@@ -28,6 +28,7 @@ import {
   updateUserData,
 } from "./api";
 import { DetailPanel } from "./components/DetailPanel";
+import { DsSelect } from "./components/DsSelect";
 import { LibraryModal } from "./components/LibraryModal";
 import { MiniWaveform } from "./components/MiniWaveform";
 import {
@@ -599,23 +600,24 @@ export const App: React.FC = () => {
               )}
             </div>
 
-            <select
+            <DsSelect
               disabled={!hasIndexedFiles}
               value={mode}
-              onChange={(e) => {
-                const nextMode = e.target.value as SearchMode;
+              width={160}
+              ariaLabel="Search mode"
+              options={[
+                { value: "hybrid", label: "Hybrid (RRF)" },
+                { value: "audio_only", label: "Audio (CLAP)" },
+                { value: "keyword_only", label: "Keyword (BM25)" },
+              ]}
+              onChange={(val) => {
+                const nextMode = val as SearchMode;
                 setMode(nextMode);
                 if (hasIndexedFiles) {
                   runSearch(query, nextMode, filters);
                 }
               }}
-              className="ds-select-field"
-              style={{ width: 155 }}
-            >
-              <option value="hybrid">Hybrid (RRF)</option>
-              <option value="audio_only">Audio (CLAP)</option>
-              <option value="keyword_only">Keyword (BM25)</option>
-            </select>
+            />
 
             <button
               type="submit"
@@ -770,42 +772,38 @@ export const App: React.FC = () => {
 
             <div className="ds-input-field">
               <label className="ds-microlabel">Format</label>
-              <select
+              <DsSelect
                 value={filters.format}
-                onChange={(e) =>
-                  setFilters({ ...filters, format: e.target.value })
-                }
-                className="ds-select-field"
-                style={{ width: 120 }}
-              >
-                <option value="">All formats</option>
-                {(
-                  availFilters?.formats || ["wav", "flac", "mp3", "ogg", "aiff"]
-                ).map((fmt) => (
-                  <option key={fmt} value={fmt}>
-                    {fmt.toUpperCase()}
-                  </option>
-                ))}
-              </select>
+                width={128}
+                ariaLabel="Audio format"
+                options={[
+                  { value: "", label: "All formats" },
+                  ...(
+                    availFilters?.formats || ["wav", "flac", "mp3", "ogg", "aiff"]
+                  ).map((fmt) => ({
+                    value: fmt,
+                    label: fmt.toUpperCase(),
+                  })),
+                ]}
+                onChange={(val) => setFilters({ ...filters, format: val })}
+              />
             </div>
 
             <div className="ds-input-field">
               <label className="ds-microlabel">Folder root</label>
-              <select
+              <DsSelect
                 value={filters.root}
-                onChange={(e) =>
-                  setFilters({ ...filters, root: e.target.value })
-                }
-                className="ds-select-field"
-                style={{ width: 180 }}
-              >
-                <option value="">All roots</option>
-                {(availFilters?.roots || []).map((rt) => (
-                  <option key={rt} value={rt}>
-                    {rt}
-                  </option>
-                ))}
-              </select>
+                width={190}
+                ariaLabel="Folder root"
+                options={[
+                  { value: "", label: "All roots" },
+                  ...(availFilters?.roots || []).map((rt) => ({
+                    value: rt,
+                    label: rt,
+                  })),
+                ]}
+                onChange={(val) => setFilters({ ...filters, root: val })}
+              />
             </div>
 
             <div className="ds-input-field">
@@ -828,21 +826,19 @@ export const App: React.FC = () => {
 
             <div className="ds-input-field">
               <label className="ds-microlabel">User tag</label>
-              <select
+              <DsSelect
                 value={filters.userTag}
-                onChange={(e) =>
-                  setFilters({ ...filters, userTag: e.target.value })
-                }
-                className="ds-select-field"
-                style={{ width: 120 }}
-              >
-                <option value="">Any tag</option>
-                {(availFilters?.user_tags || []).map((t) => (
-                  <option key={t} value={t}>
-                    #{t}
-                  </option>
-                ))}
-              </select>
+                width={130}
+                ariaLabel="User tag"
+                options={[
+                  { value: "", label: "Any tag" },
+                  ...(availFilters?.user_tags || []).map((t) => ({
+                    value: t,
+                    label: `#${t}`,
+                  })),
+                ]}
+                onChange={(val) => setFilters({ ...filters, userTag: val })}
+              />
             </div>
 
             <label

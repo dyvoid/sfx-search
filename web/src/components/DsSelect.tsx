@@ -1,0 +1,134 @@
+import React, { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+
+export interface DsSelectOption {
+  value: string;
+  label: string;
+  hint?: string;
+}
+
+interface DsSelectProps {
+  value: string;
+  options: DsSelectOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  width?: number | string;
+  ariaLabel?: string;
+}
+
+export const DsSelect: React.FC<DsSelectProps> = ({
+  value,
+  options,
+  onChange,
+  disabled = false,
+  width = 160,
+  ariaLabel,
+}) => {
+  const [open, setOpen] = useState<boolean>(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  const selectedOption =
+    options.find((o) => o.value === value) || options[0] || { value: "", label: "" };
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointerDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{
+        position: "relative",
+        width,
+        flexShrink: 0,
+        opacity: disabled ? 0.5 : 1,
+        pointerEvents: disabled ? "none" : "auto",
+      }}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        onClick={() => setOpen((prev) => !prev)}
+        className={`ds-select-field ${open ? "open" : ""}`}
+        style={{ width: "100%" }}
+      >
+        <span
+          style={{
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {selectedOption.label}
+        </span>
+        <ChevronDown className="ds-select-chev" size={14} />
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          className="ds-select-pop"
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            minWidth: "100%",
+            top: "100%",
+            zIndex: 60,
+            maxHeight: 260,
+            overflowY: "auto",
+          }}
+        >
+          {options.map((opt) => {
+            const isSel = opt.value === value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                role="option"
+                aria-selected={isSel}
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                className={`ds-select-option ${isSel ? "sel" : ""}`}
+              >
+                <span
+                  style={{
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {opt.label}
+                </span>
+                {opt.hint && <span className="ds-select-hint">{opt.hint}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
