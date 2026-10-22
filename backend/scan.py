@@ -62,6 +62,10 @@ def normalize_path(path: str | Path) -> str:
     )
     if sys.platform != "win32" and is_win_abs:
         resolved = ntpath.normpath(raw).replace("\\", "/")
+    elif sys.platform != "win32":
+        # Native POSIX path: backslashes are legal filename characters, so don't
+        # use the slash-swapped `raw` here.
+        resolved = os.path.abspath(str(path))
     else:
         resolved = os.path.abspath(raw).replace("\\", "/")
     while "//" in resolved[2:]:
