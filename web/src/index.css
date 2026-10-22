@@ -249,6 +249,19 @@ body,
   animation: sfx-drawer-in var(--duration-base) var(--ease-out) both;
 }
 
+.sfx-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  background: var(--warning-muted-bg);
+  border-bottom: var(--border-width) solid var(--border-subtle);
+  color: var(--warning-500);
+  font-size: var(--font-size-sm);
+  flex-shrink: 0;
+  animation: sfx-drawer-in var(--duration-base) var(--ease-out) both;
+}
+
 /* ===== Main Workspace ===== */
 .sfx-workspace {
   display: flex;

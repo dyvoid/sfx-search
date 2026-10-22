@@ -417,8 +417,10 @@ def create_app(
     def api_get_library() -> dict[str, Any]:
         stats = st.get_library_stats()
         configured_roots = [normalize_path(r) for r in cfg.library.roots if str(r).strip()]
+        missing_roots = [r for r in configured_roots if not os.path.isdir(to_os_path(r))]
         return {
             "roots": configured_roots,
+            "missing_roots": missing_roots,
             "stats": stats,
             "indexing": index_mgr.get_status(),
         }

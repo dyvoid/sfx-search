@@ -146,6 +146,14 @@ def test_fastapi_endpoints_range_and_transcode(tmp_path: Path) -> None:
     r_lib = client.get("/api/library")
     assert r_lib.status_code == 200
     assert len(r_lib.json()["roots"]) == 1
+    assert r_lib.json()["missing_roots"] == []
+
+    # Configured roots that no longer exist on disk are reported as missing.
+    cfg.library.roots.append(str(tmp_path / "gone_sfx"))
+    r_lib2 = client.get("/api/library")
+    assert r_lib2.status_code == 200
+    assert r_lib2.json()["missing_roots"] == [str(tmp_path / "gone_sfx").replace("\\", "/")]
+    cfg.library.roots.pop()
 
     extra_root = tmp_path / "extra_sfx"
     write_sine_wav(extra_root / "UI" / "button_pop.wav", freq_hz=500.0, duration_s=0.4)

@@ -216,11 +216,12 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                           style={{
                             fontFamily: "var(--font-mono)",
                             fontSize: "var(--font-size-xs)",
+                            wordBreak: "break-all",
                           }}
                         >
                           {rt}
                         </td>
-                        <td style={{ textAlign: "right" }}>
+                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                           <button
                             type="button"
                             onClick={() => onRemoveRoot(rt)}

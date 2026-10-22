@@ -118,6 +118,7 @@ export interface LibraryStats {
 
 export interface LibraryStateResponse {
   roots: string[];
+  missing_roots: string[];
   stats: LibraryStats;
   indexing: IndexingProgress;
 }

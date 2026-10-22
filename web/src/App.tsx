@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Clock,
   Filter,
   FolderOpen,
@@ -113,6 +114,7 @@ export const App: React.FC = () => {
   const [showHistory, setShowHistory] = useState<boolean>(false);
 
   const [roots, setRoots] = useState<string[]>([]);
+  const [missingRoots, setMissingRoots] = useState<string[]>([]);
   const [stats, setStats] = useState<LibraryStats | null>(null);
   const [indexing, setIndexing] = useState<IndexingProgress | null>(null);
   const [availFilters, setAvailFilters] = useState<AvailableFilters | null>(null);
@@ -360,6 +362,7 @@ export const App: React.FC = () => {
     try {
       const lib = await fetchLibraryState();
       setRoots(lib.roots);
+      setMissingRoots(lib.missing_roots ?? []);
       setStats(lib.stats);
       setIndexing(lib.indexing);
 
@@ -1493,6 +1496,34 @@ export const App: React.FC = () => {
             className="ds-btn ds-btn-ghost ds-btn-sm"
           >
             Details
+          </button>
+        </div>
+      )}
+
+      {/* Missing Library Roots Warning */}
+      {missingRoots.length > 0 && (
+        <div className="sfx-warning-banner">
+          <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>
+            {missingRoots.length === 1
+              ? "Library folder not found on disk: "
+              : "Library folders not found on disk: "}
+            {missingRoots.join(" · ")}. Files may have moved — indexed results
+            can be stale.
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleRescan(false)}
+            className="ds-btn ds-btn-ghost ds-btn-sm"
+          >
+            Rescan
+          </button>
+          <button
+            type="button"
+            onClick={() => setLibraryModalOpen(true)}
+            className="ds-btn ds-btn-ghost ds-btn-sm"
+          >
+            Manage folders
           </button>
         </div>
       )}
