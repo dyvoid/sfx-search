@@ -14,6 +14,17 @@ interface MiniWaveformProps {
 }
 
 const peaksCache = new Map<string, number[]>();
+const PEAKS_CACHE_MAX = 1500;
+
+function cachePeaks(fileId: string, peaks: number[]): void {
+  if (peaksCache.size >= PEAKS_CACHE_MAX) {
+    const oldest = peaksCache.keys().next().value;
+    if (oldest !== undefined) {
+      peaksCache.delete(oldest);
+    }
+  }
+  peaksCache.set(fileId, peaks);
+}
 
 function readTokenColor(varName: string, fallback: string): string {
   const val = getComputedStyle(document.documentElement)
@@ -68,11 +79,34 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
   const [hoverRatio, setHoverRatio] = useState<number | null>(null);
   const [canvasWidth, setCanvasWidth] = useState<number>(320);
   const isScrubbingRef = useRef<boolean>(false);
+  const colorsRef = useRef<{
+    waveColor: string;
+    progressColor: string;
+    cursorColor: string;
+    regionColor: string;
+    accent1Color: string;
+    hoverColor: string;
+  } | null>(null);
+
+  // Token colors are read once on mount instead of per draw frame.
+  useEffect(() => {
+    colorsRef.current = {
+      waveColor: readTokenColor("--gray-500", "oklch(52% 0.015 260)"),
+      progressColor: readTokenColor("--primary-400", "oklch(62% 0.14 275)"),
+      cursorColor: readTokenColor("--accent-2-400", "oklch(78% 0.08 190)"),
+      regionColor: readTokenColor(
+        "--primary-muted-bg",
+        "oklch(58% 0.14 275 / 0.16)"
+      ),
+      accent1Color: readTokenColor("--accent-1-400", "oklch(78% 0.12 55)"),
+      hoverColor: readTokenColor("--gray-200", "oklch(85% 0.009 260)"),
+    };
+  }, []);
 
   useEffect(() => {
+    setPeaks(peaksCache.get(fileId) || []);
     if (peaksCache.has(fileId)) {
       setIsVisible(true);
-      setPeaks(peaksCache.get(fileId) || []);
       return;
     }
     const el = wrapRef.current;
@@ -106,12 +140,14 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       setPeaks(cached);
       return;
     }
-    fetchPeaks(fileId).then((p) => {
-      if (active && p.length > 0) {
-        peaksCache.set(fileId, p);
-        setPeaks(p);
-      }
-    });
+    fetchPeaks(fileId)
+      .then((p) => {
+        if (active && p.length > 0) {
+          cachePeaks(fileId, p);
+          setPeaks(p);
+        }
+      })
+      .catch(() => {});
     return () => {
       active = false;
     };
@@ -154,18 +190,22 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     ctx.clearRect(0, 0, width, h);
 
     // Exact same token palette used across row and sidebar waveforms
-    const waveColor = readTokenColor("--gray-500", "oklch(52% 0.015 260)");
-    const progressColor = readTokenColor(
-      "--primary-400",
-      "oklch(62% 0.14 275)"
-    );
-    const cursorColor = readTokenColor("--accent-2-400", "oklch(78% 0.08 190)");
-    const regionColor = readTokenColor(
-      "--primary-muted-bg",
-      "oklch(58% 0.14 275 / 0.16)"
-    );
-    const accent1Color = readTokenColor("--accent-1-400", "oklch(78% 0.12 55)");
-    const hoverColor = readTokenColor("--gray-200", "oklch(85% 0.009 260)");
+    const colors = colorsRef.current || {
+      waveColor: "oklch(52% 0.015 260)",
+      progressColor: "oklch(62% 0.14 275)",
+      cursorColor: "oklch(78% 0.08 190)",
+      regionColor: "oklch(58% 0.14 275 / 0.16)",
+      accent1Color: "oklch(78% 0.12 55)",
+      hoverColor: "oklch(85% 0.009 260)",
+    };
+    const {
+      waveColor,
+      progressColor,
+      cursorColor,
+      regionColor,
+      accent1Color,
+      hoverColor,
+    } = colors;
 
     const safeDur = Math.max(0.01, durationS);
     const activeRange = selectedChunkRange || {

@@ -62,8 +62,6 @@ export interface FilterState {
   maxDuration: string;
   minLufs: string;
   maxLufs: string;
-  sampleRate: string;
-  channels: string;
   format: string;
   root: string;
   favoritesOnly: boolean;
@@ -129,8 +127,6 @@ export const DEFAULT_FILTERS: FilterState = {
   maxDuration: "",
   minLufs: "",
   maxLufs: "",
-  sampleRate: "",
-  channels: "",
   format: "",
   root: "",
   favoritesOnly: false,

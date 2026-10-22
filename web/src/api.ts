@@ -29,8 +29,6 @@ export async function searchSounds(
     max_duration: filters.maxDuration ? parseFloat(filters.maxDuration) : null,
     min_lufs: filters.minLufs ? parseFloat(filters.minLufs) : null,
     max_lufs: filters.maxLufs ? parseFloat(filters.maxLufs) : null,
-    sample_rates: filters.sampleRate ? [parseInt(filters.sampleRate, 10)] : null,
-    channels: filters.channels ? [parseInt(filters.channels, 10)] : null,
     formats: filters.format ? [filters.format] : null,
     roots: filters.root ? [filters.root] : null,
     favorites_only: filters.favoritesOnly,
@@ -123,9 +121,12 @@ export async function updateUserData(
 }
 
 export async function revealInExplorer(fileId: string): Promise<void> {
-  await fetch(`/api/files/${encodeURIComponent(fileId)}/reveal`, {
+  const res = await fetch(`/api/files/${encodeURIComponent(fileId)}/reveal`, {
     method: "POST",
   });
+  if (!res.ok) {
+    throw new Error(`Reveal failed: ${res.statusText}`);
+  }
 }
 
 export async function fetchStats(): Promise<LibraryStats> {

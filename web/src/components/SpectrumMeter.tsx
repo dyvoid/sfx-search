@@ -96,6 +96,7 @@ export const SpectrumMeter: React.FC<SpectrumMeterProps> = ({
     let rafId = 0;
 
     const renderFrame = () => {
+      rafId = window.requestAnimationFrame(renderFrame);
       if (!graph || document.hidden) {
         return;
       }
@@ -122,8 +123,6 @@ export const SpectrumMeter: React.FC<SpectrumMeterProps> = ({
           ctx2d.fillRect(x, Math.max(0, height - hold[i] - 1.5), barW, 1.2);
         }
       }
-
-      rafId = window.requestAnimationFrame(renderFrame);
     };
 
     rafId = window.requestAnimationFrame(renderFrame);

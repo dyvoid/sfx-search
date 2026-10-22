@@ -146,6 +146,24 @@ export const App: React.FC = () => {
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const prevOkFilesRef = useRef<number>(0);
+  const searchReqRef = useRef<number>(0);
+  const nextOffsetRef = useRef<number>(0);
+  const favPendingRef = useRef<Set<string>>(new Set());
+  const userSearchReqRef = useRef<number>(0);
+  const paginationFailedRef = useRef<boolean>(false);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+  const committedSearchRef = useRef<{
+    q: string;
+    m: SearchMode;
+    f: FilterState;
+    s: SortMode;
+  } | null>(null);
+  const resultsRef = useRef<SearchHit[]>([]);
+  const lastTimeRef = useRef<number>(-1);
+
+  useEffect(() => {
+    resultsRef.current = results;
+  }, [results]);
 
   useEffect(() => {
     if (compactDensity) {
@@ -181,31 +199,70 @@ export const App: React.FC = () => {
       qOverride?: string,
       modeOverride?: SearchMode,
       filtersOverride?: FilterState,
-      sortOverride?: SortMode
+      sortOverride?: SortMode,
+      preserveView: boolean = false
     ) => {
-      const q = qOverride !== undefined ? qOverride : query;
-      const m = modeOverride !== undefined ? modeOverride : mode;
-      const f = filtersOverride !== undefined ? filtersOverride : filters;
-      const s = sortOverride !== undefined ? sortOverride : sort;
+      let q = qOverride !== undefined ? qOverride : query;
+      let m = modeOverride !== undefined ? modeOverride : mode;
+      let f = filtersOverride !== undefined ? filtersOverride : filters;
+      let s = sortOverride !== undefined ? sortOverride : sort;
+      if (preserveView) {
+        // A user search in flight always wins over a poll refresh.
+        if (userSearchReqRef.current !== 0) {
+          return;
+        }
+        const committed = committedSearchRef.current;
+        if (!committed) {
+          return;
+        }
+        ({ q, m, f, s } = committed);
+      }
 
       const effectiveMode: SearchMode = !q.trim() ? "keyword_only" : m;
-      setLoading(true);
-      setIsSimilarityView(false);
-      setStatusLabel("");
+      const reqId = ++searchReqRef.current;
+      if (!preserveView) {
+        userSearchReqRef.current = reqId;
+        setLoading(true);
+        setIsSimilarityView(false);
+        setStatusLabel("");
+      }
       try {
-        const page = await searchSounds(q, effectiveMode, f, PAGE_SIZE, 0, s);
+        const limit = preserveView
+          ? Math.min(Math.max(PAGE_SIZE, resultsRef.current.length), 500)
+          : PAGE_SIZE;
+        const page = await searchSounds(q, effectiveMode, f, limit, 0, s);
+        if (reqId !== searchReqRef.current) {
+          return;
+        }
         setResults(page.results);
         setTotalResults(page.total);
-        setSearchSeq((seq) => seq + 1);
-        setSelectedIndex(0);
-        resultsListRef.current?.scrollTo({ top: 0 });
-        if (q.trim()) {
-          recordHistory(q);
+        nextOffsetRef.current = page.offset + page.count;
+        if (preserveView) {
+          setSelectedIndex((prev) =>
+            Math.min(prev, Math.max(0, page.results.length - 1))
+          );
+        } else {
+          committedSearchRef.current = { q, m, f, s };
+          paginationFailedRef.current = false;
+          setSearchSeq((seq) => seq + 1);
+          setSelectedIndex(0);
+          resultsListRef.current?.scrollTo({ top: 0 });
+          if (q.trim()) {
+            recordHistory(q);
+          }
         }
       } catch (err) {
-        setStatusLabel(err instanceof Error ? err.message : "Search failed");
+        // Keep the last good page on failure; committed params still match it.
+        if (reqId === searchReqRef.current && !preserveView) {
+          setStatusLabel(err instanceof Error ? err.message : "Search failed");
+        }
       } finally {
-        setLoading(false);
+        // A non-preserve request owns `loading` while it is the newest user
+        // search, even if a similarity query superseded it in the meantime.
+        if (!preserveView && userSearchReqRef.current === reqId) {
+          userSearchReqRef.current = 0;
+          setLoading(false);
+        }
       }
     },
     [query, mode, filters, sort, recordHistory]
@@ -216,23 +273,41 @@ export const App: React.FC = () => {
       loading ||
       loadingMore ||
       isSimilarityView ||
+      paginationFailedRef.current ||
       results.length === 0 ||
       results.length >= totalResults
     ) {
       return;
     }
-    const effectiveMode: SearchMode = !query.trim() ? "keyword_only" : mode;
+    const committed = committedSearchRef.current;
+    if (!committed) {
+      return;
+    }
+    const effectiveMode: SearchMode = !committed.q.trim()
+      ? "keyword_only"
+      : committed.m;
+    const reqId = searchReqRef.current;
+    const offset = nextOffsetRef.current || results.length;
     setLoadingMore(true);
     try {
       const page = await searchSounds(
-        query,
+        committed.q,
         effectiveMode,
-        filters,
+        committed.f,
         PAGE_SIZE,
-        results.length,
-        sort
+        offset,
+        committed.s
       );
-      setTotalResults(page.total);
+      if (reqId !== searchReqRef.current) {
+        return;
+      }
+      // count===0 despite total>offset means dedupe/removed files starved the
+      // page; clamp to loaded rows so the sentinel stops re-firing.
+      setTotalResults(
+        page.count > 0 ? page.total : Math.min(page.total, results.length)
+      );
+      nextOffsetRef.current =
+        page.count > 0 ? offset + page.count : Math.max(offset, page.total);
       if (page.results.length > 0) {
         setResults((prev) => {
           const seen = new Set(prev.map((h) => h.file_id));
@@ -241,21 +316,17 @@ export const App: React.FC = () => {
         });
       }
     } catch {
-      // ignore transient pagination errors
+      // Suppress retries until the next fresh search — the sentinel would
+      // otherwise re-fire every round trip on a persistent failure.
+      paginationFailedRef.current = true;
     } finally {
       setLoadingMore(false);
     }
-  }, [
-    loading,
-    loadingMore,
-    isSimilarityView,
-    results.length,
-    totalResults,
-    query,
-    mode,
-    filters,
-    sort,
-  ]);
+  }, [loading, loadingMore, isSimilarityView, results.length, totalResults]);
+
+  useEffect(() => {
+    rowRefs.current.length = results.length;
+  }, [results.length]);
 
   useEffect(() => {
     const sentinel = loadMoreSentinelRef.current;
@@ -296,33 +367,53 @@ export const App: React.FC = () => {
       const nextOk = lib.stats.ok_files;
       prevOkFilesRef.current = nextOk;
 
-      if (nextOk > 0 && (prevOk === 0 || nextOk !== prevOk)) {
+      if (nextOk !== prevOk) {
         fetchAvailableFilters().then(setAvailFilters).catch(() => {});
-        runSearch();
-      } else if (nextOk === 0) {
-        setResults([]);
+        if (prevOk === 0 && nextOk > 0) {
+          runSearch();
+        } else if (
+          lib.indexing?.state === "running" &&
+          !isSimilarityView &&
+          !loading
+        ) {
+          // Newly indexed files mid-run: refresh results without resetting
+          // scroll/selection or writing the query to history.
+          runSearch(undefined, undefined, undefined, undefined, true);
+        }
+      }
+      if (nextOk === 0) {
+        // Invalidate in-flight search/pagination so a late response can't
+        // repopulate cleared results.
+        searchReqRef.current += 1;
+        setResults((prev) => (prev.length ? [] : prev));
         setTotalResults(0);
       }
     } catch {
       // ignore transient poll errors
     }
-  }, [runSearch]);
+  }, [runSearch, isSimilarityView, loading]);
 
   useEffect(() => {
     refreshLibraryState();
     fetchAvailableFilters().then(setAvailFilters).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    const isRunning = indexing?.state === "running";
-    if (!isRunning) {
+    refreshRef.current = refreshLibraryState;
+  });
+
+  useEffect(() => {
+    // Keyed only on indexing state so typing in the search box doesn't
+    // keep re-arming the poll timer.
+    if (indexing?.state !== "running") {
       return;
     }
     const timer = window.setInterval(() => {
-      refreshLibraryState();
+      void refreshRef.current();
     }, 1200);
     return () => window.clearInterval(timer);
-  }, [indexing?.state, refreshLibraryState]);
+  }, [indexing?.state]);
 
   useEffect(() => {
     try {
@@ -338,15 +429,22 @@ export const App: React.FC = () => {
     }
   }, [loopEnabled]);
 
-  // Smooth 60fps playhead tracking while audio is actively playing
+  // Playhead tracking while audio is actively playing; throttled to ~30fps so
+  // the whole results list isn't reconciled every single frame.
   useEffect(() => {
     if (!isPlaying) {
       return;
     }
     let rafId = 0;
-    const tick = () => {
-      if (audioRef.current && !audioRef.current.paused) {
-        setCurrentTimeS(audioRef.current.currentTime);
+    let last = 0;
+    const tick = (ts: number) => {
+      if (audioRef.current && !audioRef.current.paused && ts - last > 33) {
+        last = ts;
+        const t = audioRef.current.currentTime;
+        if (Math.abs(t - lastTimeRef.current) > 0.001) {
+          lastTimeRef.current = t;
+          setCurrentTimeS(t);
+        }
       }
       rafId = window.requestAnimationFrame(tick);
     };
@@ -369,13 +467,25 @@ export const App: React.FC = () => {
           ? hit.best_offset_s
           : 0;
 
-      if (playingFileId === hit.file_id && explicitSeekS === undefined) {
-        if (!audio.paused) {
-          audio.pause();
-          setIsPlaying(false);
-        } else {
-          audio.play().catch(() => {});
-          setIsPlaying(true);
+      if (playingFileId === hit.file_id) {
+        if (explicitSeekS === undefined) {
+          if (!audio.paused) {
+            audio.pause();
+            setIsPlaying(false);
+          } else {
+            audio.play().catch(() => {});
+            setIsPlaying(true);
+          }
+          return;
+        }
+        // Scrub seek on the already-loaded file: move the playhead only,
+        // never reassign src (would tear down and reload the stream).
+        audio.currentTime = Math.max(0, startOffset);
+        if (audio.paused) {
+          audio
+            .play()
+            .then(() => setIsPlaying(true))
+            .catch(() => setIsPlaying(false));
         }
         return;
       }
@@ -406,36 +516,52 @@ export const App: React.FC = () => {
         return;
       }
 
-      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
+      const targetEl = e.target as HTMLElement | null;
+      const tag = targetEl?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") {
         if (e.key === "Escape") {
           (e.target as HTMLElement).blur();
         }
         return;
       }
+      // Space/Enter on a focused control must activate it natively, not the app.
+      const onControl = !!targetEl?.closest?.(
+        "button, a, [role='button'], [role='option'], [role='menuitem'], [role='switch'], [role='checkbox']"
+      );
+      if (onControl && (e.key === " " || e.key === "Enter")) {
+        return;
+      }
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedIndex((prev) => {
-          const next = Math.min(results.length - 1, Math.max(0, prev + 1));
-          rowRefs.current[next]?.scrollIntoView({ block: "nearest" });
-          return next;
-        });
+        if (results.length === 0) {
+          return;
+        }
+        const next = Math.min(results.length - 1, Math.max(0, selectedIndex + 1));
+        setSelectedIndex(next);
+        rowRefs.current[next]?.scrollIntoView({ block: "nearest" });
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        setSelectedIndex((prev) => {
-          const next = Math.max(0, prev - 1);
-          rowRefs.current[next]?.scrollIntoView({ block: "nearest" });
-          return next;
-        });
+        if (results.length === 0) {
+          return;
+        }
+        const next = Math.max(0, selectedIndex - 1);
+        setSelectedIndex(next);
+        rowRefs.current[next]?.scrollIntoView({ block: "nearest" });
       } else if (e.key === " ") {
         e.preventDefault();
+        if (e.repeat) {
+          return;
+        }
         const currentHit = results[selectedIndex];
         if (currentHit) {
           playHit(currentHit);
         }
       } else if (e.key === "Enter") {
         e.preventDefault();
+        if (e.repeat) {
+          return;
+        }
         if (results[selectedIndex]) {
           setDetailOpen((prev) => !prev);
         }
@@ -443,35 +569,29 @@ export const App: React.FC = () => {
         (e.key === "r" || e.key === "R") &&
         !e.ctrlKey &&
         !e.metaKey &&
-        !e.altKey
+        !e.altKey &&
+        !e.repeat
       ) {
         e.preventDefault();
         const currentHit = results[selectedIndex];
         if (currentHit) {
-          revealInExplorer(currentHit.file_id).catch(() => {});
-          setStatusLabel(`Revealed '${currentHit.filename}' in Explorer`);
+          revealInExplorer(currentHit.file_id)
+            .then(() =>
+              setStatusLabel(`Revealed '${currentHit.filename}' in Explorer`)
+            )
+            .catch(() => setStatusLabel("Reveal failed"));
         }
       } else if (
         (e.key === "f" || e.key === "F") &&
         !e.ctrlKey &&
         !e.metaKey &&
-        !e.altKey
+        !e.altKey &&
+        !e.repeat
       ) {
         e.preventDefault();
         const currentHit = results[selectedIndex];
         if (currentHit) {
-          updateUserData(currentHit.file_id, {
-            favorite: !currentHit.favorite,
-          })
-            .then((updated) => {
-              handleUserUpdated(
-                currentHit.file_id,
-                updated.favorite,
-                updated.user_tags,
-                updated.note
-              );
-            })
-            .catch(() => {});
+          void toggleFavoriteFile(currentHit);
         }
       } else if (e.key === "/") {
         e.preventDefault();
@@ -491,29 +611,50 @@ export const App: React.FC = () => {
   };
 
   const handleBrowseAndAddRoot = async () => {
-    const picked = await pickNativeFolder();
-    if (picked) {
-      await handleAddRoot(picked);
+    try {
+      const picked = await pickNativeFolder();
+      if (picked) {
+        await handleAddRoot(picked);
+      }
+    } catch (err) {
+      setOnboardingError(
+        err instanceof Error ? err.message : "Could not add folder"
+      );
+      setStatusLabel(err instanceof Error ? err.message : "Add folder failed");
     }
   };
 
   const handleRemoveRoot = async (path: string) => {
-    const res = await removeLibraryRoot(path, true);
-    setRoots(res.roots);
-    setStats(res.stats);
-    setIndexing(res.indexing);
-    prevOkFilesRef.current = res.stats.ok_files;
-    if (res.stats.ok_files === 0) {
-      setResults([]);
-    } else {
-      runSearch();
+    try {
+      const res = await removeLibraryRoot(path, true);
+      setRoots(res.roots);
+      setStats(res.stats);
+      setIndexing(res.indexing);
+      prevOkFilesRef.current = res.stats.ok_files;
+      if (res.stats.ok_files === 0) {
+        searchReqRef.current += 1;
+        setResults([]);
+        setTotalResults(0);
+        setIsSimilarityView(false);
+      } else {
+        // Re-run the committed search (not whatever is typed in the box).
+        const committed = committedSearchRef.current;
+        runSearch(committed?.q, committed?.m, committed?.f, committed?.s);
+      }
+    } catch (err) {
+      setStatusLabel(err instanceof Error ? err.message : "Failed to remove folder");
     }
   };
 
   const handleRescan = async (reindex: boolean) => {
-    const res = await rescanLibrary(reindex);
-    setRoots(res.roots);
-    setIndexing(res.indexing);
+    try {
+      const res = await rescanLibrary(reindex);
+      setRoots(res.roots);
+      setIndexing(res.indexing);
+      void refreshLibraryState();
+    } catch (err) {
+      setStatusLabel(err instanceof Error ? err.message : "Rescan failed");
+    }
   };
 
   const handleOnboardingSubmit = async (e: React.FormEvent) => {
@@ -537,9 +678,14 @@ export const App: React.FC = () => {
   };
 
   const handleFindSimilarFile = async (fileId: string) => {
+    const reqId = ++searchReqRef.current;
+    userSearchReqRef.current = reqId;
     setLoading(true);
     try {
       const hits = await findSimilarById(fileId, undefined, 40);
+      if (reqId !== searchReqRef.current) {
+        return;
+      }
       setResults(hits);
       setTotalResults(hits.length);
       setIsSimilarityView(true);
@@ -547,15 +693,27 @@ export const App: React.FC = () => {
       setSelectedIndex(0);
       resultsListRef.current?.scrollTo({ top: 0 });
       setStatusLabel(`Similar to ${fileId.slice(0, 8)}`);
+    } catch (err) {
+      if (reqId === searchReqRef.current) {
+        setStatusLabel(err instanceof Error ? err.message : "Similarity search failed");
+      }
     } finally {
-      setLoading(false);
+      if (userSearchReqRef.current === reqId) {
+        userSearchReqRef.current = 0;
+        setLoading(false);
+      }
     }
   };
 
   const handleFindSimilarChunk = async (fileId: string, chunkIdx: number) => {
+    const reqId = ++searchReqRef.current;
+    userSearchReqRef.current = reqId;
     setLoading(true);
     try {
       const hits = await findSimilarById(fileId, chunkIdx, 40);
+      if (reqId !== searchReqRef.current) {
+        return;
+      }
       setResults(hits);
       setTotalResults(hits.length);
       setIsSimilarityView(true);
@@ -563,16 +721,28 @@ export const App: React.FC = () => {
       setSelectedIndex(0);
       resultsListRef.current?.scrollTo({ top: 0 });
       setStatusLabel(`Similar to ${fileId.slice(0, 8)} · chunk #${chunkIdx}`);
+    } catch (err) {
+      if (reqId === searchReqRef.current) {
+        setStatusLabel(err instanceof Error ? err.message : "Similarity search failed");
+      }
     } finally {
-      setLoading(false);
+      if (userSearchReqRef.current === reqId) {
+        userSearchReqRef.current = 0;
+        setLoading(false);
+      }
     }
   };
 
   const handleDropFile = async (file: File) => {
+    const reqId = ++searchReqRef.current;
+    userSearchReqRef.current = reqId;
     setLoading(true);
     setStatusLabel(`Embedding reference '${file.name}'`);
     try {
       const hits = await findSimilarByUpload(file, 40);
+      if (reqId !== searchReqRef.current) {
+        return;
+      }
       setResults(hits);
       setTotalResults(hits.length);
       setIsSimilarityView(true);
@@ -581,9 +751,14 @@ export const App: React.FC = () => {
       resultsListRef.current?.scrollTo({ top: 0 });
       setStatusLabel(`Similar to '${file.name}'`);
     } catch (err) {
-      setStatusLabel(err instanceof Error ? err.message : "Upload failed");
+      if (reqId === searchReqRef.current) {
+        setStatusLabel(err instanceof Error ? err.message : "Upload failed");
+      }
     } finally {
-      setLoading(false);
+      if (userSearchReqRef.current === reqId) {
+        userSearchReqRef.current = 0;
+        setLoading(false);
+      }
     }
   };
 
@@ -597,20 +772,34 @@ export const App: React.FC = () => {
     }
   };
 
+  const toggleFavoriteFile = async (hit: SearchHit) => {
+    if (favPendingRef.current.has(hit.file_id)) {
+      return;
+    }
+    favPendingRef.current.add(hit.file_id);
+    try {
+      const updated = await updateUserData(hit.file_id, {
+        favorite: !hit.favorite,
+      });
+      handleUserUpdated(
+        hit.file_id,
+        updated.favorite,
+        updated.user_tags,
+        updated.note
+      );
+    } catch (err) {
+      setStatusLabel(err instanceof Error ? err.message : "Favorite update failed");
+    } finally {
+      favPendingRef.current.delete(hit.file_id);
+    }
+  };
+
   const handleToggleFavoriteRow = async (
     e: React.MouseEvent,
     hit: SearchHit
   ) => {
     e.stopPropagation();
-    const updated = await updateUserData(hit.file_id, {
-      favorite: !hit.favorite,
-    });
-    handleUserUpdated(
-      hit.file_id,
-      updated.favorite,
-      updated.user_tags,
-      updated.note
-    );
+    await toggleFavoriteFile(hit);
   };
 
   const handleUserUpdated = (
@@ -678,10 +867,19 @@ export const App: React.FC = () => {
       {/* Shared HTML5 audio element */}
       <audio
         ref={audioRef}
-        onTimeUpdate={(e) => setCurrentTimeS(e.currentTarget.currentTime)}
+        onTimeUpdate={(e) => {
+          const t = e.currentTarget.currentTime;
+          lastTimeRef.current = t;
+          setCurrentTimeS(t);
+        }}
         onEnded={() => setIsPlaying(false)}
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
+        onError={() => {
+          setIsPlaying(false);
+          setPlayingFileId(null);
+          setStatusLabel("Audio playback failed");
+        }}
       />
 
       {/* Drag & drop reference overlay */}
@@ -1062,6 +1260,7 @@ export const App: React.FC = () => {
                 style={{ display: "none" }}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
+                  e.target.value = "";
                   if (f) {
                     handleDropFile(f);
                   }
@@ -1479,7 +1678,10 @@ export const App: React.FC = () => {
                       ref={(el) => {
                         rowRefs.current[idx] = el;
                       }}
-                      onClick={() => {
+                      onClick={(e) => {
+                        if (e.detail > 1) {
+                          return;
+                        }
                         setSelectedIndex(idx);
                         playHit(hit);
                       }}
@@ -1645,14 +1847,24 @@ export const App: React.FC = () => {
                       color: "var(--text-tertiary)",
                     }}
                   >
-                    <span
-                      className="ds-spinner"
-                      style={{ width: 14, height: 14 }}
-                    />
-                    <span>
-                      Loading more sounds ({results.length.toLocaleString()} /{" "}
-                      {totalResults.toLocaleString()})...
-                    </span>
+                    {paginationFailedRef.current ? (
+                      <span>
+                        Showing {results.length.toLocaleString()} of{" "}
+                        {totalResults.toLocaleString()} (load failed — run the
+                        search again to resume)
+                      </span>
+                    ) : (
+                      <>
+                        <span
+                          className="ds-spinner"
+                          style={{ width: 14, height: 14 }}
+                        />
+                        <span>
+                          Loading more sounds ({results.length.toLocaleString()}{" "}
+                          / {totalResults.toLocaleString()})...
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -1696,6 +1908,7 @@ export const App: React.FC = () => {
               onClose={() => setDetailOpen(false)}
               onFindSimilarFile={handleFindSimilarFile}
               onFindSimilarChunk={handleFindSimilarChunk}
+              onToggleFavorite={() => void toggleFavoriteFile(selectedHit)}
               onUserUpdated={handleUserUpdated}
             />
           </>

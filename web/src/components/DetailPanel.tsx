@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Copy,
   FolderOpen,
@@ -25,6 +25,7 @@ interface DetailPanelProps {
   onClose: () => void;
   onFindSimilarFile: (fileId: string) => void;
   onFindSimilarChunk: (fileId: string, chunkIdx: number) => void;
+  onToggleFavorite: () => void;
   onUserUpdated: (
     fileId: string,
     favorite: boolean,
@@ -42,6 +43,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   onClose,
   onFindSimilarFile,
   onFindSimilarChunk,
+  onToggleFavorite,
   onUserUpdated,
 }) => {
   const [detail, setDetail] = useState<FileDetail | null>(null);
@@ -51,19 +53,44 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [tagInput, setTagInput] = useState<string>("");
   const [noteInput, setNoteInput] = useState<string>(hit.note || "");
   const [copied, setCopied] = useState<boolean>(false);
+  const [actionError, setActionError] = useState<string>("");
+  const savedNoteRef = useRef<string>(hit.note || "");
+  const noteDirtyRef = useRef<boolean>(false);
+  const copiedTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    let active = true;
+    setDetail(null);
+    setActionError("");
+    setCopied(false);
+    setTagInput("");
+    noteDirtyRef.current = false;
+    savedNoteRef.current = hit.note || "";
     setSelectedChunkIdx(hit.best_chunk_idx || 0);
     setNoteInput(hit.note || "");
     fetchFileDetail(hit.file_id)
       .then((d) => {
-        setDetail(d);
-        setNoteInput(d.note || "");
+        if (active) {
+          setDetail(d);
+          savedNoteRef.current = d.note || "";
+          if (!noteDirtyRef.current) {
+            setNoteInput(d.note || "");
+          }
+        }
       })
       .catch(() => {
-        setDetail(null);
+        if (active) {
+          setDetail(null);
+        }
       });
-  }, [hit.file_id, hit.best_chunk_idx, hit.note]);
+    return () => {
+      active = false;
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+        copiedTimerRef.current = null;
+      }
+    };
+  }, [hit.file_id, hit.best_chunk_idx]);
 
   const handleSeekAndSelectChunk = (timeS: number) => {
     const chunks: ChunkInfo[] = detail?.chunks || [];
@@ -85,15 +112,12 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     onSeek(timeS);
   };
 
-  const handleToggleFavorite = async () => {
-    const nextFav = !hit.favorite;
-    const updated = await updateUserData(hit.file_id, { favorite: nextFav });
-    onUserUpdated(
-      hit.file_id,
-      updated.favorite,
-      updated.user_tags,
-      updated.note
-    );
+  const reportError = (err: unknown) => {
+    setActionError(err instanceof Error ? err.message : "Action failed");
+  };
+
+  const handleToggleFavorite = () => {
+    onToggleFavorite();
   };
 
   const handleAddTag = async (e: React.FormEvent) => {
@@ -102,42 +126,68 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     if (!clean) {
       return;
     }
-    const nextTags = Array.from(new Set([...hit.user_tags, clean]));
-    setTagInput("");
-    const updated = await updateUserData(hit.file_id, { user_tags: nextTags });
-    onUserUpdated(
-      hit.file_id,
-      updated.favorite,
-      updated.user_tags,
-      updated.note
-    );
+    try {
+      const nextTags = Array.from(new Set([...hit.user_tags, clean]));
+      const updated = await updateUserData(hit.file_id, { user_tags: nextTags });
+      setTagInput("");
+      setActionError("");
+      onUserUpdated(
+        hit.file_id,
+        updated.favorite,
+        updated.user_tags,
+        updated.note
+      );
+    } catch (err) {
+      reportError(err);
+    }
   };
 
   const handleRemoveTag = async (tagToRemove: string) => {
-    const nextTags = hit.user_tags.filter((t) => t !== tagToRemove);
-    const updated = await updateUserData(hit.file_id, { user_tags: nextTags });
-    onUserUpdated(
-      hit.file_id,
-      updated.favorite,
-      updated.user_tags,
-      updated.note
-    );
+    try {
+      const nextTags = hit.user_tags.filter((t) => t !== tagToRemove);
+      const updated = await updateUserData(hit.file_id, { user_tags: nextTags });
+      setActionError("");
+      onUserUpdated(
+        hit.file_id,
+        updated.favorite,
+        updated.user_tags,
+        updated.note
+      );
+    } catch (err) {
+      reportError(err);
+    }
   };
 
   const handleSaveNote = async () => {
-    const updated = await updateUserData(hit.file_id, { note: noteInput });
-    onUserUpdated(
-      hit.file_id,
-      updated.favorite,
-      updated.user_tags,
-      updated.note
-    );
+    if (noteInput === savedNoteRef.current) {
+      return;
+    }
+    try {
+      const updated = await updateUserData(hit.file_id, { note: noteInput });
+      savedNoteRef.current = updated.note || "";
+      setActionError("");
+      onUserUpdated(
+        hit.file_id,
+        updated.favorite,
+        updated.user_tags,
+        updated.note
+      );
+    } catch (err) {
+      reportError(err);
+    }
   };
 
   const handleCopyPath = async () => {
-    await navigator.clipboard.writeText(hit.path);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(hit.path);
+      setCopied(true);
+      if (copiedTimerRef.current !== null) {
+        window.clearTimeout(copiedTimerRef.current);
+      }
+      copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      reportError("Copy to clipboard failed");
+    }
   };
 
   const rawTags = detail?.tags || hit.tags || {};
@@ -183,7 +233,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <button
             type="button"
-            onClick={() => revealInExplorer(hit.file_id)}
+            onClick={() => revealInExplorer(hit.file_id).catch(() => {})}
             className="sfx-icon-btn"
             aria-label="Reveal file in Explorer"
             title="Reveal file in Explorer"
@@ -215,6 +265,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
         <div className="sfx-inspector-section">
           <div className="sfx-audition-bay">
             <MiniWaveform
+              key={hit.file_id}
               fileId={hit.file_id}
               durationS={hit.duration_s}
               bestOffsetS={hit.best_offset_s}
@@ -370,6 +421,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               {hit.favorite ? "Favorited" : "Favorite"}
             </button>
           </div>
+          {actionError && (
+            <div className="ds-input-error" style={{ marginBottom: "var(--space-2)" }}>
+              {actionError}
+            </div>
+          )}
 
           <div
             style={{
@@ -434,7 +490,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               <textarea
                 rows={2}
                 value={noteInput}
-                onChange={(e) => setNoteInput(e.target.value)}
+                onChange={(e) => {
+                  noteDirtyRef.current = true;
+                  setNoteInput(e.target.value);
+                }}
                 onBlur={handleSaveNote}
                 placeholder="Add production note"
                 className="ds-input"
