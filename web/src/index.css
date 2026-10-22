@@ -40,7 +40,7 @@ body,
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* ===== Top Transport & Search Header ===== */
+/* ===== Top Two-Tier Studio Header ===== */
 .sfx-toolbar {
   display: flex;
   flex-direction: column;
@@ -57,23 +57,25 @@ body,
   z-index: 20;
 }
 
-.sfx-toolbar-row {
+/* Tier 1: Brand + Transport Readout + Workspace Utilities */
+.sfx-topbar {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  justify-content: space-between;
+  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
 .sfx-brand {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 
 .sfx-brand-mark {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border-radius: var(--radius-sm);
   background: var(--primary);
   color: var(--text-on-accent);
@@ -93,22 +95,22 @@ body,
   line-height: 1.1;
 }
 
-.sfx-brand-sub {
-  font-family: var(--font-mono);
-  font-size: var(--font-size-2xs);
-  letter-spacing: var(--tracking-wide);
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-}
-
-/* Digital Transport Readout (DAW style) */
-.sfx-readout {
+.sfx-transport-strip {
   display: flex;
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   padding: 2px var(--space-3);
-  border-left: var(--border-width) solid var(--border-subtle);
-  border-right: var(--border-width) solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  border: var(--border-width) solid var(--border-subtle);
+  box-shadow: var(--inset-rail);
+  flex-shrink: 0;
+}
+
+.sfx-workspace-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   flex-shrink: 0;
 }
 
@@ -145,27 +147,82 @@ body,
   color: var(--accent-1-400);
 }
 
-/* Search Form */
-.sfx-search-form {
+/* Tier 2: Full-Width Hero Search Command Bar */
+.sfx-command-row {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  flex: 1 1 380px;
-  min-width: 0;
+  width: 100%;
 }
 
 .sfx-search-box-wrap {
   position: relative;
-  flex: 1;
-  min-width: 180px;
+  flex: 1 1 320px;
+  min-width: 220px;
 }
 
-.sfx-transport-controls {
+.sfx-search-hero-box {
+  height: var(--control-height-lg);
+  padding: 0 var(--space-3) 0 var(--space-4);
+  border-radius: var(--radius-md);
+  background: linear-gradient(
+    180deg,
+    oklch(from var(--surface-sunken) calc(l - 0.02 * var(--presence)) c h),
+    var(--surface-sunken)
+  );
+  border: var(--border-width) solid
+    oklch(from var(--primary-400) l c h / 0.42);
+  box-shadow: var(--inset-rail),
+    0 0 0 1px oklch(from var(--primary-seed) l c h / 0.12);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.sfx-search-hero-box.disabled {
+  opacity: 0.55;
+  border-color: var(--border-subtle);
+  box-shadow: var(--inset-rail);
+}
+
+.sfx-search-hero-box:not(.disabled):hover {
+  border-color: var(--primary-400);
+}
+
+.sfx-search-hero-box:focus-within {
+  border-color: var(--primary);
+  box-shadow: var(--focus-ring), var(--inset-rail);
+}
+
+.sfx-search-hero-icon {
+  color: var(--primary-400);
+  flex-shrink: 0;
+}
+
+.sfx-search-hero-input {
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: var(--font-size-md);
+  font-family: var(--font-body);
+  font-weight: 500;
+  width: 100%;
+  min-width: 0;
+}
+
+.sfx-command-actions {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  margin-left: auto;
   flex-shrink: 0;
+}
+
+.sfx-btn-lg {
+  height: var(--control-height-lg);
 }
 
 .sfx-divider-v {
@@ -705,12 +762,6 @@ body,
   }
 }
 
-@media (max-width: 1180px) {
-  .sfx-readout {
-    display: none;
-  }
-}
-
 @media (max-width: 960px) {
   .sfx-inspector-backdrop {
     display: block;
@@ -735,21 +786,28 @@ body,
   }
 }
 
+@media (max-width: 820px) {
+  .sfx-command-row {
+    flex-wrap: wrap;
+  }
+
+  .sfx-search-box-wrap {
+    flex: 1 1 100%;
+  }
+
+  .sfx-command-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 680px) {
   .sfx-toolbar {
     padding: var(--space-2) var(--space-3);
   }
 
-  .sfx-search-form {
-    flex: 1 1 100%;
-    flex-wrap: wrap;
-  }
-
-  .sfx-transport-controls {
-    width: 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-    margin-left: 0;
+  .sfx-transport-strip {
+    display: none;
   }
 }
 

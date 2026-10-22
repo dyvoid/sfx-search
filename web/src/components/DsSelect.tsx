@@ -13,6 +13,7 @@ interface DsSelectProps {
   onChange: (value: string) => void;
   disabled?: boolean;
   width?: number | string;
+  height?: number | string;
   ariaLabel?: string;
 }
 
@@ -22,6 +23,7 @@ export const DsSelect: React.FC<DsSelectProps> = ({
   onChange,
   disabled = false,
   width = 160,
+  height,
   ariaLabel,
 }) => {
   const [open, setOpen] = useState<boolean>(false);
@@ -71,7 +73,7 @@ export const DsSelect: React.FC<DsSelectProps> = ({
         aria-label={ariaLabel}
         onClick={() => setOpen((prev) => !prev)}
         className={`ds-select-field ${open ? "open" : ""}`}
-        style={{ width: "100%" }}
+        style={{ width: "100%", height: height || undefined }}
       >
         <span
           style={{
