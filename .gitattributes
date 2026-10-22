@@ -1,0 +1,31 @@
+# Normalize line endings: let git handle conversion, store LF in the repo.
+* text=auto eol=lf
+
+# Common binaries -- never normalize, never diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+
+# Audio binaries
+*.wav binary
+*.flac binary
+*.aif binary
+*.aiff binary
+*.mp3 binary
+*.ogg binary
+*.opus binary
+*.m4a binary
+*.wma binary
+*.aac binary
+
+# Generated lockfiles, committed for reproducibility but collapsed in diffs.
+poetry.lock linguist-generated=true
+uv.lock linguist-generated=true
+package-lock.json linguist-generated=true
+pnpm-lock.yaml linguist-generated=true
+yarn.lock linguist-generated=true
