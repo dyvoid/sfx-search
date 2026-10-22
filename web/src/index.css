@@ -184,7 +184,7 @@ body,
   flex-wrap: wrap;
   padding-top: var(--space-3);
   border-top: var(--border-width) solid var(--border-subtle);
-  animation: sfx-drawer-in var(--duration-base) var(--ease-out) both;
+  animation: sfx-drawer-in 260ms var(--ease-out) both;
 }
 
 .sfx-filter-grid {
@@ -266,10 +266,11 @@ body,
   min-height: 54px;
   border-bottom: var(--border-width) solid var(--border-subtle);
   cursor: pointer;
-  transition: background var(--duration-fast) var(--ease-standard);
+  transition: background var(--duration-base) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-out);
   position: relative;
-  animation: sfx-row-in var(--duration-base) var(--ease-out) both;
-  animation-delay: calc(var(--row-idx, 0) * 12ms);
+  animation: sfx-row-in 300ms var(--ease-out) both;
+  animation-delay: calc(var(--row-idx, 0) * 20ms);
 }
 
 [data-density="compact"] .sfx-row {
@@ -609,17 +610,19 @@ body,
 
 .sfx-icon-btn.fav-active {
   color: var(--danger-400);
+  animation: sfx-fav-pop 240ms var(--ease-out);
 }
 
 .sfx-reveal-btn:hover {
   color: var(--primary-300);
+  transform: translateY(-1px);
 }
 
 /* ===== Purposeful Motion Keyframes (Operate Mode) ===== */
 @keyframes sfx-drawer-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-8px);
   }
   to {
     opacity: 1;
@@ -630,7 +633,7 @@ body,
 @keyframes sfx-inspector-in {
   from {
     opacity: 0;
-    transform: translateX(12px);
+    transform: translateX(24px);
   }
   to {
     opacity: 1;
@@ -641,11 +644,23 @@ body,
 @keyframes sfx-row-in {
   from {
     opacity: 0;
-    transform: translateY(3px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes sfx-fav-pop {
+  0% {
+    transform: scale(0.82);
+  }
+  60% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
   }
 }
 

@@ -96,6 +96,7 @@ export const App: React.FC = () => {
   const [libraryModalOpen, setLibraryModalOpen] = useState<boolean>(false);
 
   const [results, setResults] = useState<SearchHit[]>([]);
+  const [searchSeq, setSearchSeq] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
   const [statusLabel, setStatusLabel] = useState<string>("");
 
@@ -163,6 +164,7 @@ export const App: React.FC = () => {
       try {
         const hits = await searchSounds(q, effectiveMode, f, 50);
         setResults(hits);
+        setSearchSeq((s) => s + 1);
         setSelectedIndex((prev) =>
           hits.length > 0 ? Math.min(prev, hits.length - 1) : 0
         );
@@ -440,6 +442,7 @@ export const App: React.FC = () => {
     try {
       const hits = await findSimilarById(fileId, undefined, 40);
       setResults(hits);
+      setSearchSeq((s) => s + 1);
       setSelectedIndex(0);
       setStatusLabel(`Similar to ${fileId.slice(0, 8)}`);
     } finally {
@@ -452,6 +455,7 @@ export const App: React.FC = () => {
     try {
       const hits = await findSimilarById(fileId, chunkIdx, 40);
       setResults(hits);
+      setSearchSeq((s) => s + 1);
       setSelectedIndex(0);
       setStatusLabel(`Similar to ${fileId.slice(0, 8)} · chunk #${chunkIdx}`);
     } finally {
@@ -465,6 +469,7 @@ export const App: React.FC = () => {
     try {
       const hits = await findSimilarByUpload(file, 40);
       setResults(hits);
+      setSearchSeq((s) => s + 1);
       setSelectedIndex(0);
       setStatusLabel(`Similar to '${file.name}'`);
     } catch (err) {
@@ -1308,7 +1313,7 @@ export const App: React.FC = () => {
 
                 return (
                   <div
-                    key={hit.file_id}
+                    key={`${hit.file_id}-${searchSeq}`}
                     ref={(el) => {
                       rowRefs.current[idx] = el;
                     }}
@@ -1322,7 +1327,7 @@ export const App: React.FC = () => {
                     }}
                     style={
                       {
-                        "--row-idx": Math.min(idx, 10),
+                        "--row-idx": Math.min(idx, 14),
                       } as React.CSSProperties
                     }
                     className={`sfx-row ${isSelected ? "selected" : ""} ${

@@ -717,7 +717,14 @@ def create_app(
                 return FileResponse(str(candidate))
             index_html = web_dist / "index.html"
             if index_html.is_file():
-                return FileResponse(str(index_html))
+                return FileResponse(
+                    str(index_html),
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                        "Expires": "0",
+                    },
+                )
             raise HTTPException(status_code=404, detail="Not found")
 
     return app

@@ -29,16 +29,7 @@
 :where(input[type="checkbox"], input[type="radio"], input[type="range"]) { accent-color: var(--primary); }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-  /* Spinner is a loading indicator, not decorative motion.
-     A stationary spinner reads as "stuck" — keep it spinning. */
-  .ds-spinner {
-    animation-duration: 0.9s !important;
-    animation-iteration-count: infinite !important;
+  html {
+    scroll-behavior: auto;
   }
 }
