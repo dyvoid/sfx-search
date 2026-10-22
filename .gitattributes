@@ -1,5 +1,8 @@
 # Normalize line endings: let git handle conversion, store LF in the repo.
 * text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
 
 # Common binaries -- never normalize, never diff as text.
 *.png binary
