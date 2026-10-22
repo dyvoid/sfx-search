@@ -354,13 +354,6 @@ export const App: React.FC = () => {
     return () => window.cancelAnimationFrame(rafId);
   }, [isPlaying]);
 
-  const stopAudio = useCallback(() => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    setIsPlaying(false);
-  }, []);
-
   const playHit = useCallback(
     (hit: SearchHit, explicitSeekS?: number) => {
       const audio = audioRef.current;
@@ -1694,11 +1687,16 @@ export const App: React.FC = () => {
             />
             <DetailPanel
               hit={selectedHit}
+              isPlaying={playingFileId === selectedHit.file_id && isPlaying}
+              currentTimeS={
+                playingFileId === selectedHit.file_id ? currentTimeS : null
+              }
+              onTogglePlay={() => playHit(selectedHit)}
+              onSeek={(timeS) => playHit(selectedHit, timeS)}
               onClose={() => setDetailOpen(false)}
               onFindSimilarFile={handleFindSimilarFile}
               onFindSimilarChunk={handleFindSimilarChunk}
               onUserUpdated={handleUserUpdated}
-              onStopGlobalAudio={stopAudio}
             />
           </>
         )}

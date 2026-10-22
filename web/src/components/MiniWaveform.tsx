@@ -9,6 +9,8 @@ interface MiniWaveformProps {
   currentTimeS: number | null;
   isPlaying: boolean;
   onSeek: (timeS: number) => void;
+  height?: number;
+  selectedChunkRange?: { startS: number; endS: number } | null;
 }
 
 const peaksCache = new Map<string, number[]>();
@@ -20,14 +22,11 @@ function readTokenColor(varName: string, fallback: string): string {
   return val || fallback;
 }
 
-function buildSmoothEnvelope(
-  peaks: number[],
-  numSamples: number
-): Float32Array {
-  const raw = new Float32Array(numSamples);
+function sampleBars(peaks: number[], barCount: number): Float32Array {
+  const bars = new Float32Array(barCount);
   const n = peaks.length;
-  if (n === 0 || numSamples === 0) {
-    return raw;
+  if (n === 0 || barCount <= 0) {
+    return bars;
   }
 
   let maxPeak = 0;
@@ -38,24 +37,15 @@ function buildSmoothEnvelope(
   }
   const normScale = maxPeak > 0.001 ? 1 / maxPeak : 1;
 
-  for (let i = 0; i < numSamples; i++) {
-    const pos = (i / Math.max(1, numSamples - 1)) * (n - 1);
+  for (let i = 0; i < barCount; i++) {
+    const pos = (i / Math.max(1, barCount - 1)) * (n - 1);
     const idx0 = Math.floor(pos);
     const idx1 = Math.min(n - 1, idx0 + 1);
     const frac = pos - idx0;
     const v = (peaks[idx0] * (1 - frac) + peaks[idx1] * frac) * normScale;
-    raw[i] = Math.pow(Math.min(1, Math.max(0, v)), 0.78);
+    bars[i] = Math.min(1, Math.max(0, v));
   }
-
-  // Light 3-tap Gaussian smoothing so wide waveforms look like a continuous studio envelope
-  const smoothed = new Float32Array(numSamples);
-  for (let i = 0; i < numSamples; i++) {
-    const prev = raw[Math.max(0, i - 1)];
-    const curr = raw[i];
-    const next = raw[Math.min(numSamples - 1, i + 1)];
-    smoothed[i] = 0.22 * prev + 0.56 * curr + 0.22 * next;
-  }
-  return smoothed;
+  return bars;
 }
 
 export const MiniWaveform: React.FC<MiniWaveformProps> = ({
@@ -66,6 +56,8 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
   currentTimeS,
   isPlaying,
   onSeek,
+  height = 36,
+  selectedChunkRange = null,
 }) => {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -75,6 +67,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
   );
   const [hoverRatio, setHoverRatio] = useState<number | null>(null);
   const [canvasWidth, setCanvasWidth] = useState<number>(320);
+  const isScrubbingRef = useRef<boolean>(false);
 
   useEffect(() => {
     if (peaksCache.has(fileId)) {
@@ -153,171 +146,108 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
 
     const dpr = window.devicePixelRatio || 1;
     const width = canvasWidth || canvas.clientWidth || 320;
-    const height = canvas.clientHeight || 36;
+    const h = height;
     canvas.width = width * dpr;
-    canvas.height = height * dpr;
+    canvas.height = h * dpr;
     ctx.scale(dpr, dpr);
 
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, width, h);
 
-    const primaryColor = readTokenColor("--primary-400", "oklch(62% 0.14 275)");
-    const accent1Color = readTokenColor("--accent-1-400", "oklch(78% 0.12 55)");
-    const accent2Color = readTokenColor("--accent-2-400", "oklch(78% 0.08 190)");
-    const waveStrokeIdle = readTokenColor("--gray-400", "oklch(63% 0.013 260)");
-    const waveFillIdle = readTokenColor("--gray-600", "oklch(42% 0.018 260)");
-    const centerLine = readTokenColor(
-      "--border-subtle",
-      "oklch(100% 0 0 / 0.08)"
+    // Exact same token palette used across row and sidebar waveforms
+    const waveColor = readTokenColor("--gray-500", "oklch(52% 0.015 260)");
+    const progressColor = readTokenColor(
+      "--primary-400",
+      "oklch(62% 0.14 275)"
     );
+    const cursorColor = readTokenColor("--accent-2-400", "oklch(78% 0.08 190)");
+    const regionColor = readTokenColor(
+      "--primary-muted-bg",
+      "oklch(58% 0.14 275 / 0.16)"
+    );
+    const accent1Color = readTokenColor("--accent-1-400", "oklch(78% 0.12 55)");
     const hoverColor = readTokenColor("--gray-200", "oklch(85% 0.009 260)");
 
     const safeDur = Math.max(0.01, durationS);
-    const windowLen = Math.max(0, bestEndS - bestOffsetS);
-    // Only highlight a sub-window when the file is meaningfully longer than a single 10s window
+    const activeRange = selectedChunkRange || {
+      startS: bestOffsetS,
+      endS: bestEndS,
+    };
+    const windowLen = Math.max(0, activeRange.endS - activeRange.startS);
     const hasSubWindow =
       safeDur > 12.5 &&
-      (bestOffsetS > 0.5 || (windowLen > 0 && windowLen < safeDur * 0.82));
-    const markerStartRatio = Math.min(1, Math.max(0, bestOffsetS / safeDur));
+      (activeRange.startS > 0.5 || (windowLen > 0 && windowLen < safeDur * 0.85));
+    const markerStartRatio = Math.min(
+      1,
+      Math.max(0, activeRange.startS / safeDur)
+    );
     const markerEndRatio = Math.min(
       1,
-      Math.max(markerStartRatio, bestEndS / safeDur)
+      Math.max(markerStartRatio, activeRange.endS / safeDur)
     );
-    const midY = height / 2;
+    const midY = h / 2;
 
-    // 1. Subtle zero-crossing axis line
-    ctx.fillStyle = centerLine;
-    ctx.fillRect(0, midY - 0.5, width, 1);
-
-    // 2. Best-match sub-window region (only on genuinely long multi-window files)
+    // 1. Optional sub-window region highlight on long files (> 12.5s)
     if (hasSubWindow) {
       const rx = markerStartRatio * width;
       const rw = Math.max(3, (markerEndRatio - markerStartRatio) * width);
       ctx.save();
-      ctx.globalAlpha = 0.055;
+      ctx.fillStyle = regionColor;
+      ctx.fillRect(rx, 2, rw, h - 4);
+      ctx.globalAlpha = 0.5;
       ctx.fillStyle = accent1Color;
-      ctx.fillRect(rx, 3, rw, height - 6);
-      ctx.globalAlpha = 0.45;
-      ctx.fillRect(rx, height - 1.5, rw, 1.5);
+      ctx.fillRect(rx, h - 1.5, rw, 1.5);
       ctx.restore();
     }
 
-    // 3. Continuous mirror-envelope waveform (Arturia Pigments / FabFilter style)
-    if (peaks.length > 0) {
-      const sampleCount = Math.max(80, Math.min(360, Math.floor(width / 1.5)));
-      const env = buildSmoothEnvelope(peaks, sampleCount);
-      const maxAmpH = (height - 6) / 2;
+    // 2. Unified WaveSurfer-style crisp 2px bars with 1px gap
+    const barWidth = 2;
+    const barGap = 1;
+    const step = barWidth + barGap;
+    const barCount = Math.max(16, Math.floor(width / step));
+    const bars = sampleBars(peaks, barCount);
+    const maxBarHeight = h - 4;
+    const playRatio =
+      currentTimeS !== null
+        ? Math.min(1, Math.max(0, currentTimeS / safeDur))
+        : -1;
 
-      const drawEnvelopePass = (
-        fillStyle: string,
-        strokeStyle: string,
-        fillAlpha: number
-      ) => {
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(0, midY);
-        for (let i = 0; i < sampleCount; i++) {
-          const x = (i / (sampleCount - 1)) * width;
-          const h = env[i] < 0.015 ? 0 : env[i] * maxAmpH;
-          ctx.lineTo(x, midY - h);
-        }
-        for (let i = sampleCount - 1; i >= 0; i--) {
-          const x = (i / (sampleCount - 1)) * width;
-          const h = env[i] < 0.015 ? 0 : env[i] * maxAmpH;
-          ctx.lineTo(x, midY + h);
-        }
-        ctx.closePath();
-        ctx.globalAlpha = fillAlpha;
-        ctx.fillStyle = fillStyle;
-        ctx.fill();
+    for (let i = 0; i < barCount; i++) {
+      const x = i * step;
+      const barRatio = i / Math.max(1, barCount - 1);
+      const amp = bars[i] || 0;
+      const barH = amp < 0.015 ? 1.5 : Math.max(2, amp * maxBarHeight);
+      const y = midY - barH / 2;
 
-        // Upper & lower crest strokes for crisp definition at large sizes
-        ctx.globalAlpha = 0.9;
-        ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = 1.15;
-        ctx.lineJoin = "round";
-
-        ctx.beginPath();
-        for (let i = 0; i < sampleCount; i++) {
-          const x = (i / (sampleCount - 1)) * width;
-          const h = env[i] < 0.015 ? 0 : env[i] * maxAmpH;
-          if (i === 0) {
-            ctx.moveTo(x, midY - h);
-          } else {
-            ctx.lineTo(x, midY - h);
-          }
-        }
-        ctx.stroke();
-
-        ctx.beginPath();
-        for (let i = 0; i < sampleCount; i++) {
-          const x = (i / (sampleCount - 1)) * width;
-          const h = env[i] < 0.015 ? 0 : env[i] * maxAmpH;
-          if (i === 0) {
-            ctx.moveTo(x, midY + h);
-          } else {
-            ctx.lineTo(x, midY + h);
-          }
-        }
-        ctx.stroke();
-        ctx.restore();
-      };
-
-      // Base unplayed waveform
-      drawEnvelopePass(waveFillIdle, waveStrokeIdle, 0.22);
-
-      // Highlighted best-window clip (only on long multi-window files)
-      if (hasSubWindow) {
-        const rx = markerStartRatio * width;
-        const rw = Math.max(2, (markerEndRatio - markerStartRatio) * width);
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(rx, 0, rw, height);
-        ctx.clip();
-        drawEnvelopePass(accent1Color, accent1Color, 0.22);
-        ctx.restore();
+      if (playRatio >= 0 && barRatio <= playRatio) {
+        ctx.fillStyle = progressColor;
+      } else if (
+        hasSubWindow &&
+        barRatio >= markerStartRatio &&
+        barRatio <= markerEndRatio
+      ) {
+        ctx.fillStyle = accent1Color;
+      } else {
+        ctx.fillStyle = waveColor;
       }
 
-      // Played progress clip
-      if (currentTimeS !== null) {
-        const playRatio = Math.min(1, Math.max(0, currentTimeS / safeDur));
-        const pw = playRatio * width;
-        if (pw > 0.5) {
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(0, 0, pw, height);
-          ctx.clip();
-          const activeColor = isPlaying ? primaryColor : accent1Color;
-          drawEnvelopePass(activeColor, activeColor, 0.38);
-          ctx.restore();
-        }
-      }
+      ctx.fillRect(x, y, barWidth, barH);
     }
 
-    // 4. Best-offset cue line (only when offset > 0.5s on a long file)
-    if (hasSubWindow && bestOffsetS > 0.5) {
-      const mx = Math.min(width - 1, Math.max(0, markerStartRatio * width));
-      ctx.save();
-      ctx.globalAlpha = 0.6;
-      ctx.fillStyle = accent1Color;
-      ctx.fillRect(mx, 3, 1, height - 6);
-      ctx.restore();
-    }
-
-    // 5. Hover scrub hairline + center node
+    // 3. Hover scrub hairline
     if (hoverRatio !== null) {
       const hx = Math.min(width - 1, Math.max(0, hoverRatio * width));
       ctx.fillStyle = hoverColor;
-      ctx.fillRect(hx, 0, 1, height);
+      ctx.fillRect(hx, 0, 1, h);
     }
 
-    // 6. Active playhead cursor
+    // 4. Active playhead cursor
     if (currentTimeS !== null) {
       const playX = Math.min(
         width - 1.5,
         Math.max(0, (currentTimeS / safeDur) * width)
       );
-      ctx.fillStyle = accent2Color;
-      ctx.fillRect(playX, 0, 1.5, height);
+      ctx.fillStyle = isPlaying ? cursorColor : progressColor;
+      ctx.fillRect(playX, 0, 1.5, h);
     }
   }, [
     peaks,
@@ -328,9 +258,9 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     isPlaying,
     hoverRatio,
     canvasWidth,
+    height,
+    selectedChunkRange,
   ]);
-
-  const isScrubbingRef = useRef<boolean>(false);
 
   const ratioFromClientX = (
     el: HTMLCanvasElement,
@@ -381,7 +311,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       style={{
         position: "relative",
         width: "100%",
-        height: 36,
+        height,
         overflow: "hidden",
       }}
     >

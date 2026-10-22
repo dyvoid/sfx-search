@@ -1,6 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
-import WaveSurfer from "wavesurfer.js";
-import RegionsPlugin from "wavesurfer.js/dist/plugins/regions.esm.js";
+import React, { useEffect, useState } from "react";
 import {
   Copy,
   FolderOpen,
@@ -16,9 +14,14 @@ import {
   updateUserData,
 } from "../api";
 import { ChunkInfo, FileDetail, SearchHit } from "../types";
+import { MiniWaveform } from "./MiniWaveform";
 
 interface DetailPanelProps {
   hit: SearchHit;
+  isPlaying: boolean;
+  currentTimeS: number | null;
+  onTogglePlay: () => void;
+  onSeek: (timeS: number) => void;
   onClose: () => void;
   onFindSimilarFile: (fileId: string) => void;
   onFindSimilarChunk: (fileId: string, chunkIdx: number) => void;
@@ -28,26 +31,19 @@ interface DetailPanelProps {
     userTags: string[],
     note: string
   ) => void;
-  onStopGlobalAudio: () => void;
-}
-
-function readToken(varName: string, fallback: string): string {
-  const val = getComputedStyle(document.documentElement)
-    .getPropertyValue(varName)
-    .trim();
-  return val || fallback;
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
   hit,
+  isPlaying,
+  currentTimeS,
+  onTogglePlay,
+  onSeek,
   onClose,
   onFindSimilarFile,
   onFindSimilarChunk,
   onUserUpdated,
-  onStopGlobalAudio,
 }) => {
-  const waveformContainerRef = useRef<HTMLDivElement | null>(null);
-  const wsRef = useRef<WaveSurfer | null>(null);
   const [detail, setDetail] = useState<FileDetail | null>(null);
   const [selectedChunkIdx, setSelectedChunkIdx] = useState<number>(
     hit.best_chunk_idx || 0
@@ -55,7 +51,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const [tagInput, setTagInput] = useState<string>("");
   const [noteInput, setNoteInput] = useState<string>(hit.note || "");
   const [copied, setCopied] = useState<boolean>(false);
-  const [wsPlaying, setWsPlaying] = useState<boolean>(false);
 
   useEffect(() => {
     setSelectedChunkIdx(hit.best_chunk_idx || 0);
@@ -68,87 +63,27 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
       .catch(() => {
         setDetail(null);
       });
-  }, [hit.file_id]);
+  }, [hit.file_id, hit.best_chunk_idx, hit.note]);
 
-  useEffect(() => {
-    const container = waveformContainerRef.current;
-    if (!container) {
-      return;
-    }
-
-    const waveColor = readToken("--gray-500", "oklch(52% 0.015 260)");
-    const progressColor = readToken("--primary-400", "oklch(62% 0.14 275)");
-    const cursorColor = readToken("--accent-2-400", "oklch(78% 0.08 190)");
-    const regionColor = readToken(
-      "--primary-muted-bg",
-      "oklch(58% 0.14 275 / 0.14)"
-    );
-
-    const regions = RegionsPlugin.create();
-    const ws = WaveSurfer.create({
-      container,
-      waveColor,
-      progressColor,
-      cursorColor,
-      barWidth: 2,
-      barGap: 1,
-      height: 80,
-      normalize: true,
-      url: `/api/audio/${encodeURIComponent(hit.file_id)}`,
-      plugins: [regions],
-    });
-
-    ws.on("ready", () => {
-      const dur = ws.getDuration() || hit.duration_s || 10;
-      if (dur > 12.5) {
-        const start = Math.min(dur, Math.max(0, hit.best_offset_s));
-        const end = Math.min(
-          dur,
-          Math.max(start + 0.5, hit.best_end_s || start + 10)
-        );
-        regions.addRegion({
-          start,
-          end,
-          color: regionColor,
-          drag: true,
-          resize: true,
-        });
-      }
-    });
-
-    regions.on("region-updated", (reg) => {
-      const mid = (reg.start + reg.end) / 2;
-      const chunks: ChunkInfo[] = detail?.chunks || [];
-      if (chunks.length > 0) {
-        let bestIdx = 0;
-        let bestDist = Infinity;
-        for (const c of chunks) {
-          const cMid = (c.start_s + c.end_s) / 2;
-          const dist = Math.abs(cMid - mid);
-          if (dist < bestDist) {
-            bestDist = dist;
-            bestIdx = c.chunk_idx;
-          }
+  const handleSeekAndSelectChunk = (timeS: number) => {
+    const chunks: ChunkInfo[] = detail?.chunks || [];
+    if (chunks.length > 0) {
+      let bestIdx = 0;
+      let bestDist = Infinity;
+      for (const c of chunks) {
+        const cMid = (c.start_s + c.end_s) / 2;
+        const dist = Math.abs(cMid - timeS);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestIdx = c.chunk_idx;
         }
-        setSelectedChunkIdx(bestIdx);
-      } else {
-        setSelectedChunkIdx(Math.max(0, Math.floor(reg.start / 5)));
       }
-    });
-
-    ws.on("play", () => {
-      onStopGlobalAudio();
-      setWsPlaying(true);
-    });
-    ws.on("pause", () => setWsPlaying(false));
-    ws.on("finish", () => setWsPlaying(false));
-
-    wsRef.current = ws;
-    return () => {
-      ws.destroy();
-      wsRef.current = null;
-    };
-  }, [hit.file_id]);
+      setSelectedChunkIdx(bestIdx);
+    } else {
+      setSelectedChunkIdx(Math.max(0, Math.floor(timeS / 5)));
+    }
+    onSeek(timeS);
+  };
 
   const handleToggleFavorite = async () => {
     const nextFav = !hit.favorite;
@@ -206,6 +141,12 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   };
 
   const rawTags = detail?.tags || hit.tags || {};
+  const activeChunk = (detail?.chunks || []).find(
+    (c) => c.chunk_idx === selectedChunkIdx
+  );
+  const selectedChunkRange = activeChunk
+    ? { startS: activeChunk.start_s, endS: activeChunk.end_s }
+    : { startS: hit.best_offset_s, endS: hit.best_end_s };
 
   return (
     <aside className="sfx-inspector">
@@ -270,10 +211,20 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
       </div>
 
       <div className="ds-scroll-subtle" style={{ flex: 1 }}>
-        {/* Waveform */}
+        {/* Unified Studio Waveform & Shared Transport */}
         <div className="sfx-inspector-section">
           <div className="sfx-audition-bay">
-            <div ref={waveformContainerRef} />
+            <MiniWaveform
+              fileId={hit.file_id}
+              durationS={hit.duration_s}
+              bestOffsetS={hit.best_offset_s}
+              bestEndS={hit.best_end_s}
+              currentTimeS={currentTimeS}
+              isPlaying={isPlaying}
+              height={80}
+              selectedChunkRange={selectedChunkRange}
+              onSeek={handleSeekAndSelectChunk}
+            />
             <div
               style={{
                 display: "flex",
@@ -284,11 +235,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             >
               <button
                 type="button"
-                onClick={() => wsRef.current?.playPause()}
+                onClick={onTogglePlay}
                 className="ds-btn ds-btn-primary ds-btn-sm"
               >
-                {wsPlaying ? <Pause size={14} /> : <Play size={14} />}
-                {wsPlaying ? "Pause" : "Audition"}
+                {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+                {isPlaying ? "Pause" : "Audition"}
               </button>
               <span
                 className="ds-tnum"
@@ -298,8 +249,12 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                   color: "var(--text-tertiary)",
                 }}
               >
-                {hit.duration_s > 12.5
-                  ? `${hit.best_offset_s.toFixed(1)}s – ${hit.best_end_s.toFixed(
+                {currentTimeS !== null
+                  ? `${currentTimeS.toFixed(2)}s / ${hit.duration_s.toFixed(2)}s`
+                  : hit.duration_s > 12.5
+                  ? `${selectedChunkRange.startS.toFixed(
+                      1
+                    )}s – ${selectedChunkRange.endS.toFixed(
                       1
                     )}s · chunk #${selectedChunkIdx}`
                   : `${hit.duration_s.toFixed(2)}s`}
