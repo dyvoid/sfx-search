@@ -181,9 +181,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                     color: "var(--text-tertiary)",
                   }}
                 >
-                  {stats.ok_files.toLocaleString()} indexed ·{" "}
-                  {stats.total_duration_hours.toFixed(2)} hrs ·{" "}
-                  {stats.total_chunks.toLocaleString()} chunks
+                  {stats.ok_files.toLocaleString()} files indexed
                 </span>
               )}
             </div>

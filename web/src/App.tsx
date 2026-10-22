@@ -531,18 +531,12 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Recessed Digital Transport Readout */}
+          {/* Digital Transport Readout */}
           <div className="sfx-readout" aria-label="Library and playback readout">
             <div className="sfx-readout-cell">
               <span className="sfx-readout-cap">Sounds</span>
               <span className="sfx-readout-val accent">
                 {stats ? stats.ok_files.toLocaleString() : "0"}
-              </span>
-            </div>
-            <div className="sfx-readout-cell">
-              <span className="sfx-readout-cap">Chunks</span>
-              <span className="sfx-readout-val">
-                {stats ? stats.total_chunks.toLocaleString() : "0"}
               </span>
             </div>
             <div className="sfx-readout-cell">
@@ -1329,9 +1323,9 @@ export const App: React.FC = () => {
                 (hasIndexedFiles
                   ? `${results.length} result${
                       results.length === 1 ? "" : "s"
-                    } · ${
+                    }${
                       stats
-                        ? `${stats.total_duration_hours.toFixed(2)}h total indexed`
+                        ? ` · ${stats.ok_files.toLocaleString()} files indexed`
                         : ""
                     }`
                   : roots.length === 0
