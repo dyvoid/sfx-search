@@ -77,11 +77,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     }
 
     const waveColor = readToken("--gray-500", "oklch(52% 0.015 260)");
-    const progressColor = readToken("--primary", "oklch(58% 0.17 275)");
+    const progressColor = readToken("--primary-400", "oklch(62% 0.14 275)");
     const cursorColor = readToken("--accent-2-400", "oklch(78% 0.08 190)");
     const regionColor = readToken(
-      "--accent-1-muted-bg",
-      "oklch(72% 0.15 55 / 0.22)"
+      "--primary-muted-bg",
+      "oklch(58% 0.14 275 / 0.14)"
     );
 
     const regions = RegionsPlugin.create();
@@ -92,7 +92,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
       cursorColor,
       barWidth: 2,
       barGap: 1,
-      height: 88,
+      height: 80,
       normalize: true,
       url: `/api/audio/${encodeURIComponent(hit.file_id)}`,
       plugins: [regions],
@@ -100,18 +100,20 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
     ws.on("ready", () => {
       const dur = ws.getDuration() || hit.duration_s || 10;
-      const start = Math.min(dur, Math.max(0, hit.best_offset_s));
-      const end = Math.min(
-        dur,
-        Math.max(start + 0.5, hit.best_end_s || start + 10)
-      );
-      regions.addRegion({
-        start,
-        end,
-        color: regionColor,
-        drag: true,
-        resize: true,
-      });
+      if (dur > 12.5) {
+        const start = Math.min(dur, Math.max(0, hit.best_offset_s));
+        const end = Math.min(
+          dur,
+          Math.max(start + 0.5, hit.best_end_s || start + 10)
+        );
+        regions.addRegion({
+          start,
+          end,
+          color: regionColor,
+          drag: true,
+          resize: true,
+        });
+      }
     });
 
     regions.on("region-updated", (reg) => {
@@ -204,19 +206,11 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   };
 
   const rawTags = detail?.tags || hit.tags || {};
-  const clapPct =
-    hit.clap_score !== null
-      ? Math.min(100, Math.max(0, Math.round(hit.clap_score * 100)))
-      : 0;
-  const bm25Pct =
-    hit.bm25_score !== null
-      ? Math.min(100, Math.max(0, Math.round((hit.bm25_score / 15) * 100)))
-      : 0;
 
   return (
     <aside className="sfx-inspector">
       <div className="ds-panel-head">
-        <div style={{ minWidth: 0, paddingRight: "var(--space-2)" }}>
+        <div style={{ minWidth: 0, flex: 1, paddingRight: "var(--space-3)" }}>
           <div
             style={{
               fontSize: "var(--font-size-base)",
@@ -238,19 +232,41 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
+              marginTop: 2,
             }}
             title={hit.path}
           >
-            {hit.path}
+            {hit.folder}
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="sfx-icon-btn"
-          aria-label="Close inspector"
-        >
-          <X size={14} />
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <button
+            type="button"
+            onClick={() => revealInExplorer(hit.file_id)}
+            className="sfx-icon-btn"
+            aria-label="Reveal file in Explorer"
+            title="Reveal file in Explorer"
+          >
+            <FolderOpen size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={handleCopyPath}
+            className="sfx-icon-btn"
+            aria-label="Copy file path"
+            title={copied ? "Copied!" : "Copy full path"}
+          >
+            <Copy size={14} />
+          </button>
+          <button
+            onClick={onClose}
+            className="sfx-icon-btn"
+            aria-label="Close inspector"
+            title="Close inspector"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="ds-scroll-subtle" style={{ flex: 1 }}>
@@ -279,11 +295,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 style={{
                   fontFamily: "var(--font-mono)",
                   fontSize: "var(--font-size-xs)",
-                  color: "var(--accent-1-400)",
+                  color: "var(--text-tertiary)",
                 }}
               >
-                {hit.best_offset_s.toFixed(1)}s – {hit.best_end_s.toFixed(1)}s
-                · chunk #{selectedChunkIdx}
+                {hit.duration_s > 12.5
+                  ? `${hit.best_offset_s.toFixed(1)}s – ${hit.best_end_s.toFixed(
+                      1
+                    )}s · chunk #${selectedChunkIdx}`
+                  : `${hit.duration_s.toFixed(2)}s`}
               </span>
             </div>
           </div>
@@ -291,7 +310,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
+              gridTemplateColumns:
+                hit.duration_s > 12.5 ? "1fr 1fr" : "1fr",
               gap: "var(--space-2)",
               marginTop: "var(--space-3)",
             }}
@@ -302,32 +322,20 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               className="ds-btn ds-btn-secondary ds-btn-sm"
             >
               <Sparkles size={14} />
-              Similar file
+              Find similar sounds
             </button>
-            <button
-              type="button"
-              onClick={() => onFindSimilarChunk(hit.file_id, selectedChunkIdx)}
-              className="ds-btn ds-btn-secondary ds-btn-sm"
-            >
-              <Sparkles size={14} />
-              Similar chunk #{selectedChunkIdx}
-            </button>
-            <button
-              type="button"
-              onClick={() => revealInExplorer(hit.file_id)}
-              className="ds-btn ds-btn-secondary ds-btn-sm"
-            >
-              <FolderOpen size={14} />
-              Reveal file
-            </button>
-            <button
-              type="button"
-              onClick={handleCopyPath}
-              className="ds-btn ds-btn-secondary ds-btn-sm"
-            >
-              <Copy size={14} />
-              {copied ? "Copied" : "Copy path"}
-            </button>
+            {hit.duration_s > 12.5 && (
+              <button
+                type="button"
+                onClick={() =>
+                  onFindSimilarChunk(hit.file_id, selectedChunkIdx)
+                }
+                className="ds-btn ds-btn-secondary ds-btn-sm"
+              >
+                <Sparkles size={14} />
+                Similar chunk #{selectedChunkIdx}
+              </button>
+            )}
           </div>
         </div>
 
@@ -337,7 +345,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             className="ds-panel-title"
             style={{ marginBottom: "var(--space-3)" }}
           >
-            Signal readout
+            Specs
           </div>
           <div className="sfx-param-grid">
             <div className="sfx-param-cell">
@@ -370,62 +378,17 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               <span className="sfx-param-label">Channels</span>
               <span className="sfx-param-val">
                 {hit.channels === 1
-                  ? "Mono (1)"
+                  ? "Mono"
                   : hit.channels === 2
-                  ? "Stereo (2)"
+                  ? "Stereo"
                   : `${hit.channels} ch`}
               </span>
             </div>
             <div className="sfx-param-cell">
-              <span className="sfx-param-label">Loop score</span>
+              <span className="sfx-param-label">Format</span>
               <span className="sfx-param-val">
-                {hit.loop_score !== null
-                  ? `${Math.round(hit.loop_score * 100)}%`
-                  : "—"}
+                {hit.format.split("/")[0].toUpperCase()}
               </span>
-            </div>
-          </div>
-
-          {/* Score meters */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-2)",
-              marginTop: "var(--space-4)",
-            }}
-          >
-            <div className="ds-progress-row">
-              <div className="ds-progress-label">
-                <span>CLAP semantic similarity</span>
-                <span className="ds-progress-pct ds-tnum">
-                  {hit.clap_score !== null ? hit.clap_score.toFixed(3) : "—"}
-                </span>
-              </div>
-              <div className="ds-progress-track">
-                <div
-                  className="ds-progress-fill"
-                  style={{ width: `${clapPct}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="ds-progress-row">
-              <div className="ds-progress-label">
-                <span>BM25 lexical relevance · RRF {hit.rrf_score.toFixed(4)}</span>
-                <span className="ds-progress-pct ds-tnum">
-                  {hit.bm25_score !== null ? hit.bm25_score.toFixed(2) : "—"}
-                </span>
-              </div>
-              <div className="ds-progress-track">
-                <div
-                  className="ds-progress-fill"
-                  style={{
-                    width: `${bm25Pct}%`,
-                    background: "var(--accent-1-500)",
-                  }}
-                />
-              </div>
             </div>
           </div>
         </div>

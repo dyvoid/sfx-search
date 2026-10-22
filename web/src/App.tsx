@@ -63,6 +63,25 @@ function extractQueryTokens(q: string): string[] {
 
 const PAGE_SIZE = 50;
 
+function formatQuietFolder(folder: string, root: string): string {
+  const normFolder = folder.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (
+    normRoot &&
+    normFolder.toLowerCase().startsWith(normRoot.toLowerCase())
+  ) {
+    const rel = normFolder.slice(normRoot.length).replace(/^\/+/, "");
+    if (rel) {
+      return rel;
+    }
+  }
+  const parts = normFolder.split("/").filter(Boolean);
+  if (parts.length <= 2) {
+    return normFolder;
+  }
+  return parts.slice(-2).join(" / ");
+}
+
 export const App: React.FC = () => {
   const [query, setQuery] = useState<string>("");
   const [mode, setMode] = useState<SearchMode>("hybrid");
@@ -711,31 +730,28 @@ export const App: React.FC = () => {
               <Volume2 size={15} />
             </div>
             <span className="sfx-brand-title">sfx-search</span>
-            <span className="ds-badge ds-badge-neutral ds-tnum">
-              {stats ? stats.ok_files.toLocaleString() : "0"} sounds
+            <span className="sfx-brand-count ds-tnum">
+              {stats ? `${stats.ok_files.toLocaleString()} sounds` : ""}
             </span>
           </div>
 
           <div className="sfx-transport-strip" aria-label="Playback transport">
-            <div className="sfx-readout-cell">
-              <span className="sfx-readout-cap">Playhead</span>
-              <span className="sfx-readout-val warm">
-                {(() => {
-                  const activeHit =
-                    (isPlaying && playingHit) || selectedHit || playingHit;
-                  if (!activeHit) {
-                    return "00.00s / 00.0s";
-                  }
-                  const pos =
-                    playingFileId === activeHit.file_id
-                      ? currentTimeS
-                      : activeHit.best_offset_s;
-                  return `${pos.toFixed(2).padStart(5, "0")}s / ${activeHit.duration_s
-                    .toFixed(1)
-                    .padStart(4, "0")}s`;
-                })()}
-              </span>
-            </div>
+            <span className="sfx-readout-val warm">
+              {(() => {
+                const activeHit =
+                  (isPlaying && playingHit) || selectedHit || playingHit;
+                if (!activeHit) {
+                  return "00.00s / 00.0s";
+                }
+                const pos =
+                  playingFileId === activeHit.file_id
+                    ? currentTimeS
+                    : activeHit.best_offset_s;
+                return `${pos.toFixed(2).padStart(5, "0")}s / ${activeHit.duration_s
+                  .toFixed(1)
+                  .padStart(4, "0")}s`;
+              })()}
+            </span>
 
             <SpectrumMeter
               audioElement={audioRef.current}
@@ -754,7 +770,10 @@ export const App: React.FC = () => {
               </div>
               <span
                 className="ds-switch-label"
-                style={{ fontSize: "var(--font-size-xs)" }}
+                style={{
+                  fontSize: "var(--font-size-xs)",
+                  color: "var(--text-secondary)",
+                }}
               >
                 Best offset
               </span>
@@ -1293,15 +1312,15 @@ export const App: React.FC = () => {
           {hasIndexedFiles && (
             <div className="sfx-list-head">
               <span />
-              <span>Sound / Folder</span>
-              <span className="col-wave">Waveform &amp; Best Match Window</span>
+              <span>Sound</span>
+              <span className="col-wave">Waveform</span>
               <span className="col-specs" style={{ textAlign: "right" }}>
-                Specs
+                Duration
               </span>
               <span className="col-match" style={{ textAlign: "right" }}>
                 Match
               </span>
-              <span style={{ textAlign: "right" }}>Actions</span>
+              <span />
             </div>
           )}
 
@@ -1460,16 +1479,6 @@ export const App: React.FC = () => {
                     playingFileId === hit.file_id && isPlaying;
                   const rowTime =
                     playingFileId === hit.file_id ? currentTimeS : null;
-                  const scoreBarPct =
-                    hit.clap_score !== null
-                      ? Math.min(
-                          100,
-                          Math.max(8, Math.round(hit.clap_score * 100))
-                        )
-                      : Math.min(
-                          100,
-                          Math.max(12, Math.round(hit.rrf_score * 1800))
-                        );
 
                   return (
                     <div
@@ -1487,7 +1496,7 @@ export const App: React.FC = () => {
                       }}
                       style={
                         {
-                          "--row-idx": Math.min(idx % PAGE_SIZE, 14),
+                          "--row-idx": Math.min(idx % PAGE_SIZE, 12),
                         } as React.CSSProperties
                       }
                       className={`sfx-row ${isSelected ? "selected" : ""} ${
@@ -1528,7 +1537,7 @@ export const App: React.FC = () => {
                           ))}
                         </div>
                         <div className="sfx-row-folder" title={hit.folder}>
-                          {hit.folder}
+                          {formatQuietFolder(hit.folder, hit.root)}
                         </div>
                       </div>
 
@@ -1551,13 +1560,6 @@ export const App: React.FC = () => {
                         <span className="sfx-row-dur">
                           {hit.duration_s.toFixed(2)}s
                         </span>
-                        <span className="sfx-row-subspec">
-                          {hit.format.split("/")[0].toUpperCase()} ·{" "}
-                          {(hit.sample_rate / 1000).toFixed(0)}k ·{" "}
-                          {hit.lufs_integrated !== null
-                            ? `${hit.lufs_integrated.toFixed(0)} LUFS`
-                            : `${hit.channels}ch`}
-                        </span>
                       </div>
 
                       <div
@@ -1575,23 +1577,18 @@ export const App: React.FC = () => {
                         <span
                           style={{
                             fontSize: "var(--font-size-xs)",
-                            fontWeight: 500,
                             color:
                               hit.clap_score !== null && hit.clap_score > 0.25
-                                ? "var(--primary-400)"
-                                : "var(--text-secondary)",
+                                ? "var(--text-secondary)"
+                                : "var(--text-tertiary)",
                           }}
                         >
                           {hit.clap_score !== null
                             ? `${(hit.clap_score * 100).toFixed(0)}%`
-                            : hit.rrf_score.toFixed(3)}
+                            : hit.bm25_score !== null
+                            ? hit.bm25_score.toFixed(1)
+                            : "—"}
                         </span>
-                        <div className="sfx-score-bar-track">
-                          <div
-                            className="sfx-score-bar-fill"
-                            style={{ width: `${scoreBarPct}%` }}
-                          />
-                        </div>
                       </div>
 
                       <div className="sfx-row-actions">
@@ -1676,22 +1673,13 @@ export const App: React.FC = () => {
                 (hasIndexedFiles
                   ? `Showing ${results.length.toLocaleString()} of ${(
                       totalResults || results.length
-                    ).toLocaleString()} matching sounds${
-                      stats
-                        ? ` · ${stats.ok_files.toLocaleString()} total indexed`
-                        : ""
-                    }`
+                    ).toLocaleString()} sounds`
                   : roots.length === 0
                   ? "No library folders configured"
                   : "Indexing initial audio files...")}
             </span>
             <span className="sfx-statusbar-shortcuts">
-              <kbd className="sfx-kbd">↑</kbd> <kbd className="sfx-kbd">↓</kbd>{" "}
-              navigate · <kbd className="sfx-kbd">Space</kbd> play/pause ·{" "}
-              <kbd className="sfx-kbd">R</kbd> reveal ·{" "}
-              <kbd className="sfx-kbd">F</kbd> favorite ·{" "}
-              <kbd className="sfx-kbd">Enter</kbd> inspector ·{" "}
-              <kbd className="sfx-kbd">/</kbd> search
+              ↑↓ navigate · Space play · R reveal · F favorite · Enter inspector · / search
             </span>
           </footer>
         </main>

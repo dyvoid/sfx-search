@@ -172,8 +172,11 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     const hoverColor = readTokenColor("--gray-200", "oklch(85% 0.009 260)");
 
     const safeDur = Math.max(0.01, durationS);
+    const windowLen = Math.max(0, bestEndS - bestOffsetS);
+    // Only highlight a sub-window when the file is meaningfully longer than a single 10s window
     const hasSubWindow =
-      bestOffsetS > 0.05 || (bestEndS > 0 && bestEndS < safeDur - 0.15);
+      safeDur > 12.5 &&
+      (bestOffsetS > 0.5 || (windowLen > 0 && windowLen < safeDur * 0.82));
     const markerStartRatio = Math.min(1, Math.max(0, bestOffsetS / safeDur));
     const markerEndRatio = Math.min(
       1,
@@ -185,16 +188,16 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     ctx.fillStyle = centerLine;
     ctx.fillRect(0, midY - 0.5, width, 1);
 
-    // 2. Best-match sub-window region (only when file is longer than a single window)
+    // 2. Best-match sub-window region (only on genuinely long multi-window files)
     if (hasSubWindow) {
       const rx = markerStartRatio * width;
       const rw = Math.max(3, (markerEndRatio - markerStartRatio) * width);
       ctx.save();
-      ctx.globalAlpha = 0.08;
+      ctx.globalAlpha = 0.055;
       ctx.fillStyle = accent1Color;
-      ctx.fillRect(rx, 2, rw, height - 4);
-      ctx.globalAlpha = 0.65;
-      ctx.fillRect(rx, 0, rw, 1.5);
+      ctx.fillRect(rx, 3, rw, height - 6);
+      ctx.globalAlpha = 0.45;
+      ctx.fillRect(rx, height - 1.5, rw, 1.5);
       ctx.restore();
     }
 
@@ -260,9 +263,9 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       };
 
       // Base unplayed waveform
-      drawEnvelopePass(waveFillIdle, waveStrokeIdle, 0.28);
+      drawEnvelopePass(waveFillIdle, waveStrokeIdle, 0.22);
 
-      // Highlighted best-window clip
+      // Highlighted best-window clip (only on long multi-window files)
       if (hasSubWindow) {
         const rx = markerStartRatio * width;
         const rw = Math.max(2, (markerEndRatio - markerStartRatio) * width);
@@ -270,7 +273,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
         ctx.beginPath();
         ctx.rect(rx, 0, rw, height);
         ctx.clip();
-        drawEnvelopePass(accent1Color, accent1Color, 0.26);
+        drawEnvelopePass(accent1Color, accent1Color, 0.22);
         ctx.restore();
       }
 
@@ -284,17 +287,20 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
           ctx.rect(0, 0, pw, height);
           ctx.clip();
           const activeColor = isPlaying ? primaryColor : accent1Color;
-          drawEnvelopePass(activeColor, activeColor, 0.42);
+          drawEnvelopePass(activeColor, activeColor, 0.38);
           ctx.restore();
         }
       }
     }
 
-    // 4. Best-offset cue line (only when offset > 0)
-    if (bestOffsetS > 0.05) {
-      const mx = Math.min(width - 1.5, Math.max(0, markerStartRatio * width));
+    // 4. Best-offset cue line (only when offset > 0.5s on a long file)
+    if (hasSubWindow && bestOffsetS > 0.5) {
+      const mx = Math.min(width - 1, Math.max(0, markerStartRatio * width));
+      ctx.save();
+      ctx.globalAlpha = 0.6;
       ctx.fillStyle = accent1Color;
-      ctx.fillRect(mx, 0, 1.5, height);
+      ctx.fillRect(mx, 3, 1, height - 6);
+      ctx.restore();
     }
 
     // 5. Hover scrub hairline + center node
@@ -410,7 +416,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
             fontSize: "var(--font-size-2xs)",
             color: "var(--text-primary)",
             background: "var(--surface-overlay)",
-            border: "var(--border-width) solid var(--border-strong)",
+            border: "var(--border-width) solid var(--border-subtle)",
             padding: "0 5px",
             borderRadius: "var(--radius-xs)",
             lineHeight: 1.35,
@@ -418,7 +424,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
         >
           {hoverTimeS.toFixed(2)}s
         </span>
-      ) : bestOffsetS > 0.05 ? (
+      ) : safeDur > 12.5 && bestOffsetS > 0.5 ? (
         <span
           className="ds-tnum"
           style={{
@@ -428,8 +434,8 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
             pointerEvents: "none",
             fontFamily: "var(--font-mono)",
             fontSize: "var(--font-size-2xs)",
-            color: "var(--accent-1-400)",
-            background: "oklch(from var(--surface-app) l c h / 0.85)",
+            color: "var(--text-tertiary)",
+            background: "oklch(from var(--surface-app) l c h / 0.8)",
             padding: "0 4px",
             borderRadius: "var(--radius-xs)",
           }}
