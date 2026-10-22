@@ -119,6 +119,9 @@ body,
   flex-direction: column;
   justify-content: center;
   gap: 1px;
+  width: 116px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .sfx-readout-cap {

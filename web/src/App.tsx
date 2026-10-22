@@ -624,13 +624,20 @@ export const App: React.FC = () => {
             <div className="sfx-readout-cell">
               <span className="sfx-readout-cap">Playhead</span>
               <span className="sfx-readout-val warm">
-                {isPlaying && playingHit
-                  ? `${currentTimeS.toFixed(2)}s / ${playingHit.duration_s.toFixed(
-                      1
-                    )}s`
-                  : selectedHit
-                  ? `@${selectedHit.best_offset_s.toFixed(1)}s`
-                  : "0.00s"}
+                {(() => {
+                  const activeHit =
+                    (isPlaying && playingHit) || selectedHit || playingHit;
+                  if (!activeHit) {
+                    return "00.00s / 00.0s";
+                  }
+                  const pos =
+                    playingFileId === activeHit.file_id
+                      ? currentTimeS
+                      : activeHit.best_offset_s;
+                  return `${pos.toFixed(2).padStart(5, "0")}s / ${activeHit.duration_s
+                    .toFixed(1)
+                    .padStart(4, "0")}s`;
+                })()}
               </span>
             </div>
 
