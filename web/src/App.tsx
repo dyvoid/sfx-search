@@ -26,6 +26,7 @@ import {
   pickNativeFolder,
   removeLibraryRoot,
   rescanLibrary,
+  revealInExplorer,
   searchSounds,
   updateUserData,
 } from "./api";
@@ -337,6 +338,40 @@ export const App: React.FC = () => {
         if (results[selectedIndex]) {
           setDetailOpen((prev) => !prev);
         }
+      } else if (
+        (e.key === "r" || e.key === "R") &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        const currentHit = results[selectedIndex];
+        if (currentHit) {
+          revealInExplorer(currentHit.file_id).catch(() => {});
+          setStatusLabel(`Revealed '${currentHit.filename}' in Explorer`);
+        }
+      } else if (
+        (e.key === "f" || e.key === "F") &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        const currentHit = results[selectedIndex];
+        if (currentHit) {
+          updateUserData(currentHit.file_id, {
+            favorite: !currentHit.favorite,
+          })
+            .then((updated) => {
+              handleUserUpdated(
+                currentHit.file_id,
+                updated.favorite,
+                updated.user_tags,
+                updated.note
+              );
+            })
+            .catch(() => {});
+        }
       } else if (e.key === "/") {
         e.preventDefault();
         searchInputRef.current?.focus();
@@ -436,6 +471,16 @@ export const App: React.FC = () => {
       setStatusLabel(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRevealRow = async (e: React.MouseEvent, hit: SearchHit) => {
+    e.stopPropagation();
+    try {
+      await revealInExplorer(hit.file_id);
+      setStatusLabel(`Revealed '${hit.filename}' in Explorer`);
+    } catch {
+      setStatusLabel(`Could not reveal '${hit.filename}'`);
     }
   };
 
@@ -859,178 +904,182 @@ export const App: React.FC = () => {
         {/* Collapsible Filter Drawer */}
         {showFilters && hasIndexedFiles && (
           <div className="sfx-filter-drawer">
-            <div className="ds-input-field">
-              <label className="ds-microlabel">Duration (s)</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div className="ds-input-box" style={{ width: 76 }}>
-                  <input
-                    type="number"
-                    step="0.5"
-                    placeholder="Min"
-                    value={filters.minDuration}
-                    onChange={(e) =>
-                      setFilters({ ...filters, minDuration: e.target.value })
-                    }
-                    className="ds-input ds-tnum"
-                  />
+            <div className="sfx-filter-grid">
+              <div className="ds-input-field">
+                <label className="ds-microlabel">Duration (s)</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div className="ds-input-box" style={{ width: 76 }}>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="Min"
+                      value={filters.minDuration}
+                      onChange={(e) =>
+                        setFilters({ ...filters, minDuration: e.target.value })
+                      }
+                      className="ds-input ds-tnum"
+                    />
+                  </div>
+                  <span style={{ color: "var(--text-tertiary)" }}>–</span>
+                  <div className="ds-input-box" style={{ width: 76 }}>
+                    <input
+                      type="number"
+                      step="0.5"
+                      placeholder="Max"
+                      value={filters.maxDuration}
+                      onChange={(e) =>
+                        setFilters({ ...filters, maxDuration: e.target.value })
+                      }
+                      className="ds-input ds-tnum"
+                    />
+                  </div>
                 </div>
-                <span style={{ color: "var(--text-tertiary)" }}>–</span>
-                <div className="ds-input-box" style={{ width: 76 }}>
+              </div>
+
+              <div className="ds-input-field">
+                <label className="ds-microlabel">Loudness (LUFS)</label>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <div className="ds-input-box" style={{ width: 76 }}>
+                    <input
+                      type="number"
+                      step="1"
+                      placeholder="-40"
+                      value={filters.minLufs}
+                      onChange={(e) =>
+                        setFilters({ ...filters, minLufs: e.target.value })
+                      }
+                      className="ds-input ds-tnum"
+                    />
+                  </div>
+                  <span style={{ color: "var(--text-tertiary)" }}>–</span>
+                  <div className="ds-input-box" style={{ width: 76 }}>
+                    <input
+                      type="number"
+                      step="1"
+                      placeholder="0"
+                      value={filters.maxLufs}
+                      onChange={(e) =>
+                        setFilters({ ...filters, maxLufs: e.target.value })
+                      }
+                      className="ds-input ds-tnum"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="ds-input-field">
+                <label className="ds-microlabel">Format</label>
+                <DsSelect
+                  value={filters.format}
+                  width={128}
+                  ariaLabel="Audio format"
+                  options={[
+                    { value: "", label: "All formats" },
+                    ...(
+                      availFilters?.formats || ["wav", "flac", "mp3", "ogg", "aiff"]
+                    ).map((fmt) => ({
+                      value: fmt,
+                      label: fmt.toUpperCase(),
+                    })),
+                  ]}
+                  onChange={(val) => setFilters({ ...filters, format: val })}
+                />
+              </div>
+
+              <div className="ds-input-field">
+                <label className="ds-microlabel">Folder root</label>
+                <DsSelect
+                  value={filters.root}
+                  width={190}
+                  ariaLabel="Folder root"
+                  options={[
+                    { value: "", label: "All roots" },
+                    ...(availFilters?.roots || []).map((rt) => ({
+                      value: rt,
+                      label: rt,
+                    })),
+                  ]}
+                  onChange={(val) => setFilters({ ...filters, root: val })}
+                />
+              </div>
+
+              <div className="ds-input-field">
+                <label className="ds-microlabel">Min loop score</label>
+                <div className="ds-input-box" style={{ width: 90 }}>
                   <input
                     type="number"
-                    step="0.5"
-                    placeholder="Max"
-                    value={filters.maxDuration}
+                    step="0.1"
+                    min="0"
+                    max="1"
+                    placeholder="0.0–1.0"
+                    value={filters.minLoopScore}
                     onChange={(e) =>
-                      setFilters({ ...filters, maxDuration: e.target.value })
+                      setFilters({ ...filters, minLoopScore: e.target.value })
                     }
                     className="ds-input ds-tnum"
                   />
                 </div>
               </div>
-            </div>
 
-            <div className="ds-input-field">
-              <label className="ds-microlabel">Loudness (LUFS)</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div className="ds-input-box" style={{ width: 76 }}>
-                  <input
-                    type="number"
-                    step="1"
-                    placeholder="-40"
-                    value={filters.minLufs}
-                    onChange={(e) =>
-                      setFilters({ ...filters, minLufs: e.target.value })
-                    }
-                    className="ds-input ds-tnum"
-                  />
-                </div>
-                <span style={{ color: "var(--text-tertiary)" }}>–</span>
-                <div className="ds-input-box" style={{ width: 76 }}>
-                  <input
-                    type="number"
-                    step="1"
-                    placeholder="0"
-                    value={filters.maxLufs}
-                    onChange={(e) =>
-                      setFilters({ ...filters, maxLufs: e.target.value })
-                    }
-                    className="ds-input ds-tnum"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="ds-input-field">
-              <label className="ds-microlabel">Format</label>
-              <DsSelect
-                value={filters.format}
-                width={128}
-                ariaLabel="Audio format"
-                options={[
-                  { value: "", label: "All formats" },
-                  ...(
-                    availFilters?.formats || ["wav", "flac", "mp3", "ogg", "aiff"]
-                  ).map((fmt) => ({
-                    value: fmt,
-                    label: fmt.toUpperCase(),
-                  })),
-                ]}
-                onChange={(val) => setFilters({ ...filters, format: val })}
-              />
-            </div>
-
-            <div className="ds-input-field">
-              <label className="ds-microlabel">Folder root</label>
-              <DsSelect
-                value={filters.root}
-                width={190}
-                ariaLabel="Folder root"
-                options={[
-                  { value: "", label: "All roots" },
-                  ...(availFilters?.roots || []).map((rt) => ({
-                    value: rt,
-                    label: rt,
-                  })),
-                ]}
-                onChange={(val) => setFilters({ ...filters, root: val })}
-              />
-            </div>
-
-            <div className="ds-input-field">
-              <label className="ds-microlabel">Min loop score</label>
-              <div className="ds-input-box" style={{ width: 90 }}>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="1"
-                  placeholder="0.0–1.0"
-                  value={filters.minLoopScore}
-                  onChange={(e) =>
-                    setFilters({ ...filters, minLoopScore: e.target.value })
-                  }
-                  className="ds-input ds-tnum"
+              <div className="ds-input-field">
+                <label className="ds-microlabel">User tag</label>
+                <DsSelect
+                  value={filters.userTag}
+                  width={130}
+                  ariaLabel="User tag"
+                  options={[
+                    { value: "", label: "Any tag" },
+                    ...(availFilters?.user_tags || []).map((t) => ({
+                      value: t,
+                      label: `#${t}`,
+                    })),
+                  ]}
+                  onChange={(val) => setFilters({ ...filters, userTag: val })}
                 />
               </div>
             </div>
 
-            <div className="ds-input-field">
-              <label className="ds-microlabel">User tag</label>
-              <DsSelect
-                value={filters.userTag}
-                width={130}
-                ariaLabel="User tag"
-                options={[
-                  { value: "", label: "Any tag" },
-                  ...(availFilters?.user_tags || []).map((t) => ({
-                    value: t,
-                    label: `#${t}`,
-                  })),
-                ]}
-                onChange={(val) => setFilters({ ...filters, userTag: val })}
-              />
+            <div className="sfx-filter-actions">
+              <label
+                className="ds-check"
+                style={{ height: "var(--control-height-md)" }}
+                onClick={() =>
+                  setFilters({ ...filters, favoritesOnly: !filters.favoritesOnly })
+                }
+              >
+                <div
+                  className={`ds-checkbox ${filters.favoritesOnly ? "on" : ""}`}
+                >
+                  {filters.favoritesOnly && <div className="ds-checkbox-inner" />}
+                </div>
+                <span
+                  className="ds-check-label"
+                  style={{ fontSize: "var(--font-size-sm)" }}
+                >
+                  Favorites only
+                </span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => runSearch(query, mode, filters)}
+                className="ds-btn ds-btn-primary ds-btn-sm"
+              >
+                Apply
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setFilters(DEFAULT_FILTERS);
+                  runSearch(query, mode, DEFAULT_FILTERS);
+                }}
+                className="ds-btn ds-btn-ghost ds-btn-sm"
+              >
+                <RotateCcw size={13} />
+                Reset
+              </button>
             </div>
-
-            <label
-              className="ds-check"
-              style={{ height: "var(--control-height-md)" }}
-              onClick={() =>
-                setFilters({ ...filters, favoritesOnly: !filters.favoritesOnly })
-              }
-            >
-              <div
-                className={`ds-checkbox ${filters.favoritesOnly ? "on" : ""}`}
-              >
-                {filters.favoritesOnly && <div className="ds-checkbox-inner" />}
-              </div>
-              <span
-                className="ds-check-label"
-                style={{ fontSize: "var(--font-size-sm)" }}
-              >
-                Favorites only
-              </span>
-            </label>
-
-            <button
-              type="button"
-              onClick={() => runSearch(query, mode, filters)}
-              className="ds-btn ds-btn-primary ds-btn-sm"
-            >
-              Apply
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setFilters(DEFAULT_FILTERS);
-                runSearch(query, mode, DEFAULT_FILTERS);
-              }}
-              className="ds-btn ds-btn-ghost ds-btn-sm"
-            >
-              <RotateCcw size={13} />
-              Reset
-            </button>
           </div>
         )}
       </header>
@@ -1087,11 +1136,13 @@ export const App: React.FC = () => {
             <div className="sfx-list-head">
               <span />
               <span>Sound / Folder</span>
-              <span>Waveform &amp; Best Match Window</span>
+              <span className="col-wave">Waveform &amp; Best Match Window</span>
               <span className="col-specs" style={{ textAlign: "right" }}>
                 Specs
               </span>
-              <span style={{ textAlign: "right" }}>Match</span>
+              <span className="col-match" style={{ textAlign: "right" }}>
+                Match
+              </span>
               <span style={{ textAlign: "right" }}>Actions</span>
             </div>
           )}
@@ -1269,7 +1320,14 @@ export const App: React.FC = () => {
                       setSelectedIndex(idx);
                       setDetailOpen(true);
                     }}
-                    className={`sfx-row ${isSelected ? "selected" : ""}`}
+                    style={
+                      {
+                        "--row-idx": Math.min(idx, 10),
+                      } as React.CSSProperties
+                    }
+                    className={`sfx-row ${isSelected ? "selected" : ""} ${
+                      isRowPlaying ? "is-playing" : ""
+                    }`}
                   >
                     <button
                       type="button"
@@ -1306,18 +1364,20 @@ export const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <MiniWaveform
-                      fileId={hit.file_id}
-                      durationS={hit.duration_s}
-                      bestOffsetS={hit.best_offset_s}
-                      bestEndS={hit.best_end_s}
-                      currentTimeS={rowTime}
-                      isPlaying={isRowPlaying}
-                      onSeek={(timeS) => {
-                        setSelectedIndex(idx);
-                        playHit(hit, timeS);
-                      }}
-                    />
+                    <div className="sfx-row-wave">
+                      <MiniWaveform
+                        fileId={hit.file_id}
+                        durationS={hit.duration_s}
+                        bestOffsetS={hit.best_offset_s}
+                        bestEndS={hit.best_end_s}
+                        currentTimeS={rowTime}
+                        isPlaying={isRowPlaying}
+                        onSeek={(timeS) => {
+                          setSelectedIndex(idx);
+                          playHit(hit, timeS);
+                        }}
+                      />
+                    </div>
 
                     <div className="sfx-row-specs">
                       <span className="sfx-row-dur">
@@ -1369,16 +1429,12 @@ export const App: React.FC = () => {
                     <div className="sfx-row-actions">
                       <button
                         type="button"
-                        onClick={(e) => handleToggleFavoriteRow(e, hit)}
-                        className={`sfx-icon-btn ${
-                          hit.favorite ? "fav-active" : ""
-                        }`}
-                        title="Toggle favorite"
+                        onClick={(e) => handleRevealRow(e, hit)}
+                        className="sfx-icon-btn sfx-reveal-btn"
+                        aria-label="Reveal file in Explorer"
+                        title="Reveal file in Explorer (R)"
                       >
-                        <Heart
-                          size={14}
-                          fill={hit.favorite ? "currentColor" : "none"}
-                        />
+                        <FolderOpen size={14} />
                       </button>
 
                       <button
@@ -1388,9 +1444,29 @@ export const App: React.FC = () => {
                           handleFindSimilarFile(hit.file_id);
                         }}
                         className="sfx-icon-btn"
+                        aria-label="Find similar sounds"
                         title="Find similar sounds"
                       >
                         <Sparkles size={14} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleFavoriteRow(e, hit)}
+                        className={`sfx-icon-btn ${
+                          hit.favorite ? "fav-active" : ""
+                        }`}
+                        aria-label={
+                          hit.favorite
+                            ? "Remove from favorites"
+                            : "Add to favorites"
+                        }
+                        title="Toggle favorite (F)"
+                      >
+                        <Heart
+                          size={14}
+                          fill={hit.favorite ? "currentColor" : "none"}
+                        />
                       </button>
                     </div>
                   </div>
@@ -1415,9 +1491,11 @@ export const App: React.FC = () => {
                   ? "No library folders configured"
                   : "Indexing initial audio files...")}
             </span>
-            <span>
+            <span className="sfx-statusbar-shortcuts">
               <kbd className="sfx-kbd">↑</kbd> <kbd className="sfx-kbd">↓</kbd>{" "}
               navigate · <kbd className="sfx-kbd">Space</kbd> play/pause ·{" "}
+              <kbd className="sfx-kbd">R</kbd> reveal ·{" "}
+              <kbd className="sfx-kbd">F</kbd> favorite ·{" "}
               <kbd className="sfx-kbd">Enter</kbd> inspector ·{" "}
               <kbd className="sfx-kbd">/</kbd> search
             </span>
@@ -1426,14 +1504,21 @@ export const App: React.FC = () => {
 
         {/* Right Inspector Drawer */}
         {detailOpen && selectedHit && (
-          <DetailPanel
-            hit={selectedHit}
-            onClose={() => setDetailOpen(false)}
-            onFindSimilarFile={handleFindSimilarFile}
-            onFindSimilarChunk={handleFindSimilarChunk}
-            onUserUpdated={handleUserUpdated}
-            onStopGlobalAudio={stopAudio}
-          />
+          <>
+            <div
+              className="sfx-inspector-backdrop"
+              onClick={() => setDetailOpen(false)}
+              aria-hidden="true"
+            />
+            <DetailPanel
+              hit={selectedHit}
+              onClose={() => setDetailOpen(false)}
+              onFindSimilarFile={handleFindSimilarFile}
+              onFindSimilarChunk={handleFindSimilarChunk}
+              onUserUpdated={handleUserUpdated}
+              onStopGlobalAudio={stopAudio}
+            />
+          </>
         )}
       </div>
     </div>

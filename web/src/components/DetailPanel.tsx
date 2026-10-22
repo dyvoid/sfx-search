@@ -256,7 +256,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
       <div className="ds-scroll-subtle" style={{ flex: 1 }}>
         {/* Waveform */}
         <div className="sfx-inspector-section">
-          <div>
+          <div className="sfx-audition-bay">
             <div ref={waveformContainerRef} />
             <div
               style={{
@@ -315,7 +315,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             <button
               type="button"
               onClick={() => revealInExplorer(hit.file_id)}
-              className="ds-btn ds-btn-ghost ds-btn-sm"
+              className="ds-btn ds-btn-secondary ds-btn-sm"
             >
               <FolderOpen size={14} />
               Reveal file
@@ -323,7 +323,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             <button
               type="button"
               onClick={handleCopyPath}
-              className="ds-btn ds-btn-ghost ds-btn-sm"
+              className="ds-btn ds-btn-secondary ds-btn-sm"
             >
               <Copy size={14} />
               {copied ? "Copied" : "Copy path"}

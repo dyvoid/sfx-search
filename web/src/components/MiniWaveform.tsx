@@ -291,17 +291,46 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     canvasWidth,
   ]);
 
-  const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const isScrubbingRef = useRef<boolean>(false);
+
+  const ratioFromClientX = (
+    el: HTMLCanvasElement,
+    clientX: number
+  ): number => {
+    const rect = el.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (clientX - rect.left) / Math.max(1, rect.width)));
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.stopPropagation();
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    isScrubbingRef.current = true;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+    const ratio = ratioFromClientX(e.currentTarget, e.clientX);
+    setHoverRatio(ratio);
     onSeek(ratio * Math.max(0.01, durationS));
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const ratio = ratioFromClientX(e.currentTarget, e.clientX);
     setHoverRatio(ratio);
+    if (isScrubbingRef.current) {
+      onSeek(ratio * Math.max(0.01, durationS));
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (isScrubbingRef.current) {
+      isScrubbingRef.current = false;
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        // ignore
+      }
+    }
   };
 
   const safeDur = Math.max(0.01, durationS);
@@ -319,14 +348,21 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     >
       <canvas
         ref={canvasRef}
-        onClick={handleClick}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setHoverRatio(null)}
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onPointerLeave={() => {
+          isScrubbingRef.current = false;
+          setHoverRatio(null);
+        }}
         style={{
           display: "block",
           width: "100%",
           height: "100%",
           cursor: "pointer",
+          touchAction: "pan-y",
         }}
       />
       {hoverTimeS !== null && hoverRatio !== null ? (
