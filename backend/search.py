@@ -18,6 +18,15 @@ from .embed import EmbedderProtocol
 from .store import SearchFilters, SfxStore, UserDataRecord
 
 SearchMode = Literal["hybrid", "audio_only", "keyword_only"]
+SortMode = Literal[
+    "relevance",
+    "name_asc",
+    "name_desc",
+    "duration_asc",
+    "duration_desc",
+    "lufs_desc",
+    "lufs_asc",
+]
 
 _INLINE_DUR_RE = re.compile(r"\bdur:(?:(\d+(?:\.\d+)?))?-(?:(\d+(?:\.\d+)?))?\b", re.IGNORECASE)
 _INLINE_DUR_CMP_RE = re.compile(r"\bdur:([<>]=?)(\d+(?:\.\d+)?)\b", re.IGNORECASE)
@@ -211,13 +220,71 @@ class SearchEngine:
         mode: SearchMode = "hybrid",
         filters: SearchFilters | None = None,
     ) -> list[SearchHit]:
+        hits, _ = self.search_page(
+            query=query,
+            k=k,
+            offset=0,
+            mode=mode,
+            sort="relevance",
+            filters=filters,
+        )
+        return hits
+
+    def search_page(
+        self,
+        query: str,
+        k: int | None = None,
+        offset: int = 0,
+        mode: SearchMode = "hybrid",
+        sort: SortMode = "relevance",
+        filters: SearchFilters | None = None,
+    ) -> tuple[list[SearchHit], int]:
         top_k = k if k is not None else self.config.search.default_k
+        safe_offset = max(0, offset)
         parsed = parse_query(query, base_filters=filters)
         eff_filters = parsed.filters
 
+        has_text_query = bool(parsed.semantic_query.strip() or parsed.keyword_query.strip())
+        if not has_text_query:
+            browse_sort = sort if sort != "relevance" else "name_asc"
+            page_ids, total_matched = self.store.browse_file_ids(
+                filters=eff_filters,
+                sort=browse_sort,
+                offset=safe_offset,
+                limit=top_k,
+            )
+            if not page_ids:
+                return [], total_matched
+            files_map = self.store.get_files_by_ids(page_ids)
+            user_map = self.store.get_user_data_map(page_ids)
+            browse_hits: list[SearchHit] = []
+            for fid in page_ids:
+                f_row = files_map.get(fid)
+                if f_row is None:
+                    continue
+                u_rec = user_map.get(fid, UserDataRecord(file_id=fid))
+                dur = float(f_row.get("duration_s", 0.0))
+                browse_hits.append(
+                    self._build_hit(
+                        f_row=f_row,
+                        u_rec=u_rec,
+                        best_offset_s=0.0,
+                        best_end_s=min(dur, self.config.embedding.window_s),
+                        best_chunk_idx=0,
+                        clap_score=None,
+                        bm25_score=None,
+                        rrf_score=1.0,
+                    )
+                )
+            return browse_hits, total_matched
+
         eligible_ids = self.store.get_eligible_file_ids(eff_filters)
         if eligible_ids is not None and len(eligible_ids) == 0:
-            return []
+            return [], 0
+
+        needed_window = safe_offset + top_k
+        vec_limit = max(self.config.search.vector_candidates, needed_window * 3)
+        kw_limit = max(self.config.search.keyword_candidates, needed_window * 2)
 
         vector_ranked: list[str] = []
         best_chunk_by_file: dict[str, tuple[float, float, float, int]] = {}
@@ -226,7 +293,7 @@ class SearchEngine:
             q_vec = self.embedder.embed_text(parsed.semantic_query)
             raw_chunks = self.store.search_chunks_knn(
                 query_vec=q_vec,
-                limit=self.config.search.vector_candidates,
+                limit=vec_limit,
                 eligible_file_ids=eligible_ids,
             )
             for row in raw_chunks:
@@ -249,7 +316,7 @@ class SearchEngine:
         if mode in ("hybrid", "keyword_only") and parsed.keyword_query.strip():
             bm25_rows = self.store.search_files_bm25(
                 query_text=parsed.keyword_query,
-                limit=self.config.search.keyword_candidates,
+                limit=kw_limit,
                 filters=eff_filters,
             )
             for row in bm25_rows:
@@ -262,32 +329,33 @@ class SearchEngine:
                     keyword_ranked.append(fid)
 
         if mode == "audio_only":
-            merged = [(fid, best_chunk_by_file[fid][0]) for fid in vector_ranked[:top_k]]
+            all_merged = [(fid, best_chunk_by_file[fid][0]) for fid in vector_ranked]
         elif mode == "keyword_only":
-            if not keyword_ranked and not parsed.keyword_query.strip() and eligible_ids:
-                fallback_ids = sorted(eligible_ids)[:top_k]
-                merged = [(fid, 1.0) for fid in fallback_ids]
-            else:
-                merged = [(fid, bm25_by_file[fid]) for fid in keyword_ranked[:top_k]]
+            all_merged = [(fid, bm25_by_file[fid]) for fid in keyword_ranked]
         else:
-            fused = reciprocal_rank_fusion(
+            all_merged = reciprocal_rank_fusion(
                 vector_ranked_ids=vector_ranked,
                 keyword_ranked_ids=keyword_ranked,
                 rrf_k=self.config.search.rrf_k,
                 vector_weight=self.config.search.vector_weight,
                 keyword_weight=self.config.search.keyword_weight,
             )
-            merged = fused[:top_k]
 
-        if not merged:
-            return []
+        total_candidates = len(all_merged)
+        if total_candidates == 0:
+            return [], 0
 
-        top_file_ids = [fid for fid, _ in merged]
-        files_map = self.store.get_files_by_ids(top_file_ids)
-        user_map = self.store.get_user_data_map(top_file_ids)
+        if sort == "relevance":
+            merged_page = all_merged[safe_offset : safe_offset + top_k]
+        else:
+            merged_page = all_merged
+
+        target_file_ids = [fid for fid, _ in merged_page]
+        files_map = self.store.get_files_by_ids(target_file_ids)
+        user_map = self.store.get_user_data_map(target_file_ids)
 
         hits: list[SearchHit] = []
-        for fid, final_score in merged:
+        for fid, final_score in merged_page:
             f_row = files_map.get(fid)
             if f_row is None:
                 continue
@@ -315,7 +383,28 @@ class SearchEngine:
                     rrf_score=final_score,
                 )
             )
-        return hits
+
+        if sort != "relevance":
+            if sort == "name_asc":
+                hits.sort(key=lambda h: (h.filename.lower(), h.path.lower()))
+            elif sort == "name_desc":
+                hits.sort(key=lambda h: (h.filename.lower(), h.path.lower()), reverse=True)
+            elif sort == "duration_asc":
+                hits.sort(key=lambda h: (h.duration_s, h.filename.lower()))
+            elif sort == "duration_desc":
+                hits.sort(key=lambda h: (h.duration_s, h.filename.lower()), reverse=True)
+            elif sort == "lufs_desc":
+                hits.sort(
+                    key=lambda h: h.lufs_integrated if h.lufs_integrated is not None else -999.0,
+                    reverse=True,
+                )
+            elif sort == "lufs_asc":
+                hits.sort(
+                    key=lambda h: h.lufs_integrated if h.lufs_integrated is not None else 999.0
+                )
+            hits = hits[safe_offset : safe_offset + top_k]
+
+        return hits, total_candidates
 
     def find_similar(
         self,

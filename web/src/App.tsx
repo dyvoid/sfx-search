@@ -43,6 +43,7 @@ import {
   LibraryStats,
   SearchHit,
   SearchMode,
+  SortMode,
 } from "./types";
 
 const LS_HISTORY_KEY = "sfxsearch_query_history_v1";
@@ -60,9 +61,12 @@ function extractQueryTokens(q: string): string[] {
   return tokens.slice(0, 4);
 }
 
+const PAGE_SIZE = 50;
+
 export const App: React.FC = () => {
   const [query, setQuery] = useState<string>("");
   const [mode, setMode] = useState<SearchMode>("hybrid");
+  const [sort, setSort] = useState<SortMode>("relevance");
   const [filters, setFilters] = useState<FilterState>(() => {
     try {
       const saved = localStorage.getItem(LS_FILTERS_KEY);
@@ -96,8 +100,11 @@ export const App: React.FC = () => {
   const [libraryModalOpen, setLibraryModalOpen] = useState<boolean>(false);
 
   const [results, setResults] = useState<SearchHit[]>([]);
+  const [totalResults, setTotalResults] = useState<number>(0);
   const [searchSeq, setSearchSeq] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+  const [isSimilarityView, setIsSimilarityView] = useState<boolean>(false);
   const [statusLabel, setStatusLabel] = useState<string>("");
 
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
@@ -116,6 +123,8 @@ export const App: React.FC = () => {
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const resultsListRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const prevOkFilesRef = useRef<number>(0);
 
@@ -152,22 +161,25 @@ export const App: React.FC = () => {
     async (
       qOverride?: string,
       modeOverride?: SearchMode,
-      filtersOverride?: FilterState
+      filtersOverride?: FilterState,
+      sortOverride?: SortMode
     ) => {
       const q = qOverride !== undefined ? qOverride : query;
       const m = modeOverride !== undefined ? modeOverride : mode;
       const f = filtersOverride !== undefined ? filtersOverride : filters;
+      const s = sortOverride !== undefined ? sortOverride : sort;
 
       const effectiveMode: SearchMode = !q.trim() ? "keyword_only" : m;
       setLoading(true);
+      setIsSimilarityView(false);
       setStatusLabel("");
       try {
-        const hits = await searchSounds(q, effectiveMode, f, 50);
-        setResults(hits);
-        setSearchSeq((s) => s + 1);
-        setSelectedIndex((prev) =>
-          hits.length > 0 ? Math.min(prev, hits.length - 1) : 0
-        );
+        const page = await searchSounds(q, effectiveMode, f, PAGE_SIZE, 0, s);
+        setResults(page.results);
+        setTotalResults(page.total);
+        setSearchSeq((seq) => seq + 1);
+        setSelectedIndex(0);
+        resultsListRef.current?.scrollTo({ top: 0 });
         if (q.trim()) {
           recordHistory(q);
         }
@@ -177,8 +189,82 @@ export const App: React.FC = () => {
         setLoading(false);
       }
     },
-    [query, mode, filters, recordHistory]
+    [query, mode, filters, sort, recordHistory]
   );
+
+  const loadMoreResults = useCallback(async () => {
+    if (
+      loading ||
+      loadingMore ||
+      isSimilarityView ||
+      results.length === 0 ||
+      results.length >= totalResults
+    ) {
+      return;
+    }
+    const effectiveMode: SearchMode = !query.trim() ? "keyword_only" : mode;
+    setLoadingMore(true);
+    try {
+      const page = await searchSounds(
+        query,
+        effectiveMode,
+        filters,
+        PAGE_SIZE,
+        results.length,
+        sort
+      );
+      setTotalResults(page.total);
+      if (page.results.length > 0) {
+        setResults((prev) => {
+          const seen = new Set(prev.map((h) => h.file_id));
+          const appended = page.results.filter((h) => !seen.has(h.file_id));
+          return [...prev, ...appended];
+        });
+      }
+    } catch {
+      // ignore transient pagination errors
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [
+    loading,
+    loadingMore,
+    isSimilarityView,
+    results.length,
+    totalResults,
+    query,
+    mode,
+    filters,
+    sort,
+  ]);
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    const rootEl = resultsListRef.current;
+    if (
+      !sentinel ||
+      !rootEl ||
+      isSimilarityView ||
+      results.length === 0 ||
+      results.length >= totalResults ||
+      typeof IntersectionObserver === "undefined"
+    ) {
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            loadMoreResults();
+            break;
+          }
+        }
+      },
+      { root: rootEl, rootMargin: "0px 0px 320px 0px" }
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [loadMoreResults, isSimilarityView, results.length, totalResults]);
 
   const refreshLibraryState = useCallback(async () => {
     try {
@@ -196,6 +282,7 @@ export const App: React.FC = () => {
         runSearch();
       } else if (nextOk === 0) {
         setResults([]);
+        setTotalResults(0);
       }
     } catch {
       // ignore transient poll errors
@@ -442,8 +529,11 @@ export const App: React.FC = () => {
     try {
       const hits = await findSimilarById(fileId, undefined, 40);
       setResults(hits);
+      setTotalResults(hits.length);
+      setIsSimilarityView(true);
       setSearchSeq((s) => s + 1);
       setSelectedIndex(0);
+      resultsListRef.current?.scrollTo({ top: 0 });
       setStatusLabel(`Similar to ${fileId.slice(0, 8)}`);
     } finally {
       setLoading(false);
@@ -455,8 +545,11 @@ export const App: React.FC = () => {
     try {
       const hits = await findSimilarById(fileId, chunkIdx, 40);
       setResults(hits);
+      setTotalResults(hits.length);
+      setIsSimilarityView(true);
       setSearchSeq((s) => s + 1);
       setSelectedIndex(0);
+      resultsListRef.current?.scrollTo({ top: 0 });
       setStatusLabel(`Similar to ${fileId.slice(0, 8)} · chunk #${chunkIdx}`);
     } finally {
       setLoading(false);
@@ -469,8 +562,11 @@ export const App: React.FC = () => {
     try {
       const hits = await findSimilarByUpload(file, 40);
       setResults(hits);
+      setTotalResults(hits.length);
+      setIsSimilarityView(true);
       setSearchSeq((s) => s + 1);
       setSelectedIndex(0);
+      resultsListRef.current?.scrollTo({ top: 0 });
       setStatusLabel(`Similar to '${file.name}'`);
     } catch (err) {
       setStatusLabel(err instanceof Error ? err.message : "Upload failed");
@@ -867,7 +963,7 @@ export const App: React.FC = () => {
             <DsSelect
               disabled={!hasIndexedFiles}
               value={mode}
-              width={156}
+              width={148}
               height="var(--control-height-lg)"
               ariaLabel="Search mode"
               options={[
@@ -879,7 +975,31 @@ export const App: React.FC = () => {
                 const nextMode = val as SearchMode;
                 setMode(nextMode);
                 if (hasIndexedFiles) {
-                  runSearch(query, nextMode, filters);
+                  runSearch(query, nextMode, filters, sort);
+                }
+              }}
+            />
+
+            <DsSelect
+              disabled={!hasIndexedFiles}
+              value={sort}
+              width={154}
+              height="var(--control-height-lg)"
+              ariaLabel="Sort order"
+              options={[
+                { value: "relevance", label: "Sort: Relevance" },
+                { value: "name_asc", label: "Name (A–Z)" },
+                { value: "name_desc", label: "Name (Z–A)" },
+                { value: "duration_asc", label: "Shortest first" },
+                { value: "duration_desc", label: "Longest first" },
+                { value: "lufs_desc", label: "Loudest first" },
+                { value: "lufs_asc", label: "Quietest first" },
+              ]}
+              onChange={(val) => {
+                const nextSort = val as SortMode;
+                setSort(nextSort);
+                if (hasIndexedFiles) {
+                  runSearch(query, mode, filters, nextSort);
                 }
               }}
             />
@@ -1186,7 +1306,7 @@ export const App: React.FC = () => {
           )}
 
           {/* Content: Onboarding Empty State vs Results List */}
-          <div className="sfx-results-list ds-scroll">
+          <div ref={resultsListRef} className="sfx-results-list ds-scroll">
             {!hasIndexedFiles ? (
               <div
                 style={{
@@ -1333,183 +1453,219 @@ export const App: React.FC = () => {
                 </div>
               </div>
             ) : (
-              results.map((hit, idx) => {
-                const isSelected = idx === selectedIndex;
-                const isRowPlaying =
-                  playingFileId === hit.file_id && isPlaying;
-                const rowTime =
-                  playingFileId === hit.file_id ? currentTimeS : null;
-                const scoreBarPct =
-                  hit.clap_score !== null
-                    ? Math.min(100, Math.max(8, Math.round(hit.clap_score * 100)))
-                    : Math.min(100, Math.max(12, Math.round(hit.rrf_score * 1800)));
+              <>
+                {results.map((hit, idx) => {
+                  const isSelected = idx === selectedIndex;
+                  const isRowPlaying =
+                    playingFileId === hit.file_id && isPlaying;
+                  const rowTime =
+                    playingFileId === hit.file_id ? currentTimeS : null;
+                  const scoreBarPct =
+                    hit.clap_score !== null
+                      ? Math.min(
+                          100,
+                          Math.max(8, Math.round(hit.clap_score * 100))
+                        )
+                      : Math.min(
+                          100,
+                          Math.max(12, Math.round(hit.rrf_score * 1800))
+                        );
 
-                return (
-                  <div
-                    key={`${hit.file_id}-${searchSeq}`}
-                    ref={(el) => {
-                      rowRefs.current[idx] = el;
-                    }}
-                    onClick={() => {
-                      setSelectedIndex(idx);
-                      playHit(hit);
-                    }}
-                    onDoubleClick={() => {
-                      setSelectedIndex(idx);
-                      setDetailOpen(true);
-                    }}
-                    style={
-                      {
-                        "--row-idx": Math.min(idx, 14),
-                      } as React.CSSProperties
-                    }
-                    className={`sfx-row ${isSelected ? "selected" : ""} ${
-                      isRowPlaying ? "is-playing" : ""
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
+                  return (
+                    <div
+                      key={`${hit.file_id}-${searchSeq}`}
+                      ref={(el) => {
+                        rowRefs.current[idx] = el;
+                      }}
+                      onClick={() => {
                         setSelectedIndex(idx);
                         playHit(hit);
                       }}
-                      className={`sfx-play-btn ${
-                        isRowPlaying ? "playing" : ""
-                      }`}
-                      aria-label={isRowPlaying ? "Pause" : "Play"}
-                    >
-                      {isRowPlaying ? (
-                        <Pause size={14} />
-                      ) : (
-                        <Play size={14} />
-                      )}
-                    </button>
-
-                    <div className="sfx-row-info">
-                      <div className="sfx-row-title-line">
-                        <span className="sfx-row-filename" title={hit.filename}>
-                          {hit.filename}
-                        </span>
-                        {hit.user_tags.map((t) => (
-                          <span key={t} className="ds-badge ds-badge-accent">
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                      <div className="sfx-row-folder" title={hit.folder}>
-                        {hit.folder}
-                      </div>
-                    </div>
-
-                    <div className="sfx-row-wave">
-                      <MiniWaveform
-                        fileId={hit.file_id}
-                        durationS={hit.duration_s}
-                        bestOffsetS={hit.best_offset_s}
-                        bestEndS={hit.best_end_s}
-                        currentTimeS={rowTime}
-                        isPlaying={isRowPlaying}
-                        onSeek={(timeS) => {
-                          setSelectedIndex(idx);
-                          playHit(hit, timeS);
-                        }}
-                      />
-                    </div>
-
-                    <div className="sfx-row-specs">
-                      <span className="sfx-row-dur">
-                        {hit.duration_s.toFixed(2)}s
-                      </span>
-                      <span className="sfx-row-subspec">
-                        {hit.format.split("/")[0].toUpperCase()} ·{" "}
-                        {(hit.sample_rate / 1000).toFixed(0)}k ·{" "}
-                        {hit.lufs_integrated !== null
-                          ? `${hit.lufs_integrated.toFixed(0)} LUFS`
-                          : `${hit.channels}ch`}
-                      </span>
-                    </div>
-
-                    <div
-                      className="sfx-row-score"
-                      title={`RRF: ${hit.rrf_score.toFixed(5)} | CLAP: ${
-                        hit.clap_score !== null
-                          ? hit.clap_score.toFixed(3)
-                          : "—"
-                      } | BM25: ${
-                        hit.bm25_score !== null
-                          ? hit.bm25_score.toFixed(2)
-                          : "—"
+                      onDoubleClick={() => {
+                        setSelectedIndex(idx);
+                        setDetailOpen(true);
+                      }}
+                      style={
+                        {
+                          "--row-idx": Math.min(idx % PAGE_SIZE, 14),
+                        } as React.CSSProperties
+                      }
+                      className={`sfx-row ${isSelected ? "selected" : ""} ${
+                        isRowPlaying ? "is-playing" : ""
                       }`}
                     >
-                      <span
-                        style={{
-                          fontSize: "var(--font-size-xs)",
-                          fontWeight: 500,
-                          color:
-                            hit.clap_score !== null && hit.clap_score > 0.25
-                              ? "var(--primary-400)"
-                              : "var(--text-secondary)",
-                        }}
-                      >
-                        {hit.clap_score !== null
-                          ? `${(hit.clap_score * 100).toFixed(0)}%`
-                          : hit.rrf_score.toFixed(3)}
-                      </span>
-                      <div className="sfx-score-bar-track">
-                        <div
-                          className="sfx-score-bar-fill"
-                          style={{ width: `${scoreBarPct}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="sfx-row-actions">
-                      <button
-                        type="button"
-                        onClick={(e) => handleRevealRow(e, hit)}
-                        className="sfx-icon-btn sfx-reveal-btn"
-                        aria-label="Reveal file in Explorer"
-                        title="Reveal file in Explorer (R)"
-                      >
-                        <FolderOpen size={14} />
-                      </button>
-
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleFindSimilarFile(hit.file_id);
+                          setSelectedIndex(idx);
+                          playHit(hit);
                         }}
-                        className="sfx-icon-btn"
-                        aria-label="Find similar sounds"
-                        title="Find similar sounds"
+                        className={`sfx-play-btn ${
+                          isRowPlaying ? "playing" : ""
+                        }`}
+                        aria-label={isRowPlaying ? "Pause" : "Play"}
                       >
-                        <Sparkles size={14} />
+                        {isRowPlaying ? (
+                          <Pause size={14} />
+                        ) : (
+                          <Play size={14} />
+                        )}
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={(e) => handleToggleFavoriteRow(e, hit)}
-                        className={`sfx-icon-btn ${
-                          hit.favorite ? "fav-active" : ""
-                        }`}
-                        aria-label={
-                          hit.favorite
-                            ? "Remove from favorites"
-                            : "Add to favorites"
-                        }
-                        title="Toggle favorite (F)"
-                      >
-                        <Heart
-                          size={14}
-                          fill={hit.favorite ? "currentColor" : "none"}
+                      <div className="sfx-row-info">
+                        <div className="sfx-row-title-line">
+                          <span
+                            className="sfx-row-filename"
+                            title={hit.filename}
+                          >
+                            {hit.filename}
+                          </span>
+                          {hit.user_tags.map((t) => (
+                            <span key={t} className="ds-badge ds-badge-accent">
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="sfx-row-folder" title={hit.folder}>
+                          {hit.folder}
+                        </div>
+                      </div>
+
+                      <div className="sfx-row-wave">
+                        <MiniWaveform
+                          fileId={hit.file_id}
+                          durationS={hit.duration_s}
+                          bestOffsetS={hit.best_offset_s}
+                          bestEndS={hit.best_end_s}
+                          currentTimeS={rowTime}
+                          isPlaying={isRowPlaying}
+                          onSeek={(timeS) => {
+                            setSelectedIndex(idx);
+                            playHit(hit, timeS);
+                          }}
                         />
-                      </button>
+                      </div>
+
+                      <div className="sfx-row-specs">
+                        <span className="sfx-row-dur">
+                          {hit.duration_s.toFixed(2)}s
+                        </span>
+                        <span className="sfx-row-subspec">
+                          {hit.format.split("/")[0].toUpperCase()} ·{" "}
+                          {(hit.sample_rate / 1000).toFixed(0)}k ·{" "}
+                          {hit.lufs_integrated !== null
+                            ? `${hit.lufs_integrated.toFixed(0)} LUFS`
+                            : `${hit.channels}ch`}
+                        </span>
+                      </div>
+
+                      <div
+                        className="sfx-row-score"
+                        title={`RRF: ${hit.rrf_score.toFixed(5)} | CLAP: ${
+                          hit.clap_score !== null
+                            ? hit.clap_score.toFixed(3)
+                            : "—"
+                        } | BM25: ${
+                          hit.bm25_score !== null
+                            ? hit.bm25_score.toFixed(2)
+                            : "—"
+                        }`}
+                      >
+                        <span
+                          style={{
+                            fontSize: "var(--font-size-xs)",
+                            fontWeight: 500,
+                            color:
+                              hit.clap_score !== null && hit.clap_score > 0.25
+                                ? "var(--primary-400)"
+                                : "var(--text-secondary)",
+                          }}
+                        >
+                          {hit.clap_score !== null
+                            ? `${(hit.clap_score * 100).toFixed(0)}%`
+                            : hit.rrf_score.toFixed(3)}
+                        </span>
+                        <div className="sfx-score-bar-track">
+                          <div
+                            className="sfx-score-bar-fill"
+                            style={{ width: `${scoreBarPct}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="sfx-row-actions">
+                        <button
+                          type="button"
+                          onClick={(e) => handleRevealRow(e, hit)}
+                          className="sfx-icon-btn sfx-reveal-btn"
+                          aria-label="Reveal file in Explorer"
+                          title="Reveal file in Explorer (R)"
+                        >
+                          <FolderOpen size={14} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleFindSimilarFile(hit.file_id);
+                          }}
+                          className="sfx-icon-btn"
+                          aria-label="Find similar sounds"
+                          title="Find similar sounds"
+                        >
+                          <Sparkles size={14} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleFavoriteRow(e, hit)}
+                          className={`sfx-icon-btn ${
+                            hit.favorite ? "fav-active" : ""
+                          }`}
+                          aria-label={
+                            hit.favorite
+                              ? "Remove from favorites"
+                              : "Add to favorites"
+                          }
+                          title="Toggle favorite (F)"
+                        >
+                          <Heart
+                            size={14}
+                            fill={hit.favorite ? "currentColor" : "none"}
+                          />
+                        </button>
+                      </div>
                     </div>
+                  );
+                })}
+
+                {!isSimilarityView && results.length < totalResults && (
+                  <div
+                    ref={loadMoreSentinelRef}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "var(--space-2)",
+                      padding: "var(--space-4)",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: "var(--font-size-xs)",
+                      color: "var(--text-tertiary)",
+                    }}
+                  >
+                    <span
+                      className="ds-spinner"
+                      style={{ width: 14, height: 14 }}
+                    />
+                    <span>
+                      Loading more sounds ({results.length.toLocaleString()} /{" "}
+                      {totalResults.toLocaleString()})...
+                    </span>
                   </div>
-                );
-              })
+                )}
+              </>
             )}
           </div>
 
@@ -1518,11 +1674,11 @@ export const App: React.FC = () => {
             <span className="ds-tnum">
               {statusLabel ||
                 (hasIndexedFiles
-                  ? `${results.length} result${
-                      results.length === 1 ? "" : "s"
-                    }${
+                  ? `Showing ${results.length.toLocaleString()} of ${(
+                      totalResults || results.length
+                    ).toLocaleString()} matching sounds${
                       stats
-                        ? ` · ${stats.ok_files.toLocaleString()} files indexed`
+                        ? ` · ${stats.ok_files.toLocaleString()} total indexed`
                         : ""
                     }`
                   : roots.length === 0

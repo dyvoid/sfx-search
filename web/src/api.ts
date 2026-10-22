@@ -7,18 +7,24 @@ import {
   LibraryStats,
   SearchHit,
   SearchMode,
+  SearchPageResponse,
+  SortMode,
 } from "./types";
 
 export async function searchSounds(
   query: string,
   mode: SearchMode,
   filters: FilterState,
-  k: number = 50
-): Promise<SearchHit[]> {
+  k: number = 50,
+  offset: number = 0,
+  sort: SortMode = "relevance"
+): Promise<SearchPageResponse> {
   const body = {
     query,
     k,
+    offset,
     mode,
+    sort,
     min_duration: filters.minDuration ? parseFloat(filters.minDuration) : null,
     max_duration: filters.maxDuration ? parseFloat(filters.maxDuration) : null,
     min_lufs: filters.minLufs ? parseFloat(filters.minLufs) : null,
@@ -41,7 +47,13 @@ export async function searchSounds(
     throw new Error(`Search failed: ${res.statusText}`);
   }
   const data = await res.json();
-  return data.results as SearchHit[];
+  const results = (data.results as SearchHit[]) || [];
+  return {
+    results,
+    count: typeof data.count === "number" ? data.count : results.length,
+    total: typeof data.total === "number" ? data.total : results.length,
+    offset: typeof data.offset === "number" ? data.offset : offset,
+  };
 }
 
 export async function findSimilarById(

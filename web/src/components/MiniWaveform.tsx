@@ -70,10 +70,43 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [peaks, setPeaks] = useState<number[]>(() => peaksCache.get(fileId) || []);
+  const [isVisible, setIsVisible] = useState<boolean>(() =>
+    peaksCache.has(fileId)
+  );
   const [hoverRatio, setHoverRatio] = useState<number | null>(null);
   const [canvasWidth, setCanvasWidth] = useState<number>(320);
 
   useEffect(() => {
+    if (peaksCache.has(fileId)) {
+      setIsVisible(true);
+      setPeaks(peaksCache.get(fileId) || []);
+      return;
+    }
+    const el = wrapRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setIsVisible(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setIsVisible(true);
+            io.disconnect();
+            break;
+          }
+        }
+      },
+      { rootMargin: "280px 0px" }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [fileId]);
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
     let active = true;
     const cached = peaksCache.get(fileId);
     if (cached) {
@@ -89,7 +122,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     return () => {
       active = false;
     };
-  }, [fileId]);
+  }, [fileId, isVisible]);
 
   useEffect(() => {
     const el = wrapRef.current;

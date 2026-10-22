@@ -1,5 +1,21 @@
 export type SearchMode = "hybrid" | "audio_only" | "keyword_only";
 
+export type SortMode =
+  | "relevance"
+  | "name_asc"
+  | "name_desc"
+  | "duration_asc"
+  | "duration_desc"
+  | "lufs_desc"
+  | "lufs_asc";
+
+export interface SearchPageResponse {
+  results: SearchHit[];
+  count: number;
+  total: number;
+  offset: number;
+}
+
 export interface SearchHit {
   file_id: string;
   path: string;

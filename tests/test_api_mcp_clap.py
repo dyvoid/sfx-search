@@ -120,7 +120,28 @@ def test_fastapi_endpoints_range_and_transcode(tmp_path: Path) -> None:
     assert r_up.status_code == 200
     assert r_up.json()["count"] == 2
 
-    # 8. Library root management & background indexing endpoints
+    # 8. Empty-query browse pagination & sort modes
+    r_browse_p1 = client.post(
+        "/api/search",
+        json={"query": "", "k": 1, "offset": 0, "sort": "duration_asc"},
+    )
+    assert r_browse_p1.status_code == 200
+    b1 = r_browse_p1.json()
+    assert b1["total"] == 2
+    assert b1["count"] == 1
+
+    r_browse_p2 = client.post(
+        "/api/search",
+        json={"query": "", "k": 1, "offset": 1, "sort": "duration_asc"},
+    )
+    assert r_browse_p2.status_code == 200
+    b2 = r_browse_p2.json()
+    assert b2["total"] == 2
+    assert b2["count"] == 1
+    assert b1["results"][0]["file_id"] != b2["results"][0]["file_id"]
+    assert b1["results"][0]["duration_s"] <= b2["results"][0]["duration_s"]
+
+    # 9. Library root management & background indexing endpoints
     r_lib = client.get("/api/library")
     assert r_lib.status_code == 200
     assert len(r_lib.json()["roots"]) == 1

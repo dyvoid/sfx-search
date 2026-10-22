@@ -538,6 +538,78 @@ class SfxStore:
             return None
         return ids
 
+    def browse_file_ids(
+        self,
+        filters: SearchFilters | None = None,
+        sort: str = "name_asc",
+        offset: int = 0,
+        limit: int = 50,
+    ) -> tuple[list[str], int]:
+        if "files" not in self.table_names():
+            return [], 0
+        where_sql, allowed_user_ids = self.build_files_where_clause(filters)
+        tbl = self.db.open_table("files")
+        total_rows = tbl.count_rows()
+        if total_rows == 0:
+            return [], 0
+
+        select_cols = ["file_id", "path", "duration_s", "lufs_integrated"]
+        need_text_check = bool(filters and (filters.required_phrases or filters.excluded_terms))
+        if need_text_check:
+            select_cols.append("search_text")
+
+        rows = tbl.search().where(where_sql).select(select_cols).limit(total_rows + 100).to_list()
+        matched: list[dict[str, Any]] = []
+        for r in rows:
+            fid = str(r["file_id"])
+            if allowed_user_ids is not None and fid not in allowed_user_ids:
+                continue
+            if need_text_check and filters is not None:
+                haystack = f"{r.get('search_text', '')} {r.get('path', '')}".lower()
+                if filters.required_phrases and any(
+                    p.lower() not in haystack for p in filters.required_phrases
+                ):
+                    continue
+                if filters.excluded_terms and any(
+                    ex.lower() in haystack for ex in filters.excluded_terms
+                ):
+                    continue
+            matched.append(r)
+
+        def _filename_key(row: dict[str, Any]) -> tuple[str, str]:
+            p = str(row.get("path") or "").replace("\\", "/")
+            name = p.rsplit("/", 1)[-1].lower()
+            return (name, p.lower())
+
+        if sort == "name_desc":
+            matched.sort(key=_filename_key, reverse=True)
+        elif sort == "duration_asc":
+            matched.sort(key=lambda r: (float(r.get("duration_s") or 0.0), _filename_key(r)))
+        elif sort == "duration_desc":
+            matched.sort(
+                key=lambda r: (float(r.get("duration_s") or 0.0), _filename_key(r)),
+                reverse=True,
+            )
+        elif sort == "lufs_desc":
+            matched.sort(
+                key=lambda r: (
+                    float(r["lufs_integrated"]) if r.get("lufs_integrated") is not None else -999.0
+                ),
+                reverse=True,
+            )
+        elif sort == "lufs_asc":
+            matched.sort(
+                key=lambda r: (
+                    float(r["lufs_integrated"]) if r.get("lufs_integrated") is not None else 999.0
+                )
+            )
+        else:
+            matched.sort(key=_filename_key)
+
+        total_matched = len(matched)
+        page_slice = matched[max(0, offset) : max(0, offset) + max(1, limit)]
+        return [str(r["file_id"]) for r in page_slice], total_matched
+
     def get_files_by_ids(
         self,
         file_ids: Sequence[str],

@@ -25,7 +25,7 @@ from .embed import EmbedderProtocol
 from .features import compute_waveform_peaks
 from .indexer import IndexStats, run_indexer
 from .scan import normalize_path, to_os_path
-from .search import SearchEngine, SearchMode
+from .search import SearchEngine, SearchMode, SortMode
 from .store import SearchFilters, SfxStore, UserDataRecord
 
 NATIVE_BROWSER_EXTS: set[str] = {".mp3", ".ogg", ".opus", ".m4a", ".aac", ".flac"}
@@ -33,8 +33,10 @@ NATIVE_BROWSER_EXTS: set[str] = {".mp3", ".ogg", ".opus", ".m4a", ".aac", ".flac
 
 class SearchRequestBody(BaseModel):
     query: str = ""
-    k: int = 30
+    k: int = 50
+    offset: int = 0
     mode: SearchMode = "hybrid"
+    sort: SortMode = "relevance"
     min_duration: float | None = None
     max_duration: float | None = None
     min_lufs: float | None = None
@@ -423,8 +425,10 @@ def create_app(
     def api_search_get(
         q: str = Query("", alias="q"),
         query: str | None = Query(None),
-        k: int = Query(30, ge=1, le=500),
+        k: int = Query(50, ge=1, le=500),
+        offset: int = Query(0, ge=0),
         mode: SearchMode = Query("hybrid"),
+        sort: SortMode = Query("relevance"),
         min_dur: float | None = Query(None),
         max_dur: float | None = Query(None),
         min_lufs: float | None = Query(None),
@@ -451,11 +455,21 @@ def create_app(
             user_tag=user_tag,
             min_loop_score=min_loop,
         )
-        hits = engine.search(query=eff_q, k=k, mode=mode, filters=filters)
+        hits, total = engine.search_page(
+            query=eff_q,
+            k=k,
+            offset=offset,
+            mode=mode,
+            sort=sort,
+            filters=filters,
+        )
         return {
             "query": eff_q,
             "mode": mode,
+            "sort": sort,
+            "offset": offset,
             "count": len(hits),
+            "total": total,
             "results": [h.to_dict() for h in hits],
         }
 
@@ -474,11 +488,21 @@ def create_app(
             user_tag=body.user_tag,
             min_loop_score=body.min_loop_score,
         )
-        hits = engine.search(query=body.query, k=body.k, mode=body.mode, filters=filters)
+        hits, total = engine.search_page(
+            query=body.query,
+            k=body.k,
+            offset=body.offset,
+            mode=body.mode,
+            sort=body.sort,
+            filters=filters,
+        )
         return {
             "query": body.query,
             "mode": body.mode,
+            "sort": body.sort,
+            "offset": body.offset,
             "count": len(hits),
+            "total": total,
             "results": [h.to_dict() for h in hits],
         }
 
