@@ -20,14 +20,14 @@ function readTokenColor(varName: string, fallback: string): string {
   return val || fallback;
 }
 
-function sampleInterpolatedPeaks(
+function buildSmoothEnvelope(
   peaks: number[],
-  count: number
+  numSamples: number
 ): Float32Array {
-  const out = new Float32Array(count);
+  const raw = new Float32Array(numSamples);
   const n = peaks.length;
-  if (n === 0 || count === 0) {
-    return out;
+  if (n === 0 || numSamples === 0) {
+    return raw;
   }
 
   let maxPeak = 0;
@@ -38,17 +38,24 @@ function sampleInterpolatedPeaks(
   }
   const normScale = maxPeak > 0.001 ? 1 / maxPeak : 1;
 
-  for (let i = 0; i < count; i++) {
-    const pos = (i / Math.max(1, count - 1)) * (n - 1);
+  for (let i = 0; i < numSamples; i++) {
+    const pos = (i / Math.max(1, numSamples - 1)) * (n - 1);
     const idx0 = Math.floor(pos);
     const idx1 = Math.min(n - 1, idx0 + 1);
     const frac = pos - idx0;
-    const raw = peaks[idx0] * (1 - frac) + peaks[idx1] * frac;
-    const normalized = Math.min(1, raw * normScale);
-    // Gentle perceptual curve so quiet details read without turning silence into dashed blocks
-    out[i] = Math.pow(normalized, 0.72);
+    const v = (peaks[idx0] * (1 - frac) + peaks[idx1] * frac) * normScale;
+    raw[i] = Math.pow(Math.min(1, Math.max(0, v)), 0.78);
   }
-  return out;
+
+  // Light 3-tap Gaussian smoothing so wide waveforms look like a continuous studio envelope
+  const smoothed = new Float32Array(numSamples);
+  for (let i = 0; i < numSamples; i++) {
+    const prev = raw[Math.max(0, i - 1)];
+    const curr = raw[i];
+    const next = raw[Math.min(numSamples - 1, i + 1)];
+    smoothed[i] = 0.22 * prev + 0.56 * curr + 0.22 * next;
+  }
+  return smoothed;
 }
 
 export const MiniWaveform: React.FC<MiniWaveformProps> = ({
@@ -113,7 +120,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
 
     const dpr = window.devicePixelRatio || 1;
     const width = canvasWidth || canvas.clientWidth || 320;
-    const height = canvas.clientHeight || 34;
+    const height = canvas.clientHeight || 36;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
@@ -123,13 +130,13 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     const primaryColor = readTokenColor("--primary-400", "oklch(62% 0.14 275)");
     const accent1Color = readTokenColor("--accent-1-400", "oklch(78% 0.12 55)");
     const accent2Color = readTokenColor("--accent-2-400", "oklch(78% 0.08 190)");
-    const waveIdle = readTokenColor("--gray-500", "oklch(52% 0.015 260)");
-    const waveWindow = readTokenColor("--gray-200", "oklch(85% 0.009 260)");
+    const waveStrokeIdle = readTokenColor("--gray-400", "oklch(63% 0.013 260)");
+    const waveFillIdle = readTokenColor("--gray-600", "oklch(42% 0.018 260)");
     const centerLine = readTokenColor(
       "--border-subtle",
       "oklch(100% 0 0 / 0.08)"
     );
-    const hoverLine = readTokenColor("--gray-300", "oklch(74% 0.011 260)");
+    const hoverColor = readTokenColor("--gray-200", "oklch(85% 0.009 260)");
 
     const safeDur = Math.max(0.01, durationS);
     const hasSubWindow =
@@ -141,56 +148,112 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     );
     const midY = height / 2;
 
-    // 1. Subtle continuous baseline
+    // 1. Subtle zero-crossing axis line
     ctx.fillStyle = centerLine;
     ctx.fillRect(0, midY - 0.5, width, 1);
 
-    // 2. Subtle best-match window indicator (only when file is longer than a single chunk)
+    // 2. Best-match sub-window region (only when file is longer than a single window)
     if (hasSubWindow) {
       const rx = markerStartRatio * width;
       const rw = Math.max(3, (markerEndRatio - markerStartRatio) * width);
       ctx.save();
-      ctx.globalAlpha = 0.09;
+      ctx.globalAlpha = 0.08;
       ctx.fillStyle = accent1Color;
-      ctx.fillRect(rx, 0, rw, height);
-      ctx.globalAlpha = 0.55;
+      ctx.fillRect(rx, 2, rw, height - 4);
+      ctx.globalAlpha = 0.65;
       ctx.fillRect(rx, 0, rw, 1.5);
       ctx.restore();
     }
 
-    // 3. High-density normalized waveform bars (2px pitch: 1.5px bar, 0.5px gap)
+    // 3. Continuous mirror-envelope waveform (Arturia Pigments / FabFilter style)
     if (peaks.length > 0) {
-      const pitch = 2.5;
-      const barW = 1.5;
-      const numBars = Math.max(32, Math.floor(width / pitch));
-      const sampled = sampleInterpolatedPeaks(peaks, numBars);
-      const maxHalfH = (height - 6) / 2;
-      const playRatio =
-        currentTimeS !== null
-          ? Math.min(1, Math.max(0, currentTimeS / safeDur))
-          : -1;
+      const sampleCount = Math.max(80, Math.min(360, Math.floor(width / 1.5)));
+      const env = buildSmoothEnvelope(peaks, sampleCount);
+      const maxAmpH = (height - 6) / 2;
 
-      for (let i = 0; i < numBars; i++) {
-        const ratio = i / numBars;
-        const val = sampled[i];
-        const x = i * pitch;
-
-        // Silence stays a tiny 0.75px tick on the center line instead of a dashed block
-        const halfH = val < 0.025 ? 0.5 : Math.max(1.2, val * maxHalfH);
-
-        if (playRatio >= 0 && ratio <= playRatio) {
-          ctx.fillStyle = isPlaying ? primaryColor : accent1Color;
-        } else if (
-          hasSubWindow &&
-          ratio >= markerStartRatio &&
-          ratio <= markerEndRatio
-        ) {
-          ctx.fillStyle = waveWindow;
-        } else {
-          ctx.fillStyle = waveIdle;
+      const drawEnvelopePass = (
+        fillStyle: string,
+        strokeStyle: string,
+        fillAlpha: number
+      ) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(0, midY);
+        for (let i = 0; i < sampleCount; i++) {
+          const x = (i / (sampleCount - 1)) * width;
+          const h = env[i] < 0.015 ? 0 : env[i] * maxAmpH;
+          ctx.lineTo(x, midY - h);
         }
+        for (let i = sampleCount - 1; i >= 0; i--) {
+          const x = (i / (sampleCount - 1)) * width;
+          const h = env[i] < 0.015 ? 0 : env[i] * maxAmpH;
+          ctx.lineTo(x, midY + h);
+        }
+        ctx.closePath();
+        ctx.globalAlpha = fillAlpha;
+        ctx.fillStyle = fillStyle;
+        ctx.fill();
 
-        ctx.fillRect(x, midY - halfH, barW, halfH * 2);
+        // Upper & lower crest strokes for crisp definition at large sizes
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = 1.15;
+        ctx.lineJoin = "round";
+
+        ctx.beginPath();
+        for (let i = 0; i < sampleCount; i++) {
+          const x = (i / (sampleCount - 1)) * width;
+          const h = env[i] < 0.015 ? 0 : env[i] * maxAmpH;
+          if (i === 0) {
+            ctx.moveTo(x, midY - h);
+          } else {
+            ctx.lineTo(x, midY - h);
+          }
+        }
+        ctx.stroke();
+
+        ctx.beginPath();
+        for (let i = 0; i < sampleCount; i++) {
+          const x = (i / (sampleCount - 1)) * width;
+          const h = env[i] < 0.015 ? 0 : env[i] * maxAmpH;
+          if (i === 0) {
+            ctx.moveTo(x, midY + h);
+          } else {
+            ctx.lineTo(x, midY + h);
+          }
+        }
+        ctx.stroke();
+        ctx.restore();
+      };
+
+      // Base unplayed waveform
+      drawEnvelopePass(waveFillIdle, waveStrokeIdle, 0.28);
+
+      // Highlighted best-window clip
+      if (hasSubWindow) {
+        const rx = markerStartRatio * width;
+        const rw = Math.max(2, (markerEndRatio - markerStartRatio) * width);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(rx, 0, rw, height);
+        ctx.clip();
+        drawEnvelopePass(accent1Color, accent1Color, 0.26);
+        ctx.restore();
+      }
+
+      // Played progress clip
+      if (currentTimeS !== null) {
+        const playRatio = Math.min(1, Math.max(0, currentTimeS / safeDur));
+        const pw = playRatio * width;
+        if (pw > 0.5) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(0, 0, pw, height);
+          ctx.clip();
+          const activeColor = isPlaying ? primaryColor : accent1Color;
+          drawEnvelopePass(activeColor, activeColor, 0.42);
+          ctx.restore();
+        }
       }
     }
 
@@ -201,10 +264,10 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       ctx.fillRect(mx, 0, 1.5, height);
     }
 
-    // 5. Hover scrub hairline
+    // 5. Hover scrub hairline + center node
     if (hoverRatio !== null) {
       const hx = Math.min(width - 1, Math.max(0, hoverRatio * width));
-      ctx.fillStyle = hoverLine;
+      ctx.fillStyle = hoverColor;
       ctx.fillRect(hx, 0, 1, height);
     }
 
@@ -250,7 +313,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       style={{
         position: "relative",
         width: "100%",
-        height: 34,
+        height: 36,
         overflow: "hidden",
       }}
     >
@@ -266,7 +329,27 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
           cursor: "pointer",
         }}
       />
-      {(bestOffsetS > 0.05 || hoverTimeS !== null) && (
+      {hoverTimeS !== null && hoverRatio !== null ? (
+        <span
+          className="ds-tnum"
+          style={{
+            position: "absolute",
+            left: `clamp(4px, calc(${(hoverRatio * 100).toFixed(1)}% - 22px), calc(100% - 48px))`,
+            top: 2,
+            pointerEvents: "none",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--font-size-2xs)",
+            color: "var(--text-primary)",
+            background: "var(--surface-overlay)",
+            border: "var(--border-width) solid var(--border-strong)",
+            padding: "0 5px",
+            borderRadius: "var(--radius-xs)",
+            lineHeight: 1.35,
+          }}
+        >
+          {hoverTimeS.toFixed(2)}s
+        </span>
+      ) : bestOffsetS > 0.05 ? (
         <span
           className="ds-tnum"
           style={{
@@ -276,20 +359,15 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
             pointerEvents: "none",
             fontFamily: "var(--font-mono)",
             fontSize: "var(--font-size-2xs)",
-            color:
-              hoverTimeS !== null
-                ? "var(--text-primary)"
-                : "var(--accent-1-400)",
+            color: "var(--accent-1-400)",
             background: "oklch(from var(--surface-app) l c h / 0.85)",
             padding: "0 4px",
             borderRadius: "var(--radius-xs)",
           }}
         >
-          {hoverTimeS !== null
-            ? `${hoverTimeS.toFixed(1)}s`
-            : `@${bestOffsetS.toFixed(1)}s`}
+          @{bestOffsetS.toFixed(1)}s
         </span>
-      )}
+      ) : null}
     </div>
   );
 };

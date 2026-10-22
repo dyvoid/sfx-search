@@ -33,6 +33,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import { DsSelect } from "./components/DsSelect";
 import { LibraryModal } from "./components/LibraryModal";
 import { MiniWaveform } from "./components/MiniWaveform";
+import { SpectrumMeter } from "./components/SpectrumMeter";
 import {
   AvailableFilters,
   DEFAULT_FILTERS,
@@ -46,6 +47,17 @@ import {
 const LS_HISTORY_KEY = "sfxsearch_query_history_v1";
 const LS_FILTERS_KEY = "sfxsearch_last_filters_v1";
 const LS_DENSITY_KEY = "sfxsearch_density_v1";
+
+function extractQueryTokens(q: string): string[] {
+  const tokens: string[] = [];
+  const rx =
+    /\b(?:dur:[<>]?=?\d+(?:\.\d+)?(?:-\d+(?:\.\d+)?)?|loop:(?:true|false|\d+(?:\.\d+)?)|(?:fmt|format):[a-zA-Z0-9_.-]+|fav(?:orite)?s?:(?:true|1|yes)|tag:[a-zA-Z0-9_.-]+)\b|(?:^|\s)-[a-zA-Z0-9_]+\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rx.exec(q)) !== null) {
+    tokens.push(m[0].trim());
+  }
+  return tokens.slice(0, 4);
+}
 
 export const App: React.FC = () => {
   const [query, setQuery] = useState<string>("");
@@ -216,6 +228,22 @@ export const App: React.FC = () => {
       audioRef.current.loop = loopEnabled;
     }
   }, [loopEnabled]);
+
+  // Smooth 60fps playhead tracking while audio is actively playing
+  useEffect(() => {
+    if (!isPlaying) {
+      return;
+    }
+    let rafId = 0;
+    const tick = () => {
+      if (audioRef.current && !audioRef.current.paused) {
+        setCurrentTimeS(audioRef.current.currentTime);
+      }
+      rafId = window.requestAnimationFrame(tick);
+    };
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [isPlaying]);
 
   const stopAudio = useCallback(() => {
     if (audioRef.current) {
@@ -531,7 +559,7 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Digital Transport Readout */}
+          {/* Digital Transport Readout + Live 16-Band Spectrum */}
           <div className="sfx-readout" aria-label="Library and playback readout">
             <div className="sfx-readout-cell">
               <span className="sfx-readout-cap">Sounds</span>
@@ -543,14 +571,18 @@ export const App: React.FC = () => {
               <span className="sfx-readout-cap">Playhead</span>
               <span className="sfx-readout-val warm">
                 {isPlaying && playingHit
-                  ? `${currentTimeS.toFixed(1)}s / ${playingHit.duration_s.toFixed(
+                  ? `${currentTimeS.toFixed(2)}s / ${playingHit.duration_s.toFixed(
                       1
                     )}s`
                   : selectedHit
                   ? `@${selectedHit.best_offset_s.toFixed(1)}s`
-                  : "0.0s"}
+                  : "0.00s"}
               </span>
             </div>
+            <SpectrumMeter
+              audioElement={audioRef.current}
+              isPlaying={isPlaying}
+            />
           </div>
 
           {/* Search bar + mode selector + filters */}
@@ -591,19 +623,29 @@ export const App: React.FC = () => {
                   }
                   className="ds-input"
                 />
+                {extractQueryTokens(query).map((tok) => (
+                  <span
+                    key={tok}
+                    className="ds-badge ds-badge-accent ds-tnum"
+                    style={{ flexShrink: 0 }}
+                    title="Active inline query filter"
+                  >
+                    {tok}
+                  </span>
+                ))}
                 {history.length > 0 && hasIndexedFiles && (
                   <button
                     type="button"
                     onClick={() => setShowHistory((prev) => !prev)}
                     className="sfx-icon-btn"
-                    title="Recent queries"
+                    title="Recent queries & syntax helpers"
                   >
                     <History size={13} />
                   </button>
                 )}
               </div>
 
-              {showHistory && history.length > 0 && hasIndexedFiles && (
+              {showHistory && hasIndexedFiles && (
                 <div
                   className="ds-menu"
                   style={{
@@ -614,22 +656,63 @@ export const App: React.FC = () => {
                     zIndex: 50,
                   }}
                 >
-                  <div className="ds-menu-header">Recent queries</div>
-                  {history.map((hItem) => (
-                    <button
-                      key={hItem}
-                      type="button"
-                      onMouseDown={() => {
-                        setQuery(hItem);
-                        setShowHistory(false);
-                        runSearch(hItem);
-                      }}
-                      className="ds-menu-item"
-                    >
-                      <Clock size={13} />
-                      <span className="l">{hItem}</span>
-                    </button>
-                  ))}
+                  <div className="ds-menu-header">Quick syntax operators</div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 6,
+                      padding: "4px 10px 8px",
+                    }}
+                  >
+                    {[
+                      { token: "dur:0-2", desc: "Short (<2s)" },
+                      { token: "dur:5-30", desc: "Long (5–30s)" },
+                      { token: "loop:true", desc: "Seamless loop" },
+                      { token: "fmt:wav", desc: "WAV only" },
+                      { token: "-voice", desc: "Exclude term" },
+                    ].map((op) => (
+                      <button
+                        key={op.token}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          const nextQ = `${query.trim()} ${op.token}`.trim();
+                          setQuery(nextQ);
+                          searchInputRef.current?.focus();
+                        }}
+                        className="ds-badge ds-badge-neutral"
+                        style={{
+                          cursor: "pointer",
+                          border: "var(--border-width) solid var(--border-subtle)",
+                        }}
+                        title={op.desc}
+                      >
+                        {op.token}
+                      </button>
+                    ))}
+                  </div>
+                  {history.length > 0 && (
+                    <>
+                      <div className="ds-menu-sep" />
+                      <div className="ds-menu-header">Recent queries</div>
+                      {history.map((hItem) => (
+                        <button
+                          key={hItem}
+                          type="button"
+                          onMouseDown={() => {
+                            setQuery(hItem);
+                            setShowHistory(false);
+                            runSearch(hItem);
+                          }}
+                          className="ds-menu-item"
+                        >
+                          <Clock size={13} />
+                          <span className="l">{hItem}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
                 </div>
               )}
             </div>
