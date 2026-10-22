@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -15,7 +17,8 @@ import numpy.typing as npt
 from .config import Config
 from .decode import decode_file
 from .embed import EmbedderProtocol
-from .store import SearchFilters, SfxStore, UserDataRecord
+from .scan import to_os_path
+from .store import ModelMismatchError, SearchFilters, SfxStore, UserDataRecord
 
 SearchMode = Literal["hybrid", "audio_only", "keyword_only"]
 SortMode = Literal[
@@ -32,10 +35,10 @@ _INLINE_DUR_RE = re.compile(r"\bdur:(?:(\d+(?:\.\d+)?))?-(?:(\d+(?:\.\d+)?))?\b"
 _INLINE_DUR_CMP_RE = re.compile(r"\bdur:([<>]=?)(\d+(?:\.\d+)?)\b", re.IGNORECASE)
 _INLINE_LOOP_RE = re.compile(r"\bloop:(true|false|\d+(?:\.\d+)?)\b", re.IGNORECASE)
 _INLINE_FMT_RE = re.compile(r"\b(?:fmt|format):([a-zA-Z0-9_.-]+)\b", re.IGNORECASE)
-_INLINE_FAV_RE = re.compile(r"\bfav(?:orite)?s?:(true|1|yes)\b", re.IGNORECASE)
+_INLINE_FAV_RE = re.compile(r"\bfav(?:orite)?s?:(true|1|yes|false|0|no)\b", re.IGNORECASE)
 _INLINE_TAG_RE = re.compile(r"\btag:([a-zA-Z0-9_.-]+)\b", re.IGNORECASE)
 _PHRASE_RE = re.compile(r'"([^"]+)"')
-_EXCLUSION_RE = re.compile(r"(?:^|\s)-([a-zA-Z0-9_]+)\b")
+_EXCLUSION_RE = re.compile(r"(?:^|\s)-([^\s\"]+)")
 
 
 @dataclass
@@ -108,7 +111,16 @@ def parse_query(raw_query: str, base_filters: SearchFilters | None = None) -> Pa
     f.excluded_terms = list(f.excluded_terms or [])
     f.formats = list(f.formats) if f.formats else None
 
-    working = raw_query
+    phrases: list[str] = []
+
+    def _mask_phrase(m: re.Match[str]) -> str:
+        phrase = m.group(1).strip()
+        if phrase:
+            phrases.append(phrase)
+        return " "
+
+    working = _PHRASE_RE.sub(_mask_phrase, raw_query)
+    f.required_phrases.extend(phrases)
 
     for m in _INLINE_DUR_RE.finditer(working):
         lo, hi = m.group(1), m.group(2)
@@ -143,30 +155,26 @@ def parse_query(raw_query: str, base_filters: SearchFilters | None = None) -> Pa
             f.formats.append(fmt_val)
     working = _INLINE_FMT_RE.sub(" ", working)
 
-    if _INLINE_FAV_RE.search(working):
-        f.favorites_only = True
+    for m in _INLINE_FAV_RE.finditer(working):
+        if m.group(1).lower() in ("true", "1", "yes"):
+            f.favorites_only = True
     working = _INLINE_FAV_RE.sub(" ", working)
 
     for m in _INLINE_TAG_RE.finditer(working):
         f.user_tag = m.group(1).strip()
     working = _INLINE_TAG_RE.sub(" ", working)
 
-    for m in _PHRASE_RE.finditer(working):
-        phrase = m.group(1).strip()
-        if phrase:
-            f.required_phrases.append(phrase)
-    working_no_quotes = _PHRASE_RE.sub(r" \1 ", working)
-
-    for m in _EXCLUSION_RE.finditer(working_no_quotes):
-        term = m.group(1).strip().lower()
+    for m in _EXCLUSION_RE.finditer(working):
+        term = m.group(1).strip().lower().rstrip(".,;:!?")
         if term:
             f.excluded_terms.append(term)
-    cleaned = _EXCLUSION_RE.sub(" ", working_no_quotes)
-    cleaned = " ".join(cleaned.split())
+    working = _EXCLUSION_RE.sub(" ", working)
+
+    cleaned = " ".join((working + " " + " ".join(phrases)).split())
 
     return ParsedQuery(
         raw_query=raw_query,
-        semantic_query=cleaned or raw_query.strip(),
+        semantic_query=cleaned,
         keyword_query=cleaned,
         filters=f,
     )
@@ -197,20 +205,41 @@ class SearchEngine:
         self.config = config
         self.store = store
         self._embedder = embedder
+        self._embedder_lock = threading.Lock()
+        self._model_checked = False
+
+    def _ensure_model_compatible(self) -> None:
+        if self._model_checked:
+            return
+        expected_model = (
+            self._embedder.model_id
+            if self._embedder is not None
+            else self.config.embedding.model_id
+        )
+        stored_model, _ = self.store.get_stored_model_info()
+        if stored_model and stored_model != expected_model:
+            raise ModelMismatchError(
+                f"Database contains embeddings from model '{stored_model}' "
+                f"but the current embedder is '{expected_model}'. "
+                "Vector results would be meaningless; reindex or fix the configured model."
+            )
+        self._model_checked = True
 
     @property
     def embedder(self) -> EmbedderProtocol:
         if self._embedder is None:
-            from .embed import ClapEmbedder
+            with self._embedder_lock:
+                if self._embedder is None:
+                    from .embed import ClapEmbedder
 
-            self._embedder = ClapEmbedder(
-                model_id=self.config.embedding.model_id,
-                precision=self.config.embedding.precision,
-                window_s=self.config.embedding.window_s,
-                hop_s=self.config.embedding.hop_s,
-                max_chunks_per_file=self.config.embedding.max_chunks_per_file,
-                batch_size=self.config.embedding.batch_size,
-            )
+                    self._embedder = ClapEmbedder(
+                        model_id=self.config.embedding.model_id,
+                        precision=self.config.embedding.precision,
+                        window_s=self.config.embedding.window_s,
+                        hop_s=self.config.embedding.hop_s,
+                        max_chunks_per_file=self.config.embedding.max_chunks_per_file,
+                        batch_size=self.config.embedding.batch_size,
+                    )
         return self._embedder
 
     def search(
@@ -239,6 +268,7 @@ class SearchEngine:
         sort: SortMode = "relevance",
         filters: SearchFilters | None = None,
     ) -> tuple[list[SearchHit], int]:
+        self._ensure_model_compatible()
         top_k = k if k is not None else self.config.search.default_k
         safe_offset = max(0, offset)
         parsed = parse_query(query, base_filters=filters)
@@ -414,17 +444,25 @@ class SearchEngine:
         filters: SearchFilters | None = None,
         exclude_self: bool = True,
     ) -> list[SearchHit]:
+        self._ensure_model_compatible()
         top_k = k if k is not None else self.config.search.default_k
         ref_row = self.store.get_file_by_id_or_path(file_id_or_path, include_vec=True)
 
         if ref_row is not None:
+            if str(ref_row.get("status") or "") != "ok":
+                raise ValueError(
+                    "Reference file has no usable embedding "
+                    f"(status={ref_row.get('status')}): {file_id_or_path}"
+                )
             ref_file_id = str(ref_row["file_id"])
             if chunk_idx is not None:
                 chunks = self.store.get_chunks_for_file(ref_file_id, include_vec=True)
                 target_chunk = next((c for c in chunks if int(c["chunk_idx"]) == chunk_idx), None)
-                if target_chunk is None and chunks:
-                    target_chunk = chunks[0]
                 if target_chunk is None:
+                    if chunks:
+                        raise ValueError(
+                            f"chunk_idx={chunk_idx} not found for file_id={ref_file_id}"
+                        )
                     raise ValueError(f"No chunks found for file_id={ref_file_id}")
                 q_vec = np.asarray(target_chunk["vec"], dtype=np.float32)
                 return self._similar_by_chunk_vec(
@@ -442,10 +480,9 @@ class SearchEngine:
                 exclude_file_id=ref_file_id if exclude_self else None,
             )
 
-        path_obj = Path(file_id_or_path)
-        if not path_obj.is_file():
+        if not os.path.isfile(to_os_path(file_id_or_path)):
             raise FileNotFoundError(f"Reference file or file_id not found: {file_id_or_path}")
-        return self.find_similar_from_audio_file(path_obj, k=top_k, filters=filters)
+        return self.find_similar_from_audio_file(Path(file_id_or_path), k=top_k, filters=filters)
 
     def find_similar_from_audio_file(
         self,
@@ -453,6 +490,7 @@ class SearchEngine:
         k: int | None = None,
         filters: SearchFilters | None = None,
     ) -> list[SearchHit]:
+        self._ensure_model_compatible()
         top_k = k if k is not None else self.config.search.default_k
         decoded = decode_file(
             audio_path,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import threading
 from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -188,6 +189,7 @@ class ClapEmbedder:
 
         self._query_cache: OrderedDict[str, npt.NDArray[np.float32]] = OrderedDict()
         self._query_cache_size = max(16, query_cache_size)
+        self._cache_lock = threading.Lock()
 
     def _assert_preprocessor_config(self) -> None:
         sr = int(getattr(self.feature_extractor, "sampling_rate", 0))
@@ -299,11 +301,14 @@ class ClapEmbedder:
 
     def embed_text(self, query: str) -> npt.NDArray[np.float32]:
         key = query.strip()
-        if key in self._query_cache:
-            self._query_cache.move_to_end(key)
-            return self._query_cache[key]
+        with self._cache_lock:
+            if key in self._query_cache:
+                self._query_cache.move_to_end(key)
+                return self._query_cache[key]
         vec = self.embed_texts([key])[0]
-        self._query_cache[key] = vec
-        if len(self._query_cache) > self._query_cache_size:
-            self._query_cache.popitem(last=False)
+        with self._cache_lock:
+            self._query_cache[key] = vec
+            self._query_cache.move_to_end(key)
+            if len(self._query_cache) > self._query_cache_size:
+                self._query_cache.popitem(last=False)
         return vec

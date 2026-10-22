@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import threading
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -50,7 +52,7 @@ class ChunkRecord:
     chunk_idx: int
     start_s: float
     end_s: float
-    vec: list[float]
+    vec: npt.NDArray[np.float32] | list[float]
 
 
 @dataclass
@@ -146,6 +148,8 @@ class SfxStore:
         self.db_path = Path(db_path)
         self.db_path.mkdir(parents=True, exist_ok=True)
         self.db = lancedb.connect(str(self.db_path))
+        self._write_lock = threading.RLock()
+        self._fts_rebuild_attempted = False
 
     def table_names(self) -> set[str]:
         res: Any = self.db.list_tables()
@@ -267,6 +271,15 @@ class SfxStore:
     ) -> None:
         if not files and not chunks:
             return
+        with self._write_lock:
+            self._upsert_batch_locked(files, chunks, rebuild_fts)
+
+    def _upsert_batch_locked(
+        self,
+        files: Sequence[FileRecord],
+        chunks: Sequence[ChunkRecord],
+        rebuild_fts: bool,
+    ) -> None:
         files_tbl = self.db.open_table("files")
         chunks_tbl = self.db.open_table("chunks")
 
@@ -274,6 +287,9 @@ class SfxStore:
         if file_ids:
             self._delete_by_file_ids(files_tbl, file_ids)
             self._delete_by_file_ids(chunks_tbl, file_ids)
+
+        # Chunks are written before files so a mid-batch crash leaves an absent
+        # file row (re-indexed next run) rather than an "ok" file with no chunks.
 
         if files:
             file_dicts = [
@@ -302,7 +318,9 @@ class SfxStore:
                 }
                 for f in files
             ]
-            files_tbl.add(file_dicts)
+            files_to_add = file_dicts
+        else:
+            files_to_add = []
 
         if chunks:
             chunk_dicts = [
@@ -311,11 +329,14 @@ class SfxStore:
                     "chunk_idx": int(c.chunk_idx),
                     "start_s": float(c.start_s),
                     "end_s": float(c.end_s),
-                    "vec": [float(x) for x in c.vec],
+                    "vec": np.asarray(c.vec, dtype=np.float32).tolist(),
                 }
                 for c in chunks
             ]
             chunks_tbl.add(chunk_dicts)
+
+        if files_to_add:
+            files_tbl.add(files_to_add)
 
         if rebuild_fts:
             self.rebuild_fts_index()
@@ -323,12 +344,16 @@ class SfxStore:
     def mark_missing(self, file_ids: Sequence[str]) -> None:
         if not file_ids or "files" not in self.table_names():
             return
-        files_tbl = self.db.open_table("files")
-        batch_size = 200
-        for i in range(0, len(file_ids), batch_size):
-            batch = file_ids[i : i + batch_size]
-            quoted = ", ".join(f"'{_sql_escape(fid)}'" for fid in batch)
-            files_tbl.update(where=f"file_id IN ({quoted})", values={"status": "missing"})
+        with self._write_lock:
+            files_tbl = self.db.open_table("files")
+            batch_size = 200
+            for i in range(0, len(file_ids), batch_size):
+                batch = file_ids[i : i + batch_size]
+                quoted = ", ".join(f"'{_sql_escape(fid)}'" for fid in batch)
+                files_tbl.update(where=f"file_id IN ({quoted})", values={"status": "missing"})
+            if "chunks" in self.table_names():
+                chunks_tbl = self.db.open_table("chunks")
+                self._delete_by_file_ids(chunks_tbl, file_ids)
 
     def remove_root_files(self, root_path: str) -> int:
         from .scan import normalize_path
@@ -349,20 +374,58 @@ class SfxStore:
                 target_ids.append(str(r["file_id"]))
         if not target_ids:
             return 0
-        self._delete_by_file_ids(files_tbl, target_ids)
-        if "chunks" in self.table_names():
-            chunks_tbl = self.db.open_table("chunks")
-            self._delete_by_file_ids(chunks_tbl, target_ids)
-        self.rebuild_fts_index()
+        with self._write_lock:
+            self._delete_by_file_ids(files_tbl, target_ids)
+            if "chunks" in self.table_names():
+                chunks_tbl = self.db.open_table("chunks")
+                self._delete_by_file_ids(chunks_tbl, target_ids)
+            self.rebuild_fts_index()
         return len(target_ids)
 
     def rebuild_fts_index(self) -> None:
         if "files" not in self.table_names():
             return
-        files_tbl = self.db.open_table("files")
-        if files_tbl.count_rows() == 0:
-            return
-        files_tbl.create_index("search_text", config=FTS(), replace=True)
+        with self._write_lock:
+            files_tbl = self.db.open_table("files")
+            if files_tbl.count_rows() == 0:
+                return
+            files_tbl.create_index("search_text", config=FTS(), replace=True)
+
+    def optimize_tables(self) -> None:
+        """Compact all tables and drop tombstoned fragments after bulk writes."""
+        with self._write_lock:
+            for name in ("files", "chunks", "user_data"):
+                if name in self.table_names():
+                    try:
+                        self.db.open_table(name).optimize()
+                    except Exception:
+                        pass
+
+    def create_vector_indices(self, embedding_dim: int) -> None:
+        """Create ANN indices on vec/file_vec when tables are large enough to benefit."""
+        with self._write_lock:
+            for table_name, column in (("chunks", "vec"), ("files", "file_vec")):
+                if table_name not in self.table_names():
+                    continue
+                tbl = self.db.open_table(table_name)
+                rows = tbl.count_rows()
+                if rows < 2048:
+                    continue
+                num_sub_vectors = next(
+                    (d for d in (64, 48, 32, 16, 8, 4, 2, 1) if embedding_dim % d == 0),
+                    1,
+                )
+                try:
+                    tbl.create_index(
+                        vector_column_name=column,
+                        index_type="IVF_PQ",
+                        metric="cosine",
+                        num_partitions=max(2, min(256, rows // 32)),
+                        num_sub_vectors=num_sub_vectors,
+                        replace=True,
+                    )
+                except Exception:
+                    pass
 
     def _delete_by_file_ids(self, table: Any, file_ids: Sequence[str]) -> None:
         if not file_ids or table.count_rows() == 0:
@@ -380,15 +443,19 @@ class SfxStore:
         total = tbl.count_rows()
         if total == 0:
             return {}
-        q = tbl.search()
+        rows: list[dict[str, Any]] = []
         if file_ids is not None:
             id_list = list(file_ids)
             if not id_list:
                 return {}
-            if len(id_list) <= 200:
-                quoted = ", ".join(f"'{_sql_escape(fid)}'" for fid in id_list)
-                q = q.where(f"file_id IN ({quoted})")
-        rows = q.limit(total + 100).to_list()
+            for i in range(0, len(id_list), 200):
+                batch = id_list[i : i + 200]
+                quoted = ", ".join(f"'{_sql_escape(fid)}'" for fid in batch)
+                rows.extend(
+                    tbl.search().where(f"file_id IN ({quoted})").limit(len(batch) + 10).to_list()
+                )
+        else:
+            rows = tbl.search().limit(total + 100).to_list()
         result: dict[str, UserDataRecord] = {}
         for r in rows:
             fid = str(r["file_id"])
@@ -407,28 +474,29 @@ class SfxStore:
         user_tags: list[str] | None = None,
         note: str | None = None,
     ) -> UserDataRecord:
-        self.ensure_user_data_table()
-        tbl = self.db.open_table("user_data")
-        existing_map = self.get_user_data_map([file_id])
-        current = existing_map.get(file_id, UserDataRecord(file_id=file_id))
+        with self._write_lock:
+            self.ensure_user_data_table()
+            tbl = self.db.open_table("user_data")
+            existing_map = self.get_user_data_map([file_id])
+            current = existing_map.get(file_id, UserDataRecord(file_id=file_id))
 
-        updated = UserDataRecord(
-            file_id=file_id,
-            favorite=favorite if favorite is not None else current.favorite,
-            user_tags=user_tags if user_tags is not None else current.user_tags,
-            note=note if note is not None else current.note,
-        )
-        self._delete_by_file_ids(tbl, [file_id])
-        tbl.add(
-            [
-                {
-                    "file_id": updated.file_id,
-                    "favorite": updated.favorite,
-                    "user_tags": updated.user_tags,
-                    "note": updated.note,
-                }
-            ]
-        )
+            updated = UserDataRecord(
+                file_id=file_id,
+                favorite=favorite if favorite is not None else current.favorite,
+                user_tags=user_tags if user_tags is not None else current.user_tags,
+                note=note if note is not None else current.note,
+            )
+            self._delete_by_file_ids(tbl, [file_id])
+            tbl.add(
+                [
+                    {
+                        "file_id": updated.file_id,
+                        "favorite": updated.favorite,
+                        "user_tags": updated.user_tags,
+                        "note": updated.note,
+                    }
+                ]
+            )
         return updated
 
     def build_files_where_clause(
@@ -438,18 +506,18 @@ class SfxStore:
         allowed_user_ids: set[str] | None = None
 
         if filters is not None:
-            if filters.min_duration is not None:
-                clauses.append(f"duration_s >= {float(filters.min_duration)}")
-            if filters.max_duration is not None:
-                clauses.append(f"duration_s <= {float(filters.max_duration)}")
-            if filters.min_lufs is not None:
-                clauses.append(
-                    f"lufs_integrated IS NOT NULL AND lufs_integrated >= {float(filters.min_lufs)}"
-                )
-            if filters.max_lufs is not None:
-                clauses.append(
-                    f"lufs_integrated IS NOT NULL AND lufs_integrated <= {float(filters.max_lufs)}"
-                )
+
+            def _f(v: float | None) -> float | None:
+                return v if v is not None and math.isfinite(v) else None
+
+            if (v := _f(filters.min_duration)) is not None:
+                clauses.append(f"duration_s >= {float(v)}")
+            if (v := _f(filters.max_duration)) is not None:
+                clauses.append(f"duration_s <= {float(v)}")
+            if (v := _f(filters.min_lufs)) is not None:
+                clauses.append(f"lufs_integrated IS NOT NULL AND lufs_integrated >= {float(v)}")
+            if (v := _f(filters.max_lufs)) is not None:
+                clauses.append(f"lufs_integrated IS NOT NULL AND lufs_integrated <= {float(v)}")
             if filters.sample_rates:
                 sr_list = ", ".join(str(int(sr)) for sr in filters.sample_rates)
                 clauses.append(f"sample_rate IN ({sr_list})")
@@ -460,22 +528,22 @@ class SfxStore:
                 fmt_clauses = []
                 for fmt in filters.formats:
                     clean = _sql_escape(fmt.lower().lstrip("."))
+                    like_clean = clean.replace("!", "!!").replace("%", "!%").replace("_", "!_")
                     fmt_clauses.append(
-                        f"(LOWER(format) = '{clean}' OR LOWER(format) LIKE '{clean}/%' OR LOWER(format) LIKE '%/{clean}')"
+                        f"(LOWER(format) = '{clean}' OR LOWER(format) LIKE '{like_clean}/%' ESCAPE '!' OR LOWER(format) LIKE '%/{like_clean}' ESCAPE '!')"
                     )
                 clauses.append("(" + " OR ".join(fmt_clauses) + ")")
             if filters.roots:
                 root_clauses = []
                 for rt in filters.roots:
                     clean_rt = _sql_escape(rt.replace("\\", "/").rstrip("/"))
+                    like_rt = clean_rt.replace("!", "!!").replace("%", "!%").replace("_", "!_")
                     root_clauses.append(
-                        f"(LOWER(root) = LOWER('{clean_rt}') OR LOWER(path) LIKE LOWER('{clean_rt}/%'))"
+                        f"(LOWER(root) = LOWER('{clean_rt}') OR LOWER(path) LIKE LOWER('{like_rt}/%') ESCAPE '!')"
                     )
                 clauses.append("(" + " OR ".join(root_clauses) + ")")
-            if filters.min_loop_score is not None:
-                clauses.append(
-                    f"loop_score IS NOT NULL AND loop_score >= {float(filters.min_loop_score)}"
-                )
+            if (v := _f(filters.min_loop_score)) is not None:
+                clauses.append(f"loop_score IS NOT NULL AND loop_score >= {float(v)}")
 
             if filters.favorites_only or filters.user_tag:
                 user_map = self.get_user_data_map()
@@ -742,10 +810,14 @@ class SfxStore:
         where_sql, allowed_user_ids = self.build_files_where_clause(filters)
         if allowed_user_ids is not None and len(allowed_user_ids) == 0:
             return []
+        # >300 matching ids are filtered in Python, so over-fetch like the
+        # chunks path does to avoid starving the result list.
+        post_filter = allowed_user_ids is not None and len(allowed_user_ids) > 300
+        fetch_limit = limit * 4 if post_filter else limit
         q_files: Any = tbl.search(list(map(float, query_vec)), vector_column_name="file_vec")
-        rows = q_files.metric("cosine").where(where_sql).limit(limit).to_list()
+        rows = q_files.metric("cosine").where(where_sql).limit(fetch_limit).to_list()
         if allowed_user_ids is not None:
-            rows = [r for r in rows if str(r["file_id"]) in allowed_user_ids]
+            rows = [r for r in rows if str(r["file_id"]) in allowed_user_ids][:limit]
         return rows
 
     def search_files_bm25(
@@ -763,27 +835,40 @@ class SfxStore:
         where_sql, allowed_user_ids = self.build_files_where_clause(filters)
         if allowed_user_ids is not None and len(allowed_user_ids) == 0:
             return []
+        overfetch = 1
+        if filters and (filters.required_phrases or filters.excluded_terms):
+            overfetch = 2
+        if allowed_user_ids is not None and len(allowed_user_ids) > 300:
+            overfetch = max(overfetch, 4)
+        fetch_limit = limit * overfetch
         try:
             rows = (
                 tbl.search(cleaned, query_type="fts", fts_columns="search_text")
                 .where(where_sql)
                 .select(["file_id", "path", "search_text"])
-                .limit(
-                    limit * 2
-                    if (filters and (filters.required_phrases or filters.excluded_terms))
-                    else limit
-                )
+                .limit(fetch_limit)
                 .to_list()
             )
         except Exception:
-            self.rebuild_fts_index()
-            rows = (
-                tbl.search(cleaned, query_type="fts", fts_columns="search_text")
-                .where(where_sql)
-                .select(["file_id", "path", "search_text"])
-                .limit(limit)
-                .to_list()
-            )
+            # Assume a stale/missing FTS index; rebuild once per process and
+            # retry on a fresh handle (the old one may pin a pre-index
+            # snapshot). A malformed query fails again -> return [].
+            with self._write_lock:
+                if self._fts_rebuild_attempted:
+                    return []
+                self._fts_rebuild_attempted = True
+            try:
+                self.rebuild_fts_index()
+                rows = (
+                    self.db.open_table("files")
+                    .search(cleaned, query_type="fts", fts_columns="search_text")
+                    .where(where_sql)
+                    .select(["file_id", "path", "search_text"])
+                    .limit(fetch_limit)
+                    .to_list()
+                )
+            except Exception:
+                return []
 
         filtered: list[dict[str, Any]] = []
         for r in rows:

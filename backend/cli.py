@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 import typer
 from rich.console import Console
@@ -77,19 +77,18 @@ def cmd_index(
     target_roots = [str(p) for p in roots] if roots else cfg.library.roots
     store = SfxStore(cfg.db_dir)
 
+    model_mismatch = False
     try:
         stored_model, _ = store.get_stored_model_info()
-        if stored_model and stored_model != cfg.embedding.model_id and not reindex:
-            console.print(
-                f"[bold red]Model mismatch:[/bold red] Database uses '{stored_model}', "
-                f"but '{cfg.embedding.model_id}' was requested. "
-                "Refusing to mix models in one database. Pass --reindex to rebuild or use a separate data_dir."
-            )
-            raise typer.Exit(code=1)
-        if stored_model and stored_model != cfg.embedding.model_id and reindex:
-            store.db.drop_table("files")
-            if "chunks" in store.table_names():
-                store.db.drop_table("chunks")
+        if stored_model and stored_model != cfg.embedding.model_id:
+            model_mismatch = True
+            if not reindex:
+                console.print(
+                    f"[bold red]Model mismatch:[/bold red] Database uses '{stored_model}', "
+                    f"but '{cfg.embedding.model_id}' was requested. "
+                    "Refusing to mix models in one database. Pass --reindex to rebuild or use a separate data_dir."
+                )
+                raise typer.Exit(code=1)
     except ModelMismatchError as exc:
         console.print(f"[bold red]{exc}[/bold red]")
         raise typer.Exit(code=1) from exc
@@ -98,6 +97,8 @@ def cmd_index(
         f"[cyan]Loading embedder[/cyan] [bold]{cfg.embedding.model_id}[/bold] "
         f"({cfg.embedding.precision})..."
     )
+    # Load the new embedder before dropping tables so a bad --model can't
+    # destroy an existing index.
     embedder = ClapEmbedder(
         model_id=cfg.embedding.model_id,
         precision=cfg.embedding.precision,
@@ -106,6 +107,15 @@ def cmd_index(
         max_chunks_per_file=cfg.embedding.max_chunks_per_file,
         batch_size=cfg.embedding.batch_size,
     )
+
+    if model_mismatch and reindex:
+        try:
+            store.db.drop_table("files")
+            if "chunks" in store.table_names():
+                store.db.drop_table("chunks")
+        except Exception as exc:
+            console.print(f"[bold red]Failed to reset the existing index:[/bold red] {exc}")
+            raise typer.Exit(code=1) from exc
 
     last_reported = 0
 
@@ -215,7 +225,11 @@ def cmd_search(
         favorites_only=favorites,
         min_loop_score=min_loop,
     )
-    hits = engine.search(query=query, k=k, mode=mode, filters=filters)
+    try:
+        hits = engine.search(query=query, k=k, mode=mode, filters=filters)
+    except ModelMismatchError as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1) from exc
 
     if as_json:
         sys.stdout.write(
@@ -248,7 +262,11 @@ def cmd_similar(
     store = SfxStore(cfg.db_dir)
     engine = SearchEngine(config=cfg, store=store)
 
-    hits = engine.find_similar(file_id_or_path=target, k=k, chunk_idx=chunk)
+    try:
+        hits = engine.find_similar(file_id_or_path=target, k=k, chunk_idx=chunk)
+    except (ModelMismatchError, ValueError, FileNotFoundError) as exc:
+        console.print(f"[bold red]{exc}[/bold red]")
+        raise typer.Exit(code=1) from exc
     if as_json:
         sys.stdout.write(
             json.dumps([h.to_dict() for h in hits], indent=2, ensure_ascii=False) + "\n"
@@ -326,14 +344,33 @@ def cmd_eval(
     store = SfxStore(cfg.db_dir)
     queries = load_eval_queries(queries_file)
 
-    embedder = ClapEmbedder(
-        model_id=cfg.embedding.model_id,
-        precision=cfg.embedding.precision,
-        window_s=cfg.embedding.window_s,
-        hop_s=cfg.embedding.hop_s,
-        max_chunks_per_file=cfg.embedding.max_chunks_per_file,
-        batch_size=cfg.embedding.batch_size,
-    )
+    # Lazy + shared: one ClapEmbedder across all variants; never loaded for
+    # keyword_only-only runs.
+    class _LazyEmbedder:
+        def __init__(self, c: Config) -> None:
+            self._cfg = c
+            self._inner: ClapEmbedder | None = None
+
+        def _get(self) -> ClapEmbedder:
+            if self._inner is None:
+                self._inner = ClapEmbedder(
+                    model_id=self._cfg.embedding.model_id,
+                    precision=self._cfg.embedding.precision,
+                    window_s=self._cfg.embedding.window_s,
+                    hop_s=self._cfg.embedding.hop_s,
+                    max_chunks_per_file=self._cfg.embedding.max_chunks_per_file,
+                    batch_size=self._cfg.embedding.batch_size,
+                )
+            return self._inner
+
+        @property
+        def model_id(self) -> str:
+            return self._inner.model_id if self._inner else self._cfg.embedding.model_id
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._get(), name)
+
+    embedder = _LazyEmbedder(cfg)
 
     builtin_modes: dict[str, SearchMode] = {
         "hybrid": "hybrid",

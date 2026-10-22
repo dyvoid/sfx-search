@@ -63,15 +63,22 @@ def load_eval_queries(yaml_path: str | Path) -> list[EvalQuery]:
     else:
         raise ValueError(f"Expected a list of queries in {yaml_path}")
 
+    valid_modes = {"hybrid", "audio_only", "keyword_only"}
     queries: list[EvalQuery] = []
     for item in items:
+        mode = item.get("mode")
+        if mode is not None and str(mode) not in valid_modes:
+            raise ValueError(
+                f"Query '{item.get('id')}' has invalid mode '{mode}'. "
+                f"Expected one of {sorted(valid_modes)}."
+            )
         queries.append(
             EvalQuery(
                 id=str(item["id"]),
                 query=str(item["query"]),
                 relevant=[str(r).replace("\\", "/") for r in (item.get("relevant") or [])],
                 notes=str(item.get("notes") or ""),
-                mode=item.get("mode"),
+                mode=mode,
             )
         )
     return queries
@@ -80,7 +87,8 @@ def load_eval_queries(yaml_path: str | Path) -> list[EvalQuery]:
 def _glob_to_regex(pattern: str) -> re.Pattern[str]:
     norm_pat = pattern.replace("\\", "/").lower()
     parts = norm_pat.split("**")
-    regex_parts = [fnmatch.translate(part).removesuffix(r"\Z").removesuffix("$") for part in parts]
+    # fnmatch.translate emits `\Z` on <3.14 and `\z` on 3.14+ — strip either.
+    regex_parts = [re.sub(r"(\\z|\\Z|\$)$", "", fnmatch.translate(part)) for part in parts]
     joined = ".*".join(regex_parts) + r"\Z"
     return re.compile(joined, re.IGNORECASE)
 
@@ -210,13 +218,16 @@ def evaluate_queries(
             )
         )
 
-    n = max(1, len(q_results))
+    # Queries with zero relevant docs in the DB are excluded from mean metrics:
+    # they can never score above 0 and would only drag the averages down.
+    scored = [r for r in q_results if r.relevant_total_in_db > 0]
+    n = max(1, len(scored))
     return VariantEvalSummary(
         variant_name=variant_name,
-        mean_recall_at_10=round(sum(r.recall_at_10 for r in q_results) / n, 4),
-        mean_recall_at_50=round(sum(r.recall_at_50 for r in q_results) / n, 4),
-        mean_mrr=round(sum(r.mrr for r in q_results) / n, 4),
-        mean_ndcg_at_20=round(sum(r.ndcg_at_20 for r in q_results) / n, 4),
+        mean_recall_at_10=round(sum(r.recall_at_10 for r in scored) / n, 4),
+        mean_recall_at_50=round(sum(r.recall_at_50 for r in scored) / n, 4),
+        mean_mrr=round(sum(r.mrr for r in scored) / n, 4),
+        mean_ndcg_at_20=round(sum(r.ndcg_at_20 for r in scored) / n, 4),
         query_results=q_results,
     )
 

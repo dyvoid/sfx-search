@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,16 @@ def test_windows_path_normalization_and_file_id() -> None:
     assert normalize_path(p3) == "C:/Projects/SFX/Foley/Wood/Creak_01.WAV"
     assert compute_file_id(p1) == compute_file_id(p2)
     assert compute_file_id(p1) == compute_file_id(p3)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows path semantics")
+def test_to_os_path_always_extended_length_prefixed() -> None:
+    short = to_os_path(r"C:\SFX\hit.wav")
+    assert short == "\\\\?\\C:\\SFX\\hit.wav"
+    unc = to_os_path(r"\\NAS\share\sfx\hit.wav")
+    assert unc == "\\\\?\\UNC\\NAS\\share\\sfx\\hit.wav"
+    already = to_os_path(r"\\?\C:\SFX\hit.wav")
+    assert already == r"\\?\C:\SFX\hit.wav"
 
 
 def test_long_and_unicode_windows_paths(tmp_path: Path) -> None:
@@ -269,3 +280,66 @@ def test_hybrid_search_filters_and_similarity(tmp_path: Path) -> None:
     eval_summary = evaluate_queries(cfg, store, eq, embedder=embedder, variant_name="hybrid")
     assert eval_summary.mean_recall_at_10 == 1.0
     assert eval_summary.mean_mrr > 0.0
+
+
+def test_parse_query_phrases_exclusions_and_filters() -> None:
+    from sfxsearch.search import parse_query
+
+    # Quoted phrases are masked before operator extraction: "-" and "dur:"
+    # inside quotes must not become exclusion terms or filters.
+    p = parse_query('"big - whoosh" dog dur:3-6 -cat')
+    assert p.filters.required_phrases == ["big - whoosh"]
+    assert p.filters.excluded_terms == ["cat"]
+    assert p.filters.min_duration == 3.0
+    assert p.filters.max_duration == 6.0
+    assert "big - whoosh" in p.semantic_query
+    assert "dog" in p.semantic_query
+    assert "-cat" not in p.semantic_query
+
+    # Hyphenated words outside quotes are not exclusions either.
+    p2 = parse_query("kick-drum")
+    assert p2.filters.excluded_terms == []
+    assert p2.semantic_query == "kick-drum"
+
+    # Filter-only queries must not feed filter tokens into the CLAP embedder.
+    p3 = parse_query("fmt:wav -dog")
+    assert p3.semantic_query == ""
+    assert p3.filters.excluded_terms == ["dog"]
+    assert p3.filters.formats == ["wav"]
+
+
+def test_reciprocal_rank_fusion_ordering_and_weights() -> None:
+    from sfxsearch.search import reciprocal_rank_fusion
+
+    # Doc "b" ranks #1 in both lists and must win outright.
+    fused = reciprocal_rank_fusion(["a", "b", "c"], ["b", "d", "a"], rrf_k=60)
+    assert fused[0][0] == "b"
+    assert fused[-1][0] == "c"
+
+    # A higher keyword weight must be able to reorder the result.
+    fused_kw = reciprocal_rank_fusion(
+        ["a", "b"], ["b", "a"], rrf_k=1, vector_weight=1.0, keyword_weight=5.0
+    )
+    assert fused_kw[0][0] == "b"
+
+
+def test_find_similar_invalid_chunk_idx_raises(tmp_path: Path) -> None:
+    lib_root = tmp_path / "sfx"
+    data_dir = tmp_path / "data"
+
+    w1 = write_sine_wav(lib_root / "a" / "tone_a.wav", freq_hz=200.0, duration_s=1.0)
+    write_sine_wav(lib_root / "b" / "tone_b.wav", freq_hz=400.0, duration_s=1.0)
+
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(data_dir)),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+
+    engine = SearchEngine(config=cfg, store=store, embedder=embedder)
+    fid = compute_file_id(w1)
+
+    with pytest.raises(ValueError, match="chunk_idx"):
+        engine.find_similar(fid, k=5, chunk_idx=999)
