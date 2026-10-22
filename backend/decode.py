@@ -157,7 +157,7 @@ def decode_audio_pcm(
     except Exception as exc:
         raise DecodeError(f"ffmpeg invocation failed: {exc}") from exc
 
-    if proc.returncode != 0 and len(proc.stdout) == 0:
+    if proc.returncode != 0:
         stderr_txt = proc.stderr.decode("utf-8", errors="replace").strip()
         raise DecodeError(f"ffmpeg exited with {proc.returncode}: {stderr_txt}")
 

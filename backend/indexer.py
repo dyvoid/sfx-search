@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import queue
 import threading
 import time
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from .config import Config
@@ -148,8 +150,6 @@ def run_indexer(
     reindex: bool = False,
     progress_callback: Callable[[IndexStats], None] | None = None,
 ) -> IndexStats:
-    import json
-
     t0 = time.perf_counter()
     target_roots = [normalize_path(r) for r in (roots or config.library.roots)]
 
@@ -196,32 +196,91 @@ def run_indexer(
     max_queue_size = max(4, workers * 3)
     work_queue: queue.Queue[DecodedWorkItem | None] = queue.Queue(maxsize=max_queue_size)
     stop_event = threading.Event()
+    consumer_done = threading.Event()
+
+    def _resolve_future(fut: Future[DecodedWorkItem], item: ScannedFile) -> DecodedWorkItem:
+        try:
+            return fut.result()
+        except Exception as exc:
+            try:
+                tags_json, search_text = extract_metadata(
+                    path=item.path, root=item.root, probe_tags={}
+                )
+            except Exception:
+                tags_json, search_text = "{}", ""
+            return DecodedWorkItem(
+                scanned=item,
+                format_name=item.ext,
+                sample_rate=0,
+                channels=0,
+                features=AcousticFeatures(
+                    duration_s=0.0, lufs_integrated=None, peak_dbfs=-120.0, loop_score=None
+                ),
+                tags_json=tags_json,
+                search_text=search_text,
+                windows=[],
+                peaks=None,
+                error=f"Decode worker failed: {exc}",
+            )
 
     def _producer() -> None:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            in_flight: list[Future[DecodedWorkItem]] = []
-            for item in diff.to_index:
-                if stop_event.is_set():
-                    break
-                while len(in_flight) >= max_queue_size and not stop_event.is_set():
-                    done_fut = in_flight.pop(0)
-                    work_queue.put(done_fut.result())
-                fut = pool.submit(
-                    _decode_worker_fn,
-                    item,
-                    config.paths.ffmpeg,
-                    config.paths.ffprobe,
-                    config.embedding.window_s,
-                    config.embedding.hop_s,
-                    config.embedding.max_chunks_per_file,
-                )
-                in_flight.append(fut)
+        def _safe_put(value: DecodedWorkItem | None) -> bool:
+            while not stop_event.is_set():
+                try:
+                    work_queue.put(value, timeout=0.25)
+                    return True
+                except queue.Full:
+                    continue
+            return False
 
-            for fut in in_flight:
-                if stop_event.is_set():
-                    break
-                work_queue.put(fut.result())
-        work_queue.put(None)
+        def _put_sentinel() -> None:
+            # Block until a live consumer drains a slot so no queued work is
+            # lost; only evict once the consumer is gone.
+            while not consumer_done.is_set():
+                try:
+                    work_queue.put(None, timeout=0.1)
+                    return
+                except queue.Full:
+                    continue
+            try:
+                work_queue.put_nowait(None)
+            except queue.Full:
+                try:
+                    work_queue.get_nowait()
+                    work_queue.put_nowait(None)
+                except (queue.Empty, queue.Full):
+                    pass
+
+        try:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                in_flight: list[tuple[ScannedFile, Future[DecodedWorkItem]]] = []
+                for item in diff.to_index:
+                    if stop_event.is_set():
+                        break
+                    while len(in_flight) >= max_queue_size and not stop_event.is_set():
+                        done_item, done_fut = in_flight.pop(0)
+                        if not _safe_put(_resolve_future(done_fut, done_item)):
+                            break
+                    if stop_event.is_set():
+                        break
+                    fut = pool.submit(
+                        _decode_worker_fn,
+                        item,
+                        config.paths.ffmpeg,
+                        config.paths.ffprobe,
+                        config.embedding.window_s,
+                        config.embedding.hop_s,
+                        config.embedding.max_chunks_per_file,
+                    )
+                    in_flight.append((item, fut))
+
+                for pending_item, fut in in_flight:
+                    if stop_event.is_set():
+                        break
+                    if not _safe_put(_resolve_future(fut, pending_item)):
+                        break
+        finally:
+            _put_sentinel()
 
     producer_thread = threading.Thread(target=_producer, daemon=True)
     producer_thread.start()
@@ -277,7 +336,7 @@ def run_indexer(
                             chunk_idx=w.chunk_idx,
                             start_s=w.start_s,
                             end_s=w.end_s,
-                            vec=[float(x) for x in cvec],
+                            vec=np.asarray(cvec, dtype=np.float32),
                         )
                     )
 
@@ -307,16 +366,19 @@ def run_indexer(
                 if decoded_item.peaks is not None:
                     peak_file = peaks_dir / f"{sf.file_id}.json"
                     try:
-                        peak_file.write_text(
+                        peak_tmp = peaks_dir / f"{sf.file_id}.json.tmp"
+                        peak_tmp.write_text(
                             json.dumps(
                                 {
                                     "file_id": sf.file_id,
+                                    "mtime_ns": sf.mtime_ns,
                                     "duration_s": round(decoded_item.features.duration_s, 4),
                                     "peaks": decoded_item.peaks,
                                 }
                             ),
                             encoding="utf-8",
                         )
+                        peak_tmp.replace(peak_file)
                     except OSError:
                         pass
 
@@ -338,14 +400,17 @@ def run_indexer(
 
             should_commit_first = not committed_first_ok and stats.indexed_ok >= 1
             if should_commit_first or len(pending_files) >= commit_every:
-                store.upsert_batch(pending_files, pending_chunks, rebuild_fts=True)
+                store.upsert_batch(pending_files, pending_chunks, rebuild_fts=False)
                 pending_files.clear()
                 pending_chunks.clear()
                 if stats.indexed_ok >= 1:
                     committed_first_ok = True
 
             if progress_callback:
-                progress_callback(stats)
+                try:
+                    progress_callback(stats)
+                except Exception:
+                    pass
 
         if pending_files or pending_chunks:
             store.upsert_batch(pending_files, pending_chunks, rebuild_fts=True)
@@ -355,6 +420,11 @@ def run_indexer(
             store.rebuild_fts_index()
     finally:
         stop_event.set()
+        consumer_done.set()
+        producer_thread.join(timeout=15.0)
+
+    store.create_vector_indices(embedder.embedding_dim)
+    store.optimize_tables()
 
     elapsed = max(1e-6, time.perf_counter() - t0)
     done_count = stats.indexed_ok + stats.indexed_errors

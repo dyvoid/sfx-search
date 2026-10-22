@@ -98,6 +98,7 @@ def parse_wav_chunks(path: str | Path) -> dict[str, str]:
             if riff_id not in (b"RIFF", b"RF64") or wave_id != b"WAVE":
                 return extracted
 
+            ds64_sizes: dict[bytes, int] = {}
             while True:
                 chunk_hdr = f.read(8)
                 if len(chunk_hdr) < 8:
@@ -105,12 +106,27 @@ def parse_wav_chunks(path: str | Path) -> dict[str, str]:
                 chunk_id, chunk_size = struct.unpack("<4sI", chunk_hdr)
                 cid = chunk_id.decode("latin-1", errors="ignore").strip()
 
+                if cid == "ds64" and 28 <= chunk_size <= 1024 * 1024:
+                    data = f.read(chunk_size)
+                    ds64_sizes = _parse_ds64_bytes(data)
+                    if chunk_size % 2 == 1:
+                        f.seek(1, 1)
+                    continue
+
+                if chunk_size == 0xFFFFFFFF:
+                    real_size = ds64_sizes.get(chunk_id)
+                    if real_size is None:
+                        break
+                    chunk_size = real_size
+
                 if cid.lower() == "bext" and 0 < chunk_size <= 2 * 1024 * 1024:
                     data = f.read(chunk_size)
                     _parse_bext_bytes(data, extracted)
                 elif cid.lower() == "ixml" and 0 < chunk_size <= 4 * 1024 * 1024:
                     data = f.read(chunk_size)
                     _parse_ixml_bytes(data, extracted)
+                elif chunk_size > 4 * 1024 * 1024 * 1024:
+                    break
                 else:
                     f.seek(chunk_size, 1)
 
@@ -120,6 +136,24 @@ def parse_wav_chunks(path: str | Path) -> dict[str, str]:
         return extracted
 
     return extracted
+
+
+def _parse_ds64_bytes(data: bytes) -> dict[bytes, int]:
+    """Parse an RF64 ds64 chunk into a chunk-id -> real-size map (incl. b'data')."""
+    sizes: dict[bytes, int] = {}
+    if len(data) < 28:
+        return sizes
+    _, data_size, _ = struct.unpack("<QQQ", data[:24])
+    sizes[b"data"] = int(data_size)
+    table_len = struct.unpack("<I", data[24:28])[0]
+    offset = 28
+    for _ in range(min(table_len, 1024)):
+        if offset + 12 > len(data):
+            break
+        cid, csize = struct.unpack("<4sQ", data[offset : offset + 12])
+        sizes[cid] = int(csize)
+        offset += 12
+    return sizes
 
 
 def _clean_c_str(raw: bytes) -> str:
@@ -172,8 +206,9 @@ def _parse_ixml_bytes(data: bytes, out: dict[str, str]) -> None:
             continue
         if tag_name in _IXML_INTEREST_TAGS or len(val) <= 256:
             key = f"ixml_{tag_name}"
-            if key in out and val not in out[key]:
-                out[key] = f"{out[key]} {val}"
+            if key in out:
+                if val not in out[key]:
+                    out[key] = f"{out[key]} {val}"
             else:
                 out[key] = val
 
@@ -205,7 +240,9 @@ def extract_metadata(
     if root:
         norm_root = normalize_path(root)
         parent_str = normalize_path(p.parent)
-        if parent_str.lower().startswith(norm_root.lower()):
+        root_low = norm_root.lower().rstrip("/")
+        parent_low = parent_str.lower()
+        if parent_low == root_low or parent_low.startswith(root_low + "/"):
             rel_str = parent_str[len(norm_root) :].lstrip("/")
             rel_parts = (
                 [part for part in rel_str.split("/") if part] if rel_str else [p.parent.name]

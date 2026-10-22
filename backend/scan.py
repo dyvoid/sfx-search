@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ntpath
 import os
 import sys
 from collections.abc import Iterable
@@ -39,24 +40,30 @@ class ScanDiff:
 def to_os_path(path: str | Path) -> str:
     raw = str(path)
     if sys.platform == "win32":
+        raw = raw.replace("/", "\\")
         if raw.startswith("\\\\?\\"):
             return raw
-        abs_path = os.path.abspath(raw.replace("/", "\\"))
-        if len(abs_path) >= 248:
-            if abs_path.startswith("\\\\"):
-                return "\\\\?\\UNC\\" + abs_path[2:]
-            return "\\\\?\\" + abs_path
-        return abs_path
+        abs_path = os.path.abspath(raw)
+        if abs_path.startswith("\\\\"):
+            return "\\\\?\\UNC\\" + abs_path[2:]
+        return "\\\\?\\" + abs_path
     return os.path.abspath(raw)
 
 
 def normalize_path(path: str | Path) -> str:
-    raw = str(path)
+    # Slashes first so both `\\?\` and `//?/` spellings are recognized.
+    raw = str(path).replace("/", "\\")
     if raw.startswith("\\\\?\\UNC\\"):
         raw = "\\\\" + raw[8:]
     elif raw.startswith("\\\\?\\"):
         raw = raw[4:]
-    resolved = os.path.abspath(raw).replace("\\", "/")
+    is_win_abs = raw.startswith("\\\\") or (
+        len(raw) >= 3 and raw[0].isalpha() and raw[1] == ":" and raw[2] == "\\"
+    )
+    if sys.platform != "win32" and is_win_abs:
+        resolved = ntpath.normpath(raw).replace("\\", "/")
+    else:
+        resolved = os.path.abspath(raw).replace("\\", "/")
     while "//" in resolved[2:]:
         resolved = resolved[:2] + resolved[2:].replace("//", "/")
     if len(resolved) >= 2 and resolved[1] == ":":
@@ -84,9 +91,17 @@ def walk_roots(
         if not os.path.exists(os_root):
             continue
 
-        for dirpath, dirnames, filenames in os.walk(os_root):
+        # Junctions/symlinked dirs are followed (common for SFX libraries split
+        # across drives); realpath dedup prevents ancestor-cycle loops.
+        seen_dirs: set[str] = set()
+        for dirpath, dirnames, filenames in os.walk(os_root, followlinks=True):
             dirnames.sort()
             filenames.sort()
+            real_dir = os.path.normcase(os.path.realpath(dirpath))
+            if real_dir in seen_dirs:
+                dirnames[:] = []
+                continue
+            seen_dirs.add(real_dir)
             for fname in filenames:
                 ext = os.path.splitext(fname)[1].lower()
                 if ext not in allowed_exts:

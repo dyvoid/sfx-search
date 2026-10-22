@@ -35,7 +35,7 @@ def compute_lufs_integrated(
         return None
     block_size = 0.400
     min_samples = int(sample_rate * block_size)
-    data = samples.astype(np.float64, copy=False)
+    data = samples.astype(np.float64, copy=False).reshape(-1, 1)
     if data.shape[0] < min_samples:
         rms = float(np.sqrt(np.mean(np.square(data))))
         if rms <= 1e-6:

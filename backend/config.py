@@ -111,7 +111,9 @@ class Config(BaseModel):
             except Exception:
                 payload = {}
         payload["roots"] = cleaned
-        sf.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp = sf.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(sf)
 
     def with_overrides(self, overrides: dict[str, Any]) -> Config:
         data = self.model_dump()
@@ -151,8 +153,11 @@ def load_config(config_path: str | Path | None = None) -> Config:
         with resolved.open("rb") as f:
             raw = tomllib.load(f)
         cfg = Config.model_validate(raw)
+        if not Path(cfg.paths.data_dir).is_absolute():
+            cfg.paths.data_dir = str((resolved.parent / cfg.paths.data_dir).resolve())
     else:
         cfg = Config()
+        cfg.paths.data_dir = str(Path(cfg.paths.data_dir).resolve())
 
     if cfg.settings_file.is_file():
         try:
