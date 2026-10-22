@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 from fastapi.testclient import TestClient
 from sfxsearch.api import create_app
 from sfxsearch.config import Config, LibraryConfig, PathsConfig
@@ -212,6 +213,10 @@ async def test_mcp_server_tools(tmp_path: Path) -> None:
     assert get_parsed["filename"] == "forest_wind_trees.wav"
 
 
+@pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="Real CLAP fp16 vs fp32 parity check requires CUDA GPU",
+)
 def test_real_clap_determinism_and_fp16_vs_fp32_agreement() -> None:
     sr = 48000
     t = np.arange(sr * 4, dtype=np.float32) / float(sr)

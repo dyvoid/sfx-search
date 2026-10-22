@@ -75,9 +75,9 @@ ai-assisted: <model>
 
 ### Web (`web/`) specifics
 - **Package manager:** `npm` only. Commit `package-lock.json`; do not mix package managers.
-- **Core stack:** TypeScript (strict), React, Vite, Tailwind CSS (v4), `wavesurfer.js`. Do not introduce another UI framework or styling system unprompted.
-- **Lint/format:** `eslint` + `prettier`.
-- **UX & accessibility constraints:** Keyboard-first auditioning (Up/Down arrows navigate results, Space plays/pauses, Enter opens detail panel), single active audio stream at a time, dark theme by default, instant playback at best-chunk offset via HTTP Range requests.
+- **Core stack:** TypeScript (strict), React, Vite, `dyvoided.2` CSS token/component design system (`web/src/design-system/`), `lucide-react`, `wavesurfer.js`. Do not introduce another UI framework or styling system unprompted.
+- **Build & verification:** `npm run build` (`tsc -b && vite build`) inside `web/`.
+- **UX & accessibility constraints:** Keyboard-first auditioning (`Up`/`Down` arrows navigate results, `Space` plays/pauses, `R` reveals file in Explorer, `F` toggles favorite, `Enter` toggles inspector panel, `/` focuses search), single active audio stream at a time, dark theme by default, instant playback at best-chunk offset via HTTP Range requests, infinite scroll with viewport-lazy `MiniWaveform` rendering.
 
 ---
 

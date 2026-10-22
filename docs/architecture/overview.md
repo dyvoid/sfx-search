@@ -43,8 +43,8 @@
   - `files`: file manifest, acoustic features, `search_text` (FTS-indexed), `file_vec`, `embedding_model`, and `status`.
   - `chunks`: `(file_id, chunk_idx, start_s, end_s, vec)` for temporal localization inside long files.
   - `user_data`: `(file_id, favorite, user_tags, note)`, isolated so re-indexing never clobbers user annotations.
-- **Search (`backend/search.py`):** Parses inline filters (`dur:`, `loop:`, exclusions, phrases), embeds query text (with an LRU cache), runs KNN over `chunks` (top 300, grouped by `file_id` retaining max similarity and best `start_s`) and BM25 over `files.search_text` (top 100) with pushed-down scalar filters, and merges results via Reciprocal Rank Fusion (`k = 60`). Also supports `audio_only`, `keyword_only`, and file/chunk/upload similarity search.
-- **HTTP API (`backend/api.py`) & Web UI (`web/`):** FastAPI app bound to `127.0.0.1:8765` serving search, similarity, metadata, waveform peaks, user annotations, Windows Explorer reveal, and HTTP Range audio streaming (with on-the-fly ffmpeg transcoding + disk cache for browser-incompatible formats). The React + TypeScript + Vite SPA uses `wavesurfer.js` for keyboard-driven auditioning starting at `best_offset_s`.
+- **Search (`backend/search.py`):** Parses inline filters (`dur:`, `loop:`, `fmt:`, `tag:`, `fav:`, exclusions, phrases), embeds query text (with an LRU cache), runs KNN over `chunks` (grouped by `file_id` retaining max similarity and best `start_s`) and BM25 over `files.search_text` with pushed-down scalar filters, and merges results via Reciprocal Rank Fusion (`k = 60`). Supports empty-query library browsing (`SfxStore.browse_file_ids`), `offset`/`limit` pagination with total counts (`search_page`), sort modes (`relevance`, `name_asc`, `name_desc`, `duration_asc`, `duration_desc`, `lufs_desc`, `lufs_asc`), `audio_only`, `keyword_only`, and file/chunk/upload similarity search.
+- **HTTP API (`backend/api.py`) & Web UI (`web/`):** FastAPI app bound to `127.0.0.1:8765` serving search, similarity, metadata, waveform peaks, user annotations, background library root indexing, native Windows folder picking, Windows Explorer reveal, and HTTP Range audio streaming (with on-the-fly ffmpeg transcoding + disk cache for browser-incompatible formats). The React + TypeScript + Vite SPA uses the `dyvoided.2` token/component system (`web/src/design-system/`), continuous mirror-envelope `MiniWaveform` canvases (lazy-loaded via `IntersectionObserver`), a Web Audio 16-band FFT spectrum analyzer, infinite scroll, and `wavesurfer.js` in the inspector drawer.
 - **MCP Server (`backend/mcp_server.py`):** Exposes `search_sounds`, `batch_search`, `find_similar`, `get_sound`, and `library_stats` over stdio and local HTTP directly against LanceDB without requiring the FastAPI server to run.
 - **Evaluation Harness (`backend/eval/`):** Runs benchmark query sets (`eval/queries.yaml`) with path/glob relevance judgments across config variants, outputting Recall@10, Recall@50, MRR, and nDCG@20 to `eval/runs/`.
 
@@ -71,7 +71,10 @@ sfx-search/
     api.py            FastAPI endpoints, Range streaming, transcode cache
     mcp_server.py     MCP server tools
     eval/             Evaluation runner and metrics
-  web/                React + TypeScript + Vite + Tailwind CSS v4 frontend
+  web/                React + TypeScript + Vite + dyvoided.2 design system frontend
+  .github/workflows/  GitHub Actions CI (backend + web checks on main & PRs)
+  start.bat           Windows one-step install, build, and launch script
+  start.sh            Shell one-step install, build, and launch script
   eval/               queries.example.yaml and eval/runs/ outputs
   config.example.toml Reference configuration
 ```
