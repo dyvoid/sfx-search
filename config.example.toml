@@ -1,0 +1,39 @@
+[library]
+roots = ["D:/SFX"]
+extensions = [".wav", ".flac", ".aif", ".aiff", ".mp3", ".ogg", ".opus", ".m4a", ".wma", ".aac"]
+
+[paths]
+data_dir = "./data"
+ffmpeg = "ffmpeg"
+ffprobe = "ffprobe"
+
+[embedding]
+model_id = "laion/larger_clap_general"
+precision = "fp16"        # fp16 | fp32
+window_s = 10.0
+hop_s = 5.0
+max_chunks_per_file = 120
+batch_size = 32
+
+[indexing]
+decode_workers = 6
+commit_every_files = 200
+
+[search]
+vector_candidates = 300
+keyword_candidates = 100
+rrf_k = 60
+default_k = 30
+
+[server]
+host = "127.0.0.1"
+port = 8765
+
+[variants.rrf_k20]
+search = { rrf_k = 20 }
+
+[variants.vec_heavy]
+search = { vector_weight = 2.0, keyword_weight = 0.5 }
+
+[variants.kw_heavy]
+search = { vector_weight = 0.5, keyword_weight = 2.0 }

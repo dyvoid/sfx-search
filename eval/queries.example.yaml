@@ -1,0 +1,158 @@
+- id: footsteps-snow
+  query: footsteps crunching in deep snow
+  relevant:
+    - "**/Footsteps/snow.wav"
+  notes: Crisp snow footsteps
+
+- id: footsteps-grass
+  query: walking on grass and dry leaves
+  relevant:
+    - "**/Footsteps/grass.wav"
+    - "**/Nature/bushes.wav"
+  notes: Soft foliage footsteps
+
+- id: footsteps-concrete
+  query: hard shoe footsteps on concrete pavement
+  relevant:
+    - "**/Footsteps/concrete.wav"
+  notes: Hard surface step
+
+- id: footsteps-dirt
+  query: walking on gravel dirt path
+  relevant:
+    - "**/Footsteps/dirt.wav"
+  notes: Dirt trail steps
+
+- id: impact-metal
+  query: heavy metallic clang impact
+  relevant:
+    - "**/Impacts/metal.wav"
+    - "**/Weapons/sword_*.wav"
+  notes: Resonant metal hit
+
+- id: impact-punch
+  query: body punch fist fight impact
+  relevant:
+    - "**/Impacts/punch.wav"
+    - "**/Impacts/kick.wav"
+  notes: Melee combat hit
+
+- id: music-guitar
+  query: acoustic guitar strumming chords
+  relevant:
+    - "**/Music/acoustic_guitar.wav"
+    - "**/Music/banjo.wav"
+  notes: Plucked acoustic strings
+
+- id: music-harp
+  query: magical harp strum glissando
+  relevant:
+    - "**/Asgards_Wrath_II/*Harp_Strum.wav"
+  notes: Harp chord
+
+- id: nature-rain
+  query: rain falling storm water drops
+  relevant:
+    - "**/Nature/rain.wav"
+    - "**/Sense_Of_Touch/RainUnderUmbrella.wav"
+  notes: Rainfall ambience
+
+- id: nature-water
+  query: splashing water rowing boat
+  relevant:
+    - "**/Nature/water.wav"
+    - "**/Nature/rowing.wav"
+  notes: Liquid water splash
+
+- id: object-paper
+  query: crumpling paper sheet rustle
+  relevant:
+    - "**/Objects/crumple_paper.wav"
+  notes: Paper handling foley
+
+- id: object-can-drop
+  query: aluminum tin can dropping on floor
+  relevant:
+    - "**/Objects/can_drop.wav"
+  notes: Metallic object drop
+
+- id: object-drawer
+  query: wooden drawer sliding open
+  relevant:
+    - "**/Objects/drawer_open.wav"
+    - "**/Objects/box_open.wav"
+  notes: Furniture drawer foley
+
+- id: object-servo
+  query: robotic mechanical servo motor whine
+  relevant:
+    - "**/Objects/servo.wav"
+    - "**/Objects/gear.wav"
+  notes: Small electric motor mechanism
+
+- id: weapon-laser
+  query: sci-fi laser blaster gun shot
+  relevant:
+    - "**/Weapons/laser_shoot.wav"
+  notes: Energy weapon zap
+
+- id: weapon-sword
+  query: metal sword blade scrape and clash
+  relevant:
+    - "**/Weapons/sword_scrape.wav"
+    - "**/Weapons/sword_hit.wav"
+  notes: Bladed weapon foley
+
+- id: weapon-shotgun
+  query: loud shotgun blast gunshot firing
+  relevant:
+    - "**/Population_One/Shotgun*_Firing_*.wav"
+    - "**/Population_One/Rifle*_Firing_*.wav"
+    - "**/Population_One/Assault*_Fire_*.wav"
+  notes: Firearm gunshot
+
+- id: weapon-shell-casing
+  query: brass bullet shell casing bouncing on ground
+  relevant:
+    - "**/Weapons/shell_casing.wav"
+  notes: Small brass clink
+
+- id: vehicle-car-engine
+  query: car engine starting and idling rumble
+  relevant:
+    - "**/Sound_FX/car_start.wav"
+    - "**/Sense_Of_Touch/CarEngine.wav"
+  notes: Combustion engine
+
+- id: vehicle-car-door
+  query: car door opening latch and slam
+  relevant:
+    - "**/Sound_FX/car_door_open.wav"
+    - "**/Objects/hatch_close.wav"
+  notes: Automotive door
+
+- id: touch-glass-ice
+  query: ice cubes clinking in glass cup
+  relevant:
+    - "**/Sense_Of_Touch/GlassClink.wav"
+    - "**/Sense_Of_Touch/IceGlass.wav"
+  notes: High-pitched glass clink
+
+- id: touch-phone-vibrate
+  query: smartphone vibrating buzzing on wooden table
+  relevant:
+    - "**/Sense_Of_Touch/PhoneVibrationOnWoodTable.wav"
+  notes: Buzzer vibration on wood
+
+- id: touch-drill
+  query: electric power tool drill spinning
+  relevant:
+    - "**/Sense_Of_Touch/Drill.wav"
+  notes: Power drill motor
+
+- id: ui-button-click
+  query: clean UI button click select interface sound
+  relevant:
+    - "**/Application_UX/ui_click.wav"
+    - "**/Application_UX/ui_select.wav"
+  notes: Short interface click
