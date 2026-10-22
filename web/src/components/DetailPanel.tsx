@@ -204,6 +204,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   };
 
   const rawTags = detail?.tags || hit.tags || {};
+  const clapPct =
+    hit.clap_score !== null
+      ? Math.min(100, Math.max(0, Math.round(hit.clap_score * 100)))
+      : 0;
+  const bm25Pct =
+    hit.bm25_score !== null
+      ? Math.min(100, Math.max(0, Math.round((hit.bm25_score / 15) * 100)))
+      : 0;
 
   return (
     <aside className="sfx-inspector">
@@ -248,14 +256,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
       <div className="ds-scroll-subtle" style={{ flex: 1 }}>
         {/* Waveform */}
         <div className="sfx-inspector-section">
-          <div
-            style={{
-              padding: "var(--space-3)",
-              background: "var(--surface-sunken)",
-              border: "var(--border-width) solid var(--border-subtle)",
-              borderRadius: "var(--radius-sm)",
-            }}
-          >
+          <div>
             <div ref={waveformContainerRef} />
             <div
               style={{
@@ -277,12 +278,12 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 className="ds-tnum"
                 style={{
                   fontFamily: "var(--font-mono)",
-                  fontSize: "var(--font-size-2xs)",
-                  color: "var(--text-tertiary)",
+                  fontSize: "var(--font-size-xs)",
+                  color: "var(--accent-1-400)",
                 }}
               >
                 {hit.best_offset_s.toFixed(1)}s – {hit.best_end_s.toFixed(1)}s
-                (chunk #{selectedChunkIdx})
+                · chunk #{selectedChunkIdx}
               </span>
             </div>
           </div>
@@ -330,53 +331,102 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           </div>
         </div>
 
-        {/* Acoustic Specs */}
+        {/* 6-Cell Studio Parameter Readout Grid */}
         <div className="sfx-inspector-section">
           <div
             className="ds-panel-title"
             style={{ marginBottom: "var(--space-3)" }}
           >
-            Parameters
+            Signal readout
           </div>
-          <div className="sfx-kv-row">
-            <span className="sfx-kv-key">Duration</span>
-            <span className="sfx-kv-val">{hit.duration_s.toFixed(2)} s</span>
+          <div className="sfx-param-grid">
+            <div className="sfx-param-cell">
+              <span className="sfx-param-label">Duration</span>
+              <span className="sfx-param-val">
+                {hit.duration_s.toFixed(2)}s
+              </span>
+            </div>
+            <div className="sfx-param-cell">
+              <span className="sfx-param-label">Loudness</span>
+              <span className="sfx-param-val">
+                {hit.lufs_integrated !== null
+                  ? `${hit.lufs_integrated.toFixed(1)} LUFS`
+                  : "—"}
+              </span>
+            </div>
+            <div className="sfx-param-cell">
+              <span className="sfx-param-label">Peak</span>
+              <span className="sfx-param-val">
+                {hit.peak_dbfs.toFixed(1)} dBFS
+              </span>
+            </div>
+            <div className="sfx-param-cell">
+              <span className="sfx-param-label">Sample rate</span>
+              <span className="sfx-param-val">
+                {(hit.sample_rate / 1000).toFixed(1)} kHz
+              </span>
+            </div>
+            <div className="sfx-param-cell">
+              <span className="sfx-param-label">Channels</span>
+              <span className="sfx-param-val">
+                {hit.channels === 1
+                  ? "Mono (1)"
+                  : hit.channels === 2
+                  ? "Stereo (2)"
+                  : `${hit.channels} ch`}
+              </span>
+            </div>
+            <div className="sfx-param-cell">
+              <span className="sfx-param-label">Loop score</span>
+              <span className="sfx-param-val">
+                {hit.loop_score !== null
+                  ? `${Math.round(hit.loop_score * 100)}%`
+                  : "—"}
+              </span>
+            </div>
           </div>
-          <div className="sfx-kv-row">
-            <span className="sfx-kv-key">Format</span>
-            <span className="sfx-kv-val">{hit.format}</span>
-          </div>
-          <div className="sfx-kv-row">
-            <span className="sfx-kv-key">Sample rate</span>
-            <span className="sfx-kv-val">
-              {hit.sample_rate} Hz · {hit.channels} ch
-            </span>
-          </div>
-          <div className="sfx-kv-row">
-            <span className="sfx-kv-key">Loudness</span>
-            <span className="sfx-kv-val">
-              {hit.lufs_integrated !== null
-                ? `${hit.lufs_integrated.toFixed(1)} LUFS`
-                : "—"}
-            </span>
-          </div>
-          <div className="sfx-kv-row">
-            <span className="sfx-kv-key">Peak</span>
-            <span className="sfx-kv-val">{hit.peak_dbfs.toFixed(1)} dBFS</span>
-          </div>
-          <div className="sfx-kv-row">
-            <span className="sfx-kv-key">Loop score</span>
-            <span className="sfx-kv-val">
-              {hit.loop_score !== null ? hit.loop_score.toFixed(2) : "—"}
-            </span>
-          </div>
-          <div className="sfx-kv-row">
-            <span className="sfx-kv-key">Scores (RRF / CLAP / BM25)</span>
-            <span className="sfx-kv-val" style={{ color: "var(--primary-400)" }}>
-              {hit.rrf_score.toFixed(4)} /{" "}
-              {hit.clap_score !== null ? hit.clap_score.toFixed(3) : "—"} /{" "}
-              {hit.bm25_score !== null ? hit.bm25_score.toFixed(1) : "—"}
-            </span>
+
+          {/* Score meters */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-2)",
+              marginTop: "var(--space-4)",
+            }}
+          >
+            <div className="ds-progress-row">
+              <div className="ds-progress-label">
+                <span>CLAP semantic similarity</span>
+                <span className="ds-progress-pct ds-tnum">
+                  {hit.clap_score !== null ? hit.clap_score.toFixed(3) : "—"}
+                </span>
+              </div>
+              <div className="ds-progress-track">
+                <div
+                  className="ds-progress-fill"
+                  style={{ width: `${clapPct}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="ds-progress-row">
+              <div className="ds-progress-label">
+                <span>BM25 lexical relevance · RRF {hit.rrf_score.toFixed(4)}</span>
+                <span className="ds-progress-pct ds-tnum">
+                  {hit.bm25_score !== null ? hit.bm25_score.toFixed(2) : "—"}
+                </span>
+              </div>
+              <div className="ds-progress-track">
+                <div
+                  className="ds-progress-fill"
+                  style={{
+                    width: `${bm25Pct}%`,
+                    background: "var(--accent-1-500)",
+                  }}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -458,7 +508,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             <label className="ds-input-label">Notes</label>
             <div
               className="ds-input-box"
-              style={{ height: "auto", padding: "var(--space-2) var(--space-3)" }}
+              style={{
+                height: "auto",
+                padding: "var(--space-2) var(--space-3)",
+              }}
             >
               <textarea
                 rows={2}

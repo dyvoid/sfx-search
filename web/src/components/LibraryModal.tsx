@@ -243,36 +243,38 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
 
           {/* Live Indexer Status */}
           {isRunning && indexing && (
-            <div className="ds-panel">
-              <div className="ds-panel-body ds-panel-body-sm">
-                <div className="ds-progress-row">
-                  <div className="ds-progress-label">
+            <div
+              style={{
+                padding: "var(--space-3) var(--space-4)",
+                borderTop: "var(--border-width) solid var(--border-subtle)",
+              }}
+            >
+              <div className="ds-progress-row">
+                <div className="ds-progress-label">
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      color: "var(--text-primary)",
+                    }}
+                  >
                     <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 8,
-                        color: "var(--text-primary)",
-                      }}
-                    >
-                      <span
-                        className="ds-spinner"
-                        style={{ width: 12, height: 12 }}
-                      />
-                      Scanning & embedding in background ({doneCount} /{" "}
-                      {totalCount || "?"} files)
-                    </span>
-                    <span className="ds-progress-pct ds-tnum">
-                      {indexing.files_per_min.toFixed(0)} files/min ·{" "}
-                      {pct}%
-                    </span>
-                  </div>
-                  <div className="ds-progress-track">
-                    <div
-                      className="ds-progress-fill"
-                      style={{ width: `${Math.max(4, pct)}%` }}
+                      className="ds-spinner"
+                      style={{ width: 12, height: 12 }}
                     />
-                  </div>
+                    Scanning & embedding in background ({doneCount} /{" "}
+                    {totalCount || "?"} files)
+                  </span>
+                  <span className="ds-progress-pct ds-tnum">
+                    {indexing.files_per_min.toFixed(0)} files/min · {pct}%
+                  </span>
+                </div>
+                <div className="ds-progress-track">
+                  <div
+                    className="ds-progress-fill"
+                    style={{ width: `${Math.max(4, pct)}%` }}
+                  />
                 </div>
               </div>
             </div>

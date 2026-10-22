@@ -6,10 +6,12 @@ import {
   FolderPlus,
   Heart,
   History,
+  PanelRight,
   Pause,
   Play,
   Repeat,
   RotateCcw,
+  Rows3,
   Search,
   Sparkles,
   Upload,
@@ -43,6 +45,7 @@ import {
 
 const LS_HISTORY_KEY = "sfxsearch_query_history_v1";
 const LS_FILTERS_KEY = "sfxsearch_last_filters_v1";
+const LS_DENSITY_KEY = "sfxsearch_density_v1";
 
 export const App: React.FC = () => {
   const [query, setQuery] = useState<string>("");
@@ -56,6 +59,13 @@ export const App: React.FC = () => {
     }
   });
   const [showFilters, setShowFilters] = useState<boolean>(false);
+  const [compactDensity, setCompactDensity] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(LS_DENSITY_KEY) === "compact";
+    } catch {
+      return false;
+    }
+  });
   const [history, setHistory] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(LS_HISTORY_KEY);
@@ -77,7 +87,7 @@ export const App: React.FC = () => {
   const [statusLabel, setStatusLabel] = useState<string>("");
 
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
-  const [detailOpen, setDetailOpen] = useState<boolean>(false);
+  const [detailOpen, setDetailOpen] = useState<boolean>(true);
 
   const [playingFileId, setPlayingFileId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -94,6 +104,19 @@ export const App: React.FC = () => {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
   const prevOkFilesRef = useRef<number>(0);
+
+  useEffect(() => {
+    if (compactDensity) {
+      document.documentElement.setAttribute("data-density", "compact");
+    } else {
+      document.documentElement.removeAttribute("data-density");
+    }
+    try {
+      localStorage.setItem(LS_DENSITY_KEY, compactDensity ? "compact" : "spacious");
+    } catch {
+      // ignore
+    }
+  }, [compactDensity]);
 
   const recordHistory = useCallback((q: string) => {
     const clean = q.trim();
@@ -169,7 +192,6 @@ export const App: React.FC = () => {
     fetchAvailableFilters().then(setAvailFilters).catch(() => {});
   }, []);
 
-  // Poll while background indexing is running (or when roots exist but 0 files indexed yet)
   useEffect(() => {
     const isRunning = indexing?.state === "running";
     if (!isRunning) {
@@ -430,6 +452,7 @@ export const App: React.FC = () => {
       ? Math.min(100, Math.round((doneFiles / totalToIndex) * 100))
       : 0;
   const selectedHit = results[selectedIndex] || null;
+  const playingHit = results.find((r) => r.file_id === playingFileId) || null;
 
   return (
     <div
@@ -470,9 +493,6 @@ export const App: React.FC = () => {
           <div className="ds-dialog" style={{ width: 440, textAlign: "center" }}>
             <div className="ds-dialog-body">
               <div className="ds-empty">
-                <div className="ds-empty-icon">
-                  <Upload size={20} />
-                </div>
                 <div className="ds-empty-title">Drop reference audio</div>
                 <div className="ds-empty-desc">
                   Release any WAV, FLAC, AIFF, MP3, OGG, or M4A file to search
@@ -497,7 +517,7 @@ export const App: React.FC = () => {
         onRescan={handleRescan}
       />
 
-      {/* Top Toolbar */}
+      {/* Top Transport & Search Header */}
       <header className="sfx-toolbar">
         <div className="sfx-toolbar-row">
           {/* Brand */}
@@ -507,19 +527,39 @@ export const App: React.FC = () => {
             </div>
             <div>
               <div className="sfx-brand-title">sfx-search</div>
-              <div className="sfx-brand-meta">
-                {stats && stats.ok_files > 0
-                  ? `${stats.ok_files.toLocaleString()} files · ${stats.total_duration_hours.toFixed(
-                      1
-                    )}h · ${stats.total_chunks.toLocaleString()} chunks`
-                  : roots.length > 0
-                  ? `${roots.length} folder${roots.length === 1 ? "" : "s"} configured`
-                  : "No library folders"}
-              </div>
+              <div className="sfx-brand-sub">CLAP · LanceDB</div>
             </div>
           </div>
 
-          {/* Search bar + mode tabs + filters */}
+          {/* Recessed Digital Transport Readout */}
+          <div className="sfx-readout" aria-label="Library and playback readout">
+            <div className="sfx-readout-cell">
+              <span className="sfx-readout-cap">Sounds</span>
+              <span className="sfx-readout-val accent">
+                {stats ? stats.ok_files.toLocaleString() : "0"}
+              </span>
+            </div>
+            <div className="sfx-readout-cell">
+              <span className="sfx-readout-cap">Chunks</span>
+              <span className="sfx-readout-val">
+                {stats ? stats.total_chunks.toLocaleString() : "0"}
+              </span>
+            </div>
+            <div className="sfx-readout-cell">
+              <span className="sfx-readout-cap">Playhead</span>
+              <span className="sfx-readout-val warm">
+                {isPlaying && playingHit
+                  ? `${currentTimeS.toFixed(1)}s / ${playingHit.duration_s.toFixed(
+                      1
+                    )}s`
+                  : selectedHit
+                  ? `@${selectedHit.best_offset_s.toFixed(1)}s`
+                  : "0.0s"}
+              </span>
+            </div>
+          </div>
+
+          {/* Search bar + mode selector + filters */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -552,8 +592,8 @@ export const App: React.FC = () => {
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={
                     hasIndexedFiles
-                      ? 'Search sounds ("slow wooden floor creak, large empty house") or dur:2-8 -voice'
-                      : "Search becomes available once your first sound file is indexed"
+                      ? 'Describe sound ("slow wooden floor creak, large empty house") or dur:2-8 -voice'
+                      : "Search unlocks once your first sound file is indexed"
                   }
                   className="ds-input"
                 />
@@ -577,7 +617,7 @@ export const App: React.FC = () => {
                     left: 0,
                     right: 0,
                     top: "calc(100% + 4px)",
-                    zIndex: 40,
+                    zIndex: 50,
                   }}
                 >
                   <div className="ds-menu-header">Recent queries</div>
@@ -670,6 +710,8 @@ export const App: React.FC = () => {
               Loop
             </button>
 
+            <div className="sfx-divider-v" />
+
             <label
               className={`ds-btn ds-btn-secondary ds-btn-sm ${
                 !hasIndexedFiles ? "disabled" : ""
@@ -678,6 +720,7 @@ export const App: React.FC = () => {
                 pointerEvents: hasIndexedFiles ? "auto" : "none",
                 opacity: hasIndexedFiles ? 1 : 0.5,
               }}
+              title="Upload or drop a reference audio file to find similar sounds"
             >
               <Upload size={14} />
               Match audio
@@ -698,10 +741,41 @@ export const App: React.FC = () => {
               type="button"
               onClick={() => setLibraryModalOpen(true)}
               className="ds-btn ds-btn-secondary ds-btn-sm"
+              title="Configure scanned library folders"
             >
               <FolderOpen size={14} />
-              Library ({roots.length})
+              Folders ({roots.length})
             </button>
+
+            <button
+              type="button"
+              onClick={() => setCompactDensity((prev) => !prev)}
+              className={`sfx-icon-btn ${compactDensity ? "fav-active" : ""}`}
+              style={{
+                color: compactDensity ? "var(--primary-400)" : undefined,
+              }}
+              title={
+                compactDensity
+                  ? "Switch to spacious density"
+                  : "Switch to compact density"
+              }
+            >
+              <Rows3 size={15} />
+            </button>
+
+            {hasIndexedFiles && (
+              <button
+                type="button"
+                onClick={() => setDetailOpen((prev) => !prev)}
+                className="sfx-icon-btn"
+                style={{
+                  color: detailOpen ? "var(--primary-400)" : undefined,
+                }}
+                title={detailOpen ? "Hide inspector" : "Show inspector"}
+              >
+                <PanelRight size={15} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -931,23 +1005,19 @@ export const App: React.FC = () => {
       {/* Main Workspace */}
       <div className="sfx-workspace">
         <main className="sfx-main">
-          {/* Status bar */}
-          <div className="sfx-statusbar">
-            <span className="ds-tnum">
-              {statusLabel ||
-                (hasIndexedFiles
-                  ? `${results.length} result${results.length === 1 ? "" : "s"}`
-                  : roots.length === 0
-                  ? "Awaiting library folder selection"
-                  : "Indexing initial audio files...")}
-            </span>
-            <span>
-              <kbd className="sfx-kbd">↑</kbd> <kbd className="sfx-kbd">↓</kbd>{" "}
-              navigate · <kbd className="sfx-kbd">Space</kbd> play/pause ·{" "}
-              <kbd className="sfx-kbd">Enter</kbd> inspector ·{" "}
-              <kbd className="sfx-kbd">/</kbd> search
-            </span>
-          </div>
+          {/* Sticky Column Header when files exist */}
+          {hasIndexedFiles && (
+            <div className="sfx-list-head">
+              <span />
+              <span>Sound / Folder</span>
+              <span>Waveform &amp; Best Match Window</span>
+              <span className="col-specs" style={{ textAlign: "right" }}>
+                Specs
+              </span>
+              <span style={{ textAlign: "right" }}>Match</span>
+              <span style={{ textAlign: "right" }}>Actions</span>
+            </div>
+          )}
 
           {/* Content: Onboarding Empty State vs Results List */}
           <div className="sfx-results-list ds-scroll">
@@ -961,11 +1031,17 @@ export const App: React.FC = () => {
                   padding: "var(--space-8)",
                 }}
               >
-                <div
-                  className="ds-panel"
-                  style={{ width: 520, maxWidth: "100%" }}
-                >
-                  <div className="ds-panel-head">
+                <div style={{ width: 540, maxWidth: "100%" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      paddingBottom: "var(--space-3)",
+                      marginBottom: "var(--space-4)",
+                      borderBottom: "var(--border-width) solid var(--border-subtle)",
+                    }}
+                  >
                     <span className="ds-panel-title">Library setup</span>
                     {isIndexing && (
                       <span className="ds-badge ds-badge-accent">
@@ -973,24 +1049,34 @@ export const App: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <div className="ds-panel-body">
-                    <div
-                      className="ds-empty"
-                      style={{ padding: "var(--space-4) 0 var(--space-5)" }}
-                    >
-                      <div className="ds-empty-icon">
+                  <div>
+                    <div style={{ marginBottom: "var(--space-5)" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "var(--space-2)",
+                          marginBottom: "var(--space-2)",
+                        }}
+                      >
                         {isIndexing ? (
                           <span className="ds-spinner" />
                         ) : (
-                          <FolderPlus size={20} />
+                          <FolderPlus
+                            size={18}
+                            style={{ color: "var(--primary-400)" }}
+                          />
                         )}
+                        <div className="ds-empty-title">
+                          {roots.length === 0
+                            ? "Add your sound-effects folders"
+                            : "Indexing your first audio files"}
+                        </div>
                       </div>
-                      <div className="ds-empty-title">
-                        {roots.length === 0
-                          ? "Add your sound-effects folders"
-                          : "Indexing your first audio files"}
-                      </div>
-                      <div className="ds-empty-desc">
+                      <div
+                        className="ds-empty-desc"
+                        style={{ maxWidth: "none", textAlign: "left" }}
+                      >
                         {roots.length === 0
                           ? "Define one or more folders containing your audio library. Files are decoded and embedded in the background, and search becomes available as soon as the first sound is indexed."
                           : `Scanning ${roots.join(
@@ -1074,9 +1160,6 @@ export const App: React.FC = () => {
               </div>
             ) : results.length === 0 && !loading ? (
               <div className="ds-empty" style={{ marginTop: "var(--space-10)" }}>
-                <div className="ds-empty-icon">
-                  <Search size={20} />
-                </div>
                 <div className="ds-empty-title">No matching sounds</div>
                 <div className="ds-empty-desc">
                   Adjust your query, switch search mode, or clear active
@@ -1090,6 +1173,10 @@ export const App: React.FC = () => {
                   playingFileId === hit.file_id && isPlaying;
                 const rowTime =
                   playingFileId === hit.file_id ? currentTimeS : null;
+                const scoreBarPct =
+                  hit.clap_score !== null
+                    ? Math.min(100, Math.max(8, Math.round(hit.clap_score * 100)))
+                    : Math.min(100, Math.max(12, Math.round(hit.rrf_score * 1800)));
 
                 return (
                   <div
@@ -1128,14 +1215,18 @@ export const App: React.FC = () => {
 
                     <div className="sfx-row-info">
                       <div className="sfx-row-title-line">
-                        <span className="sfx-row-filename">{hit.filename}</span>
+                        <span className="sfx-row-filename" title={hit.filename}>
+                          {hit.filename}
+                        </span>
                         {hit.user_tags.map((t) => (
                           <span key={t} className="ds-badge ds-badge-accent">
                             {t}
                           </span>
                         ))}
                       </div>
-                      <div className="sfx-row-folder">{hit.folder}</div>
+                      <div className="sfx-row-folder" title={hit.folder}>
+                        {hit.folder}
+                      </div>
                     </div>
 
                     <MiniWaveform
@@ -1151,46 +1242,54 @@ export const App: React.FC = () => {
                       }}
                     />
 
-                    <div className="sfx-row-metrics">
-                      <div style={{ textAlign: "right" }}>
-                        <div
-                          style={{
-                            fontSize: "var(--font-size-xs)",
-                            color: "var(--text-primary)",
-                          }}
-                        >
-                          {hit.duration_s.toFixed(2)}s
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "var(--font-size-2xs)",
-                            color: "var(--text-tertiary)",
-                          }}
-                        >
-                          {hit.format.split("/")[0].toUpperCase()} ·{" "}
-                          {hit.best_offset_s > 0
-                            ? `@${hit.best_offset_s.toFixed(1)}s`
-                            : "0.0s"}
-                        </div>
-                      </div>
+                    <div className="sfx-row-specs">
+                      <span className="sfx-row-dur">
+                        {hit.duration_s.toFixed(2)}s
+                      </span>
+                      <span className="sfx-row-subspec">
+                        {hit.format.split("/")[0].toUpperCase()} ·{" "}
+                        {(hit.sample_rate / 1000).toFixed(0)}k ·{" "}
+                        {hit.lufs_integrated !== null
+                          ? `${hit.lufs_integrated.toFixed(0)} LUFS`
+                          : `${hit.channels}ch`}
+                      </span>
+                    </div>
 
+                    <div
+                      className="sfx-row-score"
+                      title={`RRF: ${hit.rrf_score.toFixed(5)} | CLAP: ${
+                        hit.clap_score !== null
+                          ? hit.clap_score.toFixed(3)
+                          : "—"
+                      } | BM25: ${
+                        hit.bm25_score !== null
+                          ? hit.bm25_score.toFixed(2)
+                          : "—"
+                      }`}
+                    >
                       <span
-                        className="ds-badge ds-badge-neutral ds-tnum"
-                        title={`RRF: ${hit.rrf_score.toFixed(5)} | CLAP: ${
-                          hit.clap_score !== null
-                            ? hit.clap_score.toFixed(3)
-                            : "—"
-                        } | BM25: ${
-                          hit.bm25_score !== null
-                            ? hit.bm25_score.toFixed(2)
-                            : "—"
-                        }`}
+                        style={{
+                          fontSize: "var(--font-size-xs)",
+                          fontWeight: 500,
+                          color:
+                            hit.clap_score !== null && hit.clap_score > 0.25
+                              ? "var(--primary-400)"
+                              : "var(--text-secondary)",
+                        }}
                       >
                         {hit.clap_score !== null
                           ? `${(hit.clap_score * 100).toFixed(0)}%`
                           : hit.rrf_score.toFixed(3)}
                       </span>
+                      <div className="sfx-score-bar-track">
+                        <div
+                          className="sfx-score-bar-fill"
+                          style={{ width: `${scoreBarPct}%` }}
+                        />
+                      </div>
+                    </div>
 
+                    <div className="sfx-row-actions">
                       <button
                         type="button"
                         onClick={(e) => handleToggleFavoriteRow(e, hit)}
@@ -1222,9 +1321,33 @@ export const App: React.FC = () => {
               })
             )}
           </div>
+
+          {/* Bottom Footer Status Bar */}
+          <footer className="sfx-statusbar">
+            <span className="ds-tnum">
+              {statusLabel ||
+                (hasIndexedFiles
+                  ? `${results.length} result${
+                      results.length === 1 ? "" : "s"
+                    } · ${
+                      stats
+                        ? `${stats.total_duration_hours.toFixed(2)}h total indexed`
+                        : ""
+                    }`
+                  : roots.length === 0
+                  ? "No library folders configured"
+                  : "Indexing initial audio files...")}
+            </span>
+            <span>
+              <kbd className="sfx-kbd">↑</kbd> <kbd className="sfx-kbd">↓</kbd>{" "}
+              navigate · <kbd className="sfx-kbd">Space</kbd> play/pause ·{" "}
+              <kbd className="sfx-kbd">Enter</kbd> inspector ·{" "}
+              <kbd className="sfx-kbd">/</kbd> search
+            </span>
+          </footer>
         </main>
 
-        {/* Inspector Drawer */}
+        {/* Right Inspector Drawer */}
         {detailOpen && selectedHit && (
           <DetailPanel
             hit={selectedHit}

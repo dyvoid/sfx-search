@@ -8,7 +8,7 @@
      (--text-* below are kept as aliases for existing usage; prefer
      --font-size-* — --text-primary/secondary/etc are COLORS, and the
      shared prefix invites mistakes.) */
-  --font-size-2xs: 11px;
+  --font-size-2xs: 12px;
   --font-size-xs: 12px;
   --font-size-sm: 13px;
   --font-size-base: 14px;
