@@ -1,0 +1,15 @@
+/* dyvoided.2 — Design System entry point.
+   Import this file in any consuming app. It pulls in every token layer
+   in dependency order: colors (seeds + ramps + surfaces), typography
+   (fonts + scale + features), spacing (scale + control heights + density),
+   effects (radii + shadows + focus ring), motion (easing + durations),
+   interaction (hover/press/focus-visible + reduced-motion), scrollbar
+   (standard + webkit + utilities). */
+@import 'tokens/colors.css';
+@import 'tokens/typography.css';
+@import 'tokens/spacing.css';
+@import 'tokens/effects.css';
+@import 'tokens/motion.css';
+@import 'tokens/interaction.css';
+@import 'tokens/scrollbar.css';
+@import 'components.css';

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tomllib
 from pathlib import Path
@@ -24,7 +25,7 @@ DEFAULT_EXTENSIONS: list[str] = [
 
 
 class LibraryConfig(BaseModel):
-    roots: list[str] = Field(default_factory=lambda: ["D:/SFX"])
+    roots: list[str] = Field(default_factory=list)
     extensions: list[str] = Field(default_factory=lambda: list(DEFAULT_EXTENSIONS))
 
 
@@ -45,7 +46,7 @@ class EmbeddingConfig(BaseModel):
 
 class IndexingConfig(BaseModel):
     decode_workers: int = Field(default_factory=lambda: max(1, (os.cpu_count() or 4) - 2))
-    commit_every_files: int = 200
+    commit_every_files: int = 50
 
 
 class SearchConfig(BaseModel):
@@ -82,6 +83,35 @@ class Config(BaseModel):
     @property
     def transcode_dir(self) -> Path:
         return Path(self.paths.data_dir) / "transcode_cache"
+
+    @property
+    def settings_file(self) -> Path:
+        return Path(self.paths.data_dir) / "settings.json"
+
+    def save_library_roots(self, roots: list[str]) -> None:
+        from .scan import normalize_path
+
+        cleaned: list[str] = []
+        seen: set[str] = set()
+        for r in roots:
+            if not r or not str(r).strip():
+                continue
+            norm = normalize_path(r)
+            low = norm.lower()
+            if low not in seen:
+                seen.add(low)
+                cleaned.append(norm)
+        self.library.roots = cleaned
+        sf = self.settings_file
+        sf.parent.mkdir(parents=True, exist_ok=True)
+        payload: dict[str, Any] = {}
+        if sf.is_file():
+            try:
+                payload = json.loads(sf.read_text(encoding="utf-8"))
+            except Exception:
+                payload = {}
+        payload["roots"] = cleaned
+        sf.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def with_overrides(self, overrides: dict[str, Any]) -> Config:
         data = self.model_dump()
@@ -120,6 +150,16 @@ def load_config(config_path: str | Path | None = None) -> Config:
     if resolved is not None and resolved.is_file():
         with resolved.open("rb") as f:
             raw = tomllib.load(f)
-        return Config.model_validate(raw)
+        cfg = Config.model_validate(raw)
+    else:
+        cfg = Config()
 
-    return Config()
+    if cfg.settings_file.is_file():
+        try:
+            saved = json.loads(cfg.settings_file.read_text(encoding="utf-8"))
+            if isinstance(saved.get("roots"), list):
+                cfg.library.roots = [str(r) for r in saved["roots"] if str(r).strip()]
+        except Exception:
+            pass
+
+    return cfg

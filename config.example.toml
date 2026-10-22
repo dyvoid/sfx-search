@@ -1,5 +1,5 @@
 [library]
-roots = ["D:/SFX"]
+roots = []
 extensions = [".wav", ".flac", ".aif", ".aiff", ".mp3", ".ogg", ".opus", ".m4a", ".wma", ".aac"]
 
 [paths]

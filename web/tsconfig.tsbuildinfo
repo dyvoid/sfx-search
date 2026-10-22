@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/components/detailpanel.tsx","./src/components/miniwaveform.tsx"],"version":"5.6.3"}
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/components/detailpanel.tsx","./src/components/librarymodal.tsx","./src/components/miniwaveform.tsx"],"version":"5.6.3"}

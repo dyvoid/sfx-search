@@ -5,9 +5,9 @@ import {
   Copy,
   FolderOpen,
   Heart,
+  Pause,
   Play,
   Sparkles,
-  Tag,
   X,
 } from "lucide-react";
 import {
@@ -29,6 +29,13 @@ interface DetailPanelProps {
     note: string
   ) => void;
   onStopGlobalAudio: () => void;
+}
+
+function readToken(varName: string, fallback: string): string {
+  const val = getComputedStyle(document.documentElement)
+    .getPropertyValue(varName)
+    .trim();
+  return val || fallback;
 }
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({
@@ -69,15 +76,23 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
       return;
     }
 
+    const waveColor = readToken("--gray-500", "oklch(52% 0.015 260)");
+    const progressColor = readToken("--primary", "oklch(58% 0.17 275)");
+    const cursorColor = readToken("--accent-2-400", "oklch(78% 0.08 190)");
+    const regionColor = readToken(
+      "--accent-1-muted-bg",
+      "oklch(72% 0.15 55 / 0.22)"
+    );
+
     const regions = RegionsPlugin.create();
     const ws = WaveSurfer.create({
       container,
-      waveColor: "#71717a",
-      progressColor: "#f59e0b",
-      cursorColor: "#38bdf8",
+      waveColor,
+      progressColor,
+      cursorColor,
       barWidth: 2,
       barGap: 1,
-      height: 96,
+      height: 88,
       normalize: true,
       url: `/api/audio/${encodeURIComponent(hit.file_id)}`,
       plugins: [regions],
@@ -86,11 +101,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     ws.on("ready", () => {
       const dur = ws.getDuration() || hit.duration_s || 10;
       const start = Math.min(dur, Math.max(0, hit.best_offset_s));
-      const end = Math.min(dur, Math.max(start + 0.5, hit.best_end_s || start + 10));
+      const end = Math.min(
+        dur,
+        Math.max(start + 0.5, hit.best_end_s || start + 10)
+      );
       regions.addRegion({
         start,
         end,
-        color: "rgba(245, 158, 11, 0.22)",
+        color: regionColor,
         drag: true,
         resize: true,
       });
@@ -188,147 +206,225 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const rawTags = detail?.tags || hit.tags || {};
 
   return (
-    <aside className="flex h-full w-[420px] shrink-0 flex-col border-l border-zinc-800 bg-zinc-900/95 text-sm">
-      <div className="flex items-start justify-between border-b border-zinc-800 p-4">
-        <div className="min-w-0 pr-2">
-          <h2 className="truncate font-semibold text-zinc-100" title={hit.filename}>
+    <aside className="sfx-inspector">
+      <div className="ds-panel-head">
+        <div style={{ minWidth: 0, paddingRight: "var(--space-2)" }}>
+          <div
+            style={{
+              fontSize: "var(--font-size-base)",
+              fontWeight: 600,
+              color: "var(--text-primary)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={hit.filename}
+          >
             {hit.filename}
-          </h2>
-          <p className="truncate text-xs text-zinc-400" title={hit.path}>
+          </div>
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "var(--font-size-2xs)",
+              color: "var(--text-tertiary)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+            title={hit.path}
+          >
             {hit.path}
-          </p>
+          </div>
         </div>
         <button
           onClick={onClose}
-          className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-          title="Close detail panel"
+          className="sfx-icon-btn"
+          aria-label="Close inspector"
         >
-          <X className="h-4 w-4" />
+          <X size={14} />
         </button>
       </div>
 
-      <div className="flex-1 space-y-5 overflow-y-auto p-4">
+      <div className="ds-scroll-subtle" style={{ flex: 1 }}>
         {/* Waveform */}
-        <div className="space-y-2 rounded-lg border border-zinc-800 bg-zinc-950 p-3">
-          <div ref={waveformContainerRef} className="w-full" />
-          <div className="flex items-center justify-between pt-1 text-xs text-zinc-400">
-            <button
-              onClick={() => wsRef.current?.playPause()}
-              className="flex items-center gap-1.5 rounded bg-amber-500 px-2.5 py-1 font-medium text-zinc-950 hover:bg-amber-400"
+        <div className="sfx-inspector-section">
+          <div
+            style={{
+              padding: "var(--space-3)",
+              background: "var(--surface-sunken)",
+              border: "var(--border-width) solid var(--border-subtle)",
+              borderRadius: "var(--radius-sm)",
+            }}
+          >
+            <div ref={waveformContainerRef} />
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginTop: "var(--space-3)",
+              }}
             >
-              <Play className="h-3.5 w-3.5 fill-current" />
-              {wsPlaying ? "Pause" : "Play Detail"}
+              <button
+                type="button"
+                onClick={() => wsRef.current?.playPause()}
+                className="ds-btn ds-btn-primary ds-btn-sm"
+              >
+                {wsPlaying ? <Pause size={14} /> : <Play size={14} />}
+                {wsPlaying ? "Pause" : "Audition"}
+              </button>
+              <span
+                className="ds-tnum"
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "var(--font-size-2xs)",
+                  color: "var(--text-tertiary)",
+                }}
+              >
+                {hit.best_offset_s.toFixed(1)}s – {hit.best_end_s.toFixed(1)}s
+                (chunk #{selectedChunkIdx})
+              </span>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: "var(--space-2)",
+              marginTop: "var(--space-3)",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => onFindSimilarFile(hit.file_id)}
+              className="ds-btn ds-btn-secondary ds-btn-sm"
+            >
+              <Sparkles size={14} />
+              Similar file
             </button>
-            <span>
-              Best window: {hit.best_offset_s.toFixed(1)}s –{" "}
-              {hit.best_end_s.toFixed(1)}s (chunk #{selectedChunkIdx})
-            </span>
+            <button
+              type="button"
+              onClick={() => onFindSimilarChunk(hit.file_id, selectedChunkIdx)}
+              className="ds-btn ds-btn-secondary ds-btn-sm"
+            >
+              <Sparkles size={14} />
+              Similar chunk #{selectedChunkIdx}
+            </button>
+            <button
+              type="button"
+              onClick={() => revealInExplorer(hit.file_id)}
+              className="ds-btn ds-btn-ghost ds-btn-sm"
+            >
+              <FolderOpen size={14} />
+              Reveal file
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyPath}
+              className="ds-btn ds-btn-ghost ds-btn-sm"
+            >
+              <Copy size={14} />
+              {copied ? "Copied" : "Copy path"}
+            </button>
           </div>
         </div>
 
-        {/* Actions */}
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={() => onFindSimilarFile(hit.file_id)}
-            className="flex items-center justify-center gap-1.5 rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-100 hover:bg-zinc-700"
+        {/* Acoustic Specs */}
+        <div className="sfx-inspector-section">
+          <div
+            className="ds-panel-title"
+            style={{ marginBottom: "var(--space-3)" }}
           >
-            <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-            Similar (Whole File)
-          </button>
-          <button
-            onClick={() => onFindSimilarChunk(hit.file_id, selectedChunkIdx)}
-            className="flex items-center justify-center gap-1.5 rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-100 hover:bg-zinc-700"
-          >
-            <Sparkles className="h-3.5 w-3.5 text-sky-400" />
-            Similar (Chunk #{selectedChunkIdx})
-          </button>
-          <button
-            onClick={() => revealInExplorer(hit.file_id)}
-            className="flex items-center justify-center gap-1.5 rounded border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800"
-          >
-            <FolderOpen className="h-3.5 w-3.5" />
-            Reveal in Folder
-          </button>
-          <button
-            onClick={handleCopyPath}
-            className="flex items-center justify-center gap-1.5 rounded border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800"
-          >
-            <Copy className="h-3.5 w-3.5" />
-            {copied ? "Copied!" : "Copy Path"}
-          </button>
-        </div>
-
-        {/* Acoustic & File Specs */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            Audio Properties & Scores
-          </h3>
-          <div className="grid grid-cols-2 gap-y-1.5 text-xs">
-            <span className="text-zinc-400">Duration:</span>
-            <span className="font-mono text-zinc-200">
-              {hit.duration_s.toFixed(2)} s
+            Parameters
+          </div>
+          <div className="sfx-kv-row">
+            <span className="sfx-kv-key">Duration</span>
+            <span className="sfx-kv-val">{hit.duration_s.toFixed(2)} s</span>
+          </div>
+          <div className="sfx-kv-row">
+            <span className="sfx-kv-key">Format</span>
+            <span className="sfx-kv-val">{hit.format}</span>
+          </div>
+          <div className="sfx-kv-row">
+            <span className="sfx-kv-key">Sample rate</span>
+            <span className="sfx-kv-val">
+              {hit.sample_rate} Hz · {hit.channels} ch
             </span>
-            <span className="text-zinc-400">Format:</span>
-            <span className="font-mono text-zinc-200">{hit.format}</span>
-            <span className="text-zinc-400">Sample Rate / Ch:</span>
-            <span className="font-mono text-zinc-200">
-              {hit.sample_rate} Hz / {hit.channels} ch
-            </span>
-            <span className="text-zinc-400">Loudness (LUFS):</span>
-            <span className="font-mono text-zinc-200">
+          </div>
+          <div className="sfx-kv-row">
+            <span className="sfx-kv-key">Loudness</span>
+            <span className="sfx-kv-val">
               {hit.lufs_integrated !== null
                 ? `${hit.lufs_integrated.toFixed(1)} LUFS`
-                : "N/A"}
+                : "—"}
             </span>
-            <span className="text-zinc-400">Peak:</span>
-            <span className="font-mono text-zinc-200">
-              {hit.peak_dbfs.toFixed(1)} dBFS
+          </div>
+          <div className="sfx-kv-row">
+            <span className="sfx-kv-key">Peak</span>
+            <span className="sfx-kv-val">{hit.peak_dbfs.toFixed(1)} dBFS</span>
+          </div>
+          <div className="sfx-kv-row">
+            <span className="sfx-kv-key">Loop score</span>
+            <span className="sfx-kv-val">
+              {hit.loop_score !== null ? hit.loop_score.toFixed(2) : "—"}
             </span>
-            <span className="text-zinc-400">Loop Score:</span>
-            <span className="font-mono text-zinc-200">
-              {hit.loop_score !== null ? hit.loop_score.toFixed(2) : "N/A"}
-            </span>
-            <span className="text-zinc-400">RRF / CLAP / BM25:</span>
-            <span className="font-mono text-amber-400">
+          </div>
+          <div className="sfx-kv-row">
+            <span className="sfx-kv-key">Scores (RRF / CLAP / BM25)</span>
+            <span className="sfx-kv-val" style={{ color: "var(--primary-400)" }}>
               {hit.rrf_score.toFixed(4)} /{" "}
-              {hit.clap_score !== null ? hit.clap_score.toFixed(3) : "-"} /{" "}
-              {hit.bm25_score !== null ? hit.bm25_score.toFixed(2) : "-"}
+              {hit.clap_score !== null ? hit.clap_score.toFixed(3) : "—"} /{" "}
+              {hit.bm25_score !== null ? hit.bm25_score.toFixed(1) : "—"}
             </span>
           </div>
         </div>
 
-        {/* User Curation */}
-        <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-              User Curation
-            </h3>
+        {/* Curation */}
+        <div className="sfx-inspector-section">
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: "var(--space-3)",
+            }}
+          >
+            <span className="ds-panel-title">Curation</span>
             <button
+              type="button"
               onClick={handleToggleFavorite}
-              className={`flex items-center gap-1 rounded px-2 py-1 text-xs ${
-                hit.favorite
-                  ? "bg-rose-500/20 text-rose-400"
-                  : "bg-zinc-800 text-zinc-400 hover:text-zinc-200"
+              className={`ds-btn ds-btn-sm ${
+                hit.favorite ? "ds-btn-danger" : "ds-btn-secondary"
               }`}
             >
-              <Heart
-                className={`h-3.5 w-3.5 ${hit.favorite ? "fill-current" : ""}`}
-              />
+              <Heart size={14} />
               {hit.favorite ? "Favorited" : "Favorite"}
             </button>
           </div>
 
-          <div className="flex flex-wrap gap-1.5">
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "var(--space-1)",
+              marginBottom: "var(--space-3)",
+            }}
+          >
             {hit.user_tags.map((t) => (
-              <span
-                key={t}
-                className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-0.5 text-xs text-amber-300"
-              >
-                <Tag className="h-3 w-3" />
+              <span key={t} className="ds-badge ds-badge-accent">
                 {t}
                 <button
+                  type="button"
                   onClick={() => handleRemoveTag(t)}
-                  className="ml-0.5 text-amber-400/70 hover:text-amber-200"
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "inherit",
+                    marginLeft: 6,
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
                 >
                   ×
                 </button>
@@ -336,54 +432,71 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             ))}
           </div>
 
-          <form onSubmit={handleAddTag} className="flex gap-1.5">
-            <input
-              type="text"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              placeholder="Add user tag..."
-              className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
-            />
-            <button
-              type="submit"
-              className="rounded bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-200 hover:bg-zinc-700"
-            >
+          <form
+            onSubmit={handleAddTag}
+            style={{
+              display: "flex",
+              gap: "var(--space-2)",
+              marginBottom: "var(--space-3)",
+            }}
+          >
+            <div className="ds-input-box" style={{ flex: 1 }}>
+              <input
+                type="text"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                placeholder="Add tag"
+                className="ds-input"
+              />
+            </div>
+            <button type="submit" className="ds-btn ds-btn-secondary">
               Add
             </button>
           </form>
 
-          <div className="space-y-1.5">
-            <textarea
-              rows={2}
-              value={noteInput}
-              onChange={(e) => setNoteInput(e.target.value)}
-              onBlur={handleSaveNote}
-              placeholder="Add production notes..."
-              className="w-full rounded border border-zinc-700 bg-zinc-900 p-2 text-xs text-zinc-100 focus:border-amber-500 focus:outline-none"
-            />
+          <div className="ds-input-field">
+            <label className="ds-input-label">Notes</label>
+            <div
+              className="ds-input-box"
+              style={{ height: "auto", padding: "var(--space-2) var(--space-3)" }}
+            >
+              <textarea
+                rows={2}
+                value={noteInput}
+                onChange={(e) => setNoteInput(e.target.value)}
+                onBlur={handleSaveNote}
+                placeholder="Add production note"
+                className="ds-input"
+                style={{ resize: "vertical" }}
+              />
+            </div>
           </div>
         </div>
 
-        {/* Embedded Metadata Tags */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-400">
-            Embedded Tags (BWF / iXML / Container)
-          </h3>
+        {/* Embedded Tags */}
+        <div className="sfx-inspector-section">
+          <div
+            className="ds-panel-title"
+            style={{ marginBottom: "var(--space-3)" }}
+          >
+            Embedded metadata
+          </div>
           {Object.keys(rawTags).length === 0 ? (
-            <p className="text-xs text-zinc-500">No embedded tags extracted.</p>
-          ) : (
-            <div className="space-y-1 text-xs">
-              {Object.entries(rawTags).map(([k, v]) => (
-                <div key={k} className="grid grid-cols-3 gap-2 border-b border-zinc-900 py-1">
-                  <span className="truncate font-mono text-zinc-400" title={k}>
-                    {k}
-                  </span>
-                  <span className="col-span-2 break-words text-zinc-200">
-                    {String(v)}
-                  </span>
-                </div>
-              ))}
+            <div
+              style={{
+                fontSize: "var(--font-size-xs)",
+                color: "var(--text-tertiary)",
+              }}
+            >
+              No embedded container or BWF/iXML tags.
             </div>
+          ) : (
+            Object.entries(rawTags).map(([k, v]) => (
+              <div key={k} className="sfx-kv-row">
+                <span className="sfx-kv-key">{k}</span>
+                <span className="sfx-kv-val">{String(v)}</span>
+              </div>
+            ))
           )}
         </div>
       </div>

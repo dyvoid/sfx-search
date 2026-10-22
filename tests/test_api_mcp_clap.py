@@ -120,6 +120,26 @@ def test_fastapi_endpoints_range_and_transcode(tmp_path: Path) -> None:
     assert r_up.status_code == 200
     assert r_up.json()["count"] == 2
 
+    # 8. Library root management & background indexing endpoints
+    r_lib = client.get("/api/library")
+    assert r_lib.status_code == 200
+    assert len(r_lib.json()["roots"]) == 1
+
+    extra_root = tmp_path / "extra_sfx"
+    write_sine_wav(extra_root / "UI" / "button_pop.wav", freq_hz=500.0, duration_s=0.4)
+    r_add = client.post("/api/library/roots", json={"path": str(extra_root)})
+    assert r_add.status_code == 200
+    assert len(r_add.json()["roots"]) == 2
+    assert cfg.settings_file.is_file()
+
+    r_rem = client.request(
+        "DELETE",
+        "/api/library/roots",
+        json={"path": str(extra_root), "remove_indexed_files": True},
+    )
+    assert r_rem.status_code == 200
+    assert len(r_rem.json()["roots"]) == 1
+
 
 @pytest.mark.asyncio
 async def test_mcp_server_tools(tmp_path: Path) -> None:

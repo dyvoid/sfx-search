@@ -230,6 +230,7 @@ def run_indexer(
     pending_chunks: list[ChunkRecord] = []
     zero_vec = [0.0] * embedder.embedding_dim
     commit_every = max(1, config.indexing.commit_every_files)
+    committed_first_ok = False
 
     try:
         while True:
@@ -335,20 +336,23 @@ def run_indexer(
             )
             stats.gpu_memory_mb = _get_gpu_memory_mb()
 
-            if len(pending_files) >= commit_every:
-                store.upsert_batch(pending_files, pending_chunks, rebuild_fts=False)
+            should_commit_first = not committed_first_ok and stats.indexed_ok >= 1
+            if should_commit_first or len(pending_files) >= commit_every:
+                store.upsert_batch(pending_files, pending_chunks, rebuild_fts=True)
                 pending_files.clear()
                 pending_chunks.clear()
+                if stats.indexed_ok >= 1:
+                    committed_first_ok = True
 
             if progress_callback:
                 progress_callback(stats)
 
         if pending_files or pending_chunks:
-            store.upsert_batch(pending_files, pending_chunks, rebuild_fts=False)
+            store.upsert_batch(pending_files, pending_chunks, rebuild_fts=True)
             pending_files.clear()
             pending_chunks.clear()
-
-        store.rebuild_fts_index()
+        else:
+            store.rebuild_fts_index()
     finally:
         stop_event.set()
 

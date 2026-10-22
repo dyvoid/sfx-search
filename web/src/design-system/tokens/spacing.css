@@ -1,0 +1,38 @@
+/* Spacious by default. Set data-density="compact" on <html> or any container to tighten. */
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 48px;
+  --space-10: 64px;
+  --space-11: 80px;
+  --space-12: 96px;
+
+  --control-height-sm: 26px;
+  --control-height-md: 30px;
+  --control-height-lg: 38px;
+}
+
+[data-density="compact"] {
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 28px;
+  --space-9: 32px;
+  --space-10: 40px;
+  --space-11: 56px;
+  --space-12: 72px;
+
+  --control-height-sm: 22px;
+  --control-height-md: 26px;
+  --control-height-lg: 32px;
+}

@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,8 @@ from .config import Config, load_config
 from .decode import decode_audio_pcm
 from .embed import EmbedderProtocol
 from .features import compute_waveform_peaks
-from .scan import to_os_path
+from .indexer import IndexStats, run_indexer
+from .scan import normalize_path, to_os_path
 from .search import SearchEngine, SearchMode
 from .store import SearchFilters, SfxStore, UserDataRecord
 
@@ -56,6 +58,143 @@ class BatchSearchBody(BaseModel):
     queries: list[str] = Field(default_factory=list)
     k: int = 20
     mode: SearchMode = "hybrid"
+
+
+class RootAddBody(BaseModel):
+    path: str
+
+
+class RootRemoveBody(BaseModel):
+    path: str
+    remove_indexed_files: bool = True
+
+
+class RescanBody(BaseModel):
+    reindex: bool = False
+
+
+class BackgroundIndexManager:
+    """Manages asynchronous background scanning and indexing for the Web UI."""
+
+    def __init__(self, config: Config, store: SfxStore, engine: SearchEngine) -> None:
+        self.config = config
+        self.store = store
+        self.engine = engine
+        self._lock = threading.Lock()
+        self._state: str = "idle"
+        self._last_error: str | None = None
+        self._latest_stats: IndexStats = IndexStats()
+        self._pending_rescan: bool = False
+        self._pending_reindex: bool = False
+        self._thread: threading.Thread | None = None
+
+    def get_status(self) -> dict[str, Any]:
+        with self._lock:
+            st = self._latest_stats
+            done = st.indexed_ok + st.indexed_errors
+            total = st.to_index_count
+            rem = max(0, total - done)
+            eta_s = (rem / (st.files_per_min / 60.0)) if st.files_per_min > 0 else 0.0
+            return {
+                "state": self._state,
+                "error": self._last_error,
+                "scanned_count": st.scanned_count,
+                "skipped_unchanged": st.skipped_unchanged,
+                "to_index_count": total,
+                "indexed_ok": st.indexed_ok,
+                "indexed_errors": st.indexed_errors,
+                "marked_missing": st.marked_missing,
+                "total_chunks": st.total_chunks,
+                "elapsed_seconds": st.elapsed_seconds,
+                "files_per_min": st.files_per_min,
+                "audio_hours_per_hour": st.audio_hours_per_hour,
+                "gpu_memory_mb": st.gpu_memory_mb,
+                "eta_seconds": round(eta_s, 1),
+            }
+
+    def trigger_scan(self, reindex: bool = False) -> None:
+        with self._lock:
+            if self._state == "running":
+                self._pending_rescan = True
+                if reindex:
+                    self._pending_reindex = True
+                return
+            self._state = "running"
+            self._last_error = None
+            self._latest_stats = IndexStats()
+            self._pending_rescan = False
+            self._pending_reindex = False
+            self._thread = threading.Thread(
+                target=self._worker_loop,
+                args=(reindex,),
+                daemon=True,
+            )
+            self._thread.start()
+
+    def _worker_loop(self, initial_reindex: bool) -> None:
+        reindex = initial_reindex
+        while True:
+            roots = list(self.config.library.roots)
+            if not roots:
+                with self._lock:
+                    self._state = "idle"
+                return
+
+            def _on_progress(st: IndexStats) -> None:
+                with self._lock:
+                    self._latest_stats = st
+
+            try:
+                final_stats = run_indexer(
+                    config=self.config,
+                    store=self.store,
+                    embedder=self.engine.embedder,
+                    roots=roots,
+                    reindex=reindex,
+                    progress_callback=_on_progress,
+                )
+                with self._lock:
+                    self._latest_stats = final_stats
+            except Exception as exc:
+                with self._lock:
+                    self._last_error = str(exc)
+                    self._state = "error"
+                return
+
+            with self._lock:
+                if self._pending_rescan:
+                    self._pending_rescan = False
+                    reindex = self._pending_reindex
+                    self._pending_reindex = False
+                    self._latest_stats = IndexStats()
+                    continue
+                self._state = "idle"
+                return
+
+
+def _pick_folder_native() -> str | None:
+    script = (
+        "import tkinter as tk\n"
+        "from tkinter import filedialog\n"
+        "root = tk.Tk()\n"
+        "root.withdraw()\n"
+        "root.attributes('-topmost', True)\n"
+        "folder = filedialog.askdirectory(title='Select SFX Library Folder')\n"
+        "root.destroy()\n"
+        "print(folder or '')\n"
+    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=120.0,
+            check=False,
+        )
+        chosen = proc.stdout.strip()
+        return normalize_path(chosen) if chosen else None
+    except Exception:
+        return None
 
 
 def _needs_transcode(file_row: dict[str, Any]) -> bool:
@@ -200,6 +339,7 @@ def create_app(
     cfg = config or load_config()
     st = store or SfxStore(cfg.db_dir)
     engine = SearchEngine(config=cfg, store=st, embedder=embedder)
+    index_mgr = BackgroundIndexManager(config=cfg, store=st, engine=engine)
 
     app = FastAPI(title="sfx-search API", version="0.1.0")
     app.add_middleware(
@@ -214,6 +354,70 @@ def create_app(
     app.state.config = cfg
     app.state.store = st
     app.state.engine = engine
+    app.state.index_mgr = index_mgr
+
+    @app.get("/api/library")
+    def api_get_library() -> dict[str, Any]:
+        stats = st.get_library_stats()
+        configured_roots = [normalize_path(r) for r in cfg.library.roots if str(r).strip()]
+        return {
+            "roots": configured_roots,
+            "stats": stats,
+            "indexing": index_mgr.get_status(),
+        }
+
+    @app.post("/api/library/roots")
+    def api_add_library_root(body: RootAddBody) -> dict[str, Any]:
+        raw = body.path.strip()
+        if not raw:
+            raise HTTPException(status_code=400, detail="Folder path cannot be empty")
+        norm = normalize_path(raw)
+        if not os.path.isdir(to_os_path(norm)):
+            raise HTTPException(status_code=400, detail=f"Folder does not exist on disk: {norm}")
+
+        current = [normalize_path(r) for r in cfg.library.roots if str(r).strip()]
+        if norm.lower() not in [c.lower() for c in current]:
+            current.append(norm)
+        cfg.save_library_roots(current)
+        index_mgr.trigger_scan(reindex=False)
+
+        return {
+            "roots": cfg.library.roots,
+            "indexing": index_mgr.get_status(),
+        }
+
+    @app.delete("/api/library/roots")
+    def api_remove_library_root(body: RootRemoveBody) -> dict[str, Any]:
+        norm = normalize_path(body.path.strip())
+        current = [
+            normalize_path(r)
+            for r in cfg.library.roots
+            if str(r).strip() and normalize_path(r).lower() != norm.lower()
+        ]
+        cfg.save_library_roots(current)
+        removed_count = 0
+        if body.remove_indexed_files:
+            removed_count = st.remove_root_files(norm)
+        return {
+            "roots": cfg.library.roots,
+            "removed_files": removed_count,
+            "stats": st.get_library_stats(),
+            "indexing": index_mgr.get_status(),
+        }
+
+    @app.post("/api/library/rescan")
+    def api_rescan_library(body: RescanBody | None = None) -> dict[str, Any]:
+        reindex = body.reindex if body is not None else False
+        index_mgr.trigger_scan(reindex=reindex)
+        return {
+            "roots": cfg.library.roots,
+            "indexing": index_mgr.get_status(),
+        }
+
+    @app.post("/api/library/pick-folder")
+    def api_pick_folder() -> dict[str, Any]:
+        picked = _pick_folder_native()
+        return {"path": picked}
 
     @app.get("/api/search")
     def api_search_get(
@@ -492,6 +696,8 @@ def create_app(
         stats = st.get_library_stats()
         stats["configured_model"] = cfg.embedding.model_id
         stats["configured_precision"] = cfg.embedding.precision
+        stats["configured_roots"] = cfg.library.roots
+        stats["indexing"] = index_mgr.get_status()
         return stats
 
     @app.get("/api/filters")

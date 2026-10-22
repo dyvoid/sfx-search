@@ -330,6 +330,32 @@ class SfxStore:
             quoted = ", ".join(f"'{_sql_escape(fid)}'" for fid in batch)
             files_tbl.update(where=f"file_id IN ({quoted})", values={"status": "missing"})
 
+    def remove_root_files(self, root_path: str) -> int:
+        from .scan import normalize_path
+
+        if "files" not in self.table_names():
+            return 0
+        norm_root = normalize_path(root_path).lower().rstrip("/")
+        files_tbl = self.db.open_table("files")
+        total = files_tbl.count_rows()
+        if total == 0:
+            return 0
+        rows = files_tbl.search().select(["file_id", "root", "path"]).limit(total + 100).to_list()
+        target_ids: list[str] = []
+        for r in rows:
+            r_root = str(r.get("root") or "").lower().rstrip("/")
+            r_path = str(r.get("path") or "").lower()
+            if r_root == norm_root or r_path.startswith(norm_root + "/"):
+                target_ids.append(str(r["file_id"]))
+        if not target_ids:
+            return 0
+        self._delete_by_file_ids(files_tbl, target_ids)
+        if "chunks" in self.table_names():
+            chunks_tbl = self.db.open_table("chunks")
+            self._delete_by_file_ids(chunks_tbl, target_ids)
+        self.rebuild_fts_index()
+        return len(target_ids)
+
     def rebuild_fts_index(self) -> None:
         if "files" not in self.table_names():
             return

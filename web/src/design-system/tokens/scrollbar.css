@@ -1,0 +1,76 @@
+/* Scrollbars. Two layers, on purpose:
+   1. scrollbar-width / scrollbar-color — the standard properties. Firefox,
+      Chrome 121+, Safari 18.2+. This is the baseline everyone gets.
+   2. ::-webkit-scrollbar — Chromium/Safari only, overrides layer 1 there and
+      buys radius, thumb inset and a hover state.
+   A styled webkit scrollbar always takes layout width (never an auto-hiding
+   overlay), so scroll containers pair it with scrollbar-gutter: stable. */
+
+:root {
+  --scrollbar-size: 10px;
+  --scrollbar-inset: 3px;              /* transparent border around the thumb */
+  --scrollbar-radius: 999px;
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: var(--gray-600);
+  --scrollbar-thumb-hover: var(--gray-500);
+}
+
+[data-theme="light"] {
+  --scrollbar-thumb: var(--gray-300);
+  --scrollbar-thumb-hover: var(--gray-400);
+}
+
+/* Layer 1 — standard */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* Layer 2 — webkit */
+::-webkit-scrollbar { width: var(--scrollbar-size); height: var(--scrollbar-size); }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+::-webkit-scrollbar-corner { background: var(--scrollbar-track); }
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--scrollbar-radius);
+  border: var(--scrollbar-inset) solid transparent;
+  background-clip: content-box;
+  transition: background var(--duration-fast, 120ms) var(--ease-out, ease);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+::-webkit-scrollbar-thumb:active { background: var(--scrollbar-thumb-hover); }
+
+/* Utilities. Put these on the scroll container, not the page. */
+
+/* Default scroll container: reserves the gutter so content never shifts. */
+.ds-scroll { overflow: auto; scrollbar-gutter: stable; }
+
+/* Thumb fades in only while the container is hovered or actively scrolled.
+   For panels, sidebars, inspectors — anywhere a resting scrollbar is noise. */
+.ds-scroll-subtle {
+  overflow: auto;
+  scrollbar-gutter: stable;
+  scrollbar-color: transparent var(--scrollbar-track);
+}
+.ds-scroll-subtle:hover, .ds-scroll-subtle:focus-within {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+.ds-scroll-subtle::-webkit-scrollbar-thumb { background: transparent; }
+.ds-scroll-subtle:hover::-webkit-scrollbar-thumb,
+.ds-scroll-subtle:focus-within::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); }
+.ds-scroll-subtle:hover::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+/* Hairline variant — 6px, for dense lists and code blocks. */
+.ds-scroll-thin { overflow: auto; scrollbar-gutter: stable; }
+.ds-scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.ds-scroll-thin::-webkit-scrollbar-thumb { border-width: 2px; }
+
+/* Accent thumb — for a scroll region that is itself the focus of the view. */
+.ds-scroll-accent { scrollbar-color: var(--primary) var(--scrollbar-track); }
+.ds-scroll-accent::-webkit-scrollbar-thumb { background: var(--primary); }
+.ds-scroll-accent::-webkit-scrollbar-thumb:hover { background: var(--primary-hover); }
+
+/* No visible scrollbar, still scrollable. Carousels and rails only —
+   never for a region a user must discover content in. */
+.ds-scroll-none { overflow: auto; scrollbar-width: none; }
+.ds-scroll-none::-webkit-scrollbar { display: none; }

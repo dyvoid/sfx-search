@@ -67,6 +67,23 @@ export interface AvailableFilters {
   user_tags: string[];
 }
 
+export interface IndexingProgress {
+  state: "idle" | "running" | "error";
+  error: string | null;
+  scanned_count: number;
+  skipped_unchanged: number;
+  to_index_count: number;
+  indexed_ok: number;
+  indexed_errors: number;
+  marked_missing: number;
+  total_chunks: number;
+  elapsed_seconds: number;
+  files_per_min: number;
+  audio_hours_per_hour: number;
+  gpu_memory_mb: number;
+  eta_seconds: number;
+}
+
 export interface LibraryStats {
   total_files: number;
   ok_files: number;
@@ -81,6 +98,14 @@ export interface LibraryStats {
   roots: string[];
   formats: Record<string, number>;
   favorites_count: number;
+  configured_roots?: string[];
+  indexing?: IndexingProgress;
+}
+
+export interface LibraryStateResponse {
+  roots: string[];
+  stats: LibraryStats;
+  indexing: IndexingProgress;
 }
 
 export const DEFAULT_FILTERS: FilterState = {

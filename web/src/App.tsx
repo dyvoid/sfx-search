@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Clock,
   Filter,
+  FolderOpen,
+  FolderPlus,
   Heart,
   History,
   Pause,
@@ -14,19 +16,25 @@ import {
   Volume2,
 } from "lucide-react";
 import {
+  addLibraryRoot,
   fetchAvailableFilters,
-  fetchStats,
+  fetchLibraryState,
   findSimilarById,
   findSimilarByUpload,
+  pickNativeFolder,
+  removeLibraryRoot,
+  rescanLibrary,
   searchSounds,
   updateUserData,
 } from "./api";
 import { DetailPanel } from "./components/DetailPanel";
+import { LibraryModal } from "./components/LibraryModal";
 import { MiniWaveform } from "./components/MiniWaveform";
 import {
   AvailableFilters,
   DEFAULT_FILTERS,
   FilterState,
+  IndexingProgress,
   LibraryStats,
   SearchHit,
   SearchMode,
@@ -57,11 +65,15 @@ export const App: React.FC = () => {
   });
   const [showHistory, setShowHistory] = useState<boolean>(false);
 
+  const [roots, setRoots] = useState<string[]>([]);
+  const [stats, setStats] = useState<LibraryStats | null>(null);
+  const [indexing, setIndexing] = useState<IndexingProgress | null>(null);
+  const [availFilters, setAvailFilters] = useState<AvailableFilters | null>(null);
+  const [libraryModalOpen, setLibraryModalOpen] = useState<boolean>(false);
+
   const [results, setResults] = useState<SearchHit[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [statusLabel, setStatusLabel] = useState<string>("");
-  const [stats, setStats] = useState<LibraryStats | null>(null);
-  const [availFilters, setAvailFilters] = useState<AvailableFilters | null>(null);
 
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [detailOpen, setDetailOpen] = useState<boolean>(false);
@@ -73,29 +85,14 @@ export const App: React.FC = () => {
   const [loopEnabled, setLoopEnabled] = useState<boolean>(false);
 
   const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
+  const [onboardingInput, setOnboardingInput] = useState<string>("");
+  const [onboardingError, setOnboardingError] = useState<string>("");
+  const [onboardingBusy, setOnboardingBusy] = useState<boolean>(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
-
-  useEffect(() => {
-    fetchStats().then(setStats).catch(() => {});
-    fetchAvailableFilters().then(setAvailFilters).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_FILTERS_KEY, JSON.stringify(filters));
-    } catch {
-      // ignore storage errors
-    }
-  }, [filters]);
-
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.loop = loopEnabled;
-    }
-  }, [loopEnabled]);
+  const prevOkFilesRef = useRef<number>(0);
 
   const recordHistory = useCallback((q: string) => {
     const clean = q.trim();
@@ -114,17 +111,24 @@ export const App: React.FC = () => {
   }, []);
 
   const runSearch = useCallback(
-    async (qOverride?: string, modeOverride?: SearchMode, filtersOverride?: FilterState) => {
+    async (
+      qOverride?: string,
+      modeOverride?: SearchMode,
+      filtersOverride?: FilterState
+    ) => {
       const q = qOverride !== undefined ? qOverride : query;
       const m = modeOverride !== undefined ? modeOverride : mode;
       const f = filtersOverride !== undefined ? filtersOverride : filters;
 
+      const effectiveMode: SearchMode = !q.trim() ? "keyword_only" : m;
       setLoading(true);
       setStatusLabel("");
       try {
-        const hits = await searchSounds(q, m, f, 50);
+        const hits = await searchSounds(q, effectiveMode, f, 50);
         setResults(hits);
-        setSelectedIndex(0);
+        setSelectedIndex((prev) =>
+          hits.length > 0 ? Math.min(prev, hits.length - 1) : 0
+        );
         if (q.trim()) {
           recordHistory(q);
         }
@@ -137,9 +141,58 @@ export const App: React.FC = () => {
     [query, mode, filters, recordHistory]
   );
 
+  const refreshLibraryState = useCallback(async () => {
+    try {
+      const lib = await fetchLibraryState();
+      setRoots(lib.roots);
+      setStats(lib.stats);
+      setIndexing(lib.indexing);
+
+      const prevOk = prevOkFilesRef.current;
+      const nextOk = lib.stats.ok_files;
+      prevOkFilesRef.current = nextOk;
+
+      if (nextOk > 0 && (prevOk === 0 || nextOk !== prevOk)) {
+        fetchAvailableFilters().then(setAvailFilters).catch(() => {});
+        runSearch();
+      } else if (nextOk === 0) {
+        setResults([]);
+      }
+    } catch {
+      // ignore transient poll errors
+    }
+  }, [runSearch]);
+
   useEffect(() => {
-    runSearch("", "keyword_only", filters);
+    refreshLibraryState();
+    fetchAvailableFilters().then(setAvailFilters).catch(() => {});
   }, []);
+
+  // Poll while background indexing is running (or when roots exist but 0 files indexed yet)
+  useEffect(() => {
+    const isRunning = indexing?.state === "running";
+    if (!isRunning) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      refreshLibraryState();
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [indexing?.state, refreshLibraryState]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_FILTERS_KEY, JSON.stringify(filters));
+    } catch {
+      // ignore
+    }
+  }, [filters]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.loop = loopEnabled;
+    }
+  }, [loopEnabled]);
 
   const stopAudio = useCallback(() => {
     if (audioRef.current) {
@@ -190,9 +243,16 @@ export const App: React.FC = () => {
     [playingFileId, startAtBestOffset, loopEnabled]
   );
 
-  // Keyboard navigation: Up/Down moves selection, Space plays/pauses, Enter toggles detail panel
+  // Keyboard navigation
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (libraryModalOpen) {
+        if (e.key === "Escape") {
+          setLibraryModalOpen(false);
+        }
+        return;
+      }
+
       const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
       if (tag === "input" || tag === "textarea" || tag === "select") {
         if (e.key === "Escape") {
@@ -234,7 +294,60 @@ export const App: React.FC = () => {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [results, selectedIndex, playHit]);
+  }, [results, selectedIndex, playHit, libraryModalOpen]);
+
+  const handleAddRoot = async (path: string) => {
+    const res = await addLibraryRoot(path);
+    setRoots(res.roots);
+    setIndexing(res.indexing);
+    await refreshLibraryState();
+  };
+
+  const handleBrowseAndAddRoot = async () => {
+    const picked = await pickNativeFolder();
+    if (picked) {
+      await handleAddRoot(picked);
+    }
+  };
+
+  const handleRemoveRoot = async (path: string) => {
+    const res = await removeLibraryRoot(path, true);
+    setRoots(res.roots);
+    setStats(res.stats);
+    setIndexing(res.indexing);
+    prevOkFilesRef.current = res.stats.ok_files;
+    if (res.stats.ok_files === 0) {
+      setResults([]);
+    } else {
+      runSearch();
+    }
+  };
+
+  const handleRescan = async (reindex: boolean) => {
+    const res = await rescanLibrary(reindex);
+    setRoots(res.roots);
+    setIndexing(res.indexing);
+  };
+
+  const handleOnboardingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = onboardingInput.trim();
+    if (!clean) {
+      return;
+    }
+    setOnboardingBusy(true);
+    setOnboardingError("");
+    try {
+      await handleAddRoot(clean);
+      setOnboardingInput("");
+    } catch (err) {
+      setOnboardingError(
+        err instanceof Error ? err.message : "Failed to add folder"
+      );
+    } finally {
+      setOnboardingBusy(false);
+    }
+  };
 
   const handleFindSimilarFile = async (fileId: string) => {
     setLoading(true);
@@ -242,7 +355,7 @@ export const App: React.FC = () => {
       const hits = await findSimilarById(fileId, undefined, 40);
       setResults(hits);
       setSelectedIndex(0);
-      setStatusLabel(`Showing sounds similar to ${fileId.slice(0, 8)}...`);
+      setStatusLabel(`Similar to ${fileId.slice(0, 8)}`);
     } finally {
       setLoading(false);
     }
@@ -254,9 +367,7 @@ export const App: React.FC = () => {
       const hits = await findSimilarById(fileId, chunkIdx, 40);
       setResults(hits);
       setSelectedIndex(0);
-      setStatusLabel(
-        `Showing sounds similar to ${fileId.slice(0, 8)}... (chunk #${chunkIdx})`
-      );
+      setStatusLabel(`Similar to ${fileId.slice(0, 8)} · chunk #${chunkIdx}`);
     } finally {
       setLoading(false);
     }
@@ -264,12 +375,12 @@ export const App: React.FC = () => {
 
   const handleDropFile = async (file: File) => {
     setLoading(true);
-    setStatusLabel(`Embedding dropped reference '${file.name}'...`);
+    setStatusLabel(`Embedding reference '${file.name}'`);
     try {
       const hits = await findSimilarByUpload(file, 40);
       setResults(hits);
       setSelectedIndex(0);
-      setStatusLabel(`Showing sounds similar to uploaded '${file.name}'`);
+      setStatusLabel(`Similar to '${file.name}'`);
     } catch (err) {
       setStatusLabel(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -309,14 +420,24 @@ export const App: React.FC = () => {
     fetchAvailableFilters().then(setAvailFilters).catch(() => {});
   };
 
+  const hasIndexedFiles = (stats?.ok_files || 0) > 0;
+  const isIndexing = indexing?.state === "running";
+  const doneFiles = (indexing?.indexed_ok || 0) + (indexing?.indexed_errors || 0);
+  const totalToIndex = indexing?.to_index_count || 0;
+  const progressPct =
+    totalToIndex > 0
+      ? Math.min(100, Math.round((doneFiles / totalToIndex) * 100))
+      : 0;
   const selectedHit = results[selectedIndex] || null;
 
   return (
     <div
-      className="flex h-screen w-screen flex-col overflow-hidden bg-zinc-950 text-zinc-100"
+      className="sfx-shell"
       onDragOver={(e) => {
         e.preventDefault();
-        setIsDraggingFile(true);
+        if (hasIndexedFiles) {
+          setIsDraggingFile(true);
+        }
       }}
       onDragLeave={(e) => {
         if (e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -328,12 +449,12 @@ export const App: React.FC = () => {
         e.preventDefault();
         setIsDraggingFile(false);
         const f = e.dataTransfer.files?.[0];
-        if (f) {
+        if (f && hasIndexedFiles) {
           handleDropFile(f);
         }
       }}
     >
-      {/* Hidden shared HTML5 audio element */}
+      {/* Shared HTML5 audio element */}
       <audio
         ref={audioRef}
         onTimeUpdate={(e) => setCurrentTimeS(e.currentTarget.currentTime)}
@@ -342,81 +463,123 @@ export const App: React.FC = () => {
         onPlay={() => setIsPlaying(true)}
       />
 
-      {/* Drag & drop overlay */}
+      {/* Drag & drop reference overlay */}
       {isDraggingFile && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/85 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-amber-400 bg-zinc-900/90 px-12 py-10 text-center">
-            <Upload className="h-10 w-10 text-amber-400" />
-            <p className="text-lg font-semibold text-zinc-100">
-              Drop reference audio file to find acoustically similar sounds
-            </p>
-            <p className="text-xs text-zinc-400">
-              Supports WAV, FLAC, AIFF, MP3, OGG, OPUS, M4A
-            </p>
+        <div className="ds-scrim">
+          <div className="ds-dialog" style={{ width: 440, textAlign: "center" }}>
+            <div className="ds-dialog-body">
+              <div className="ds-empty">
+                <div className="ds-empty-icon">
+                  <Upload size={20} />
+                </div>
+                <div className="ds-empty-title">Drop reference audio</div>
+                <div className="ds-empty-desc">
+                  Release any WAV, FLAC, AIFF, MP3, OGG, or M4A file to search
+                  for acoustically similar sounds.
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Top Header & Search Bar */}
-      <header className="border-b border-zinc-800 bg-zinc-900/70 px-5 py-3">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      {/* Library Folder Management Modal */}
+      <LibraryModal
+        open={libraryModalOpen}
+        roots={roots}
+        stats={stats}
+        indexing={indexing}
+        onClose={() => setLibraryModalOpen(false)}
+        onAddRoot={handleAddRoot}
+        onBrowseRoot={handleBrowseAndAddRoot}
+        onRemoveRoot={handleRemoveRoot}
+        onRescan={handleRescan}
+      />
+
+      {/* Top Toolbar */}
+      <header className="sfx-toolbar">
+        <div className="sfx-toolbar-row">
           {/* Brand */}
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500 text-zinc-950">
-              <Volume2 className="h-5 w-5" />
+          <div className="sfx-brand">
+            <div className="sfx-brand-mark">
+              <Volume2 size={16} />
             </div>
             <div>
-              <h1 className="text-sm font-bold tracking-tight text-zinc-100">
-                sfx-search
-              </h1>
-              <p className="text-[11px] text-zinc-400">
-                {stats
-                  ? `${stats.ok_files.toLocaleString()} sounds (${stats.total_duration_hours.toFixed(
+              <div className="sfx-brand-title">sfx-search</div>
+              <div className="sfx-brand-meta">
+                {stats && stats.ok_files > 0
+                  ? `${stats.ok_files.toLocaleString()} files · ${stats.total_duration_hours.toFixed(
                       1
-                    )}h) · ${stats.total_chunks.toLocaleString()} chunks`
-                  : "Local CLAP + BM25 Hybrid Search"}
-              </p>
+                    )}h · ${stats.total_chunks.toLocaleString()} chunks`
+                  : roots.length > 0
+                  ? `${roots.length} folder${roots.length === 1 ? "" : "s"} configured`
+                  : "No library folders"}
+              </div>
             </div>
           </div>
 
-          {/* Search input + mode selector */}
+          {/* Search bar + mode tabs + filters */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
               setShowHistory(false);
-              runSearch();
+              if (hasIndexedFiles) {
+                runSearch();
+              }
             }}
-            className="relative flex flex-1 max-w-3xl items-center gap-2"
+            className="sfx-search-form"
           >
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={query}
-                onFocus={() => setShowHistory(true)}
-                onBlur={() => setTimeout(() => setShowHistory(false), 180)}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder='Describe a sound ("slow wooden floor creak, large empty house") or use dur:2-8 -voice...'
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 py-2 pl-9 pr-20 text-sm text-zinc-100 placeholder-zinc-500 focus:border-amber-500 focus:outline-none"
-              />
-              {history.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setShowHistory((prev) => !prev)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:text-zinc-200"
-                  title="Recent queries"
-                >
-                  <History className="h-4 w-4" />
-                </button>
-              )}
+            <div className="sfx-search-box-wrap">
+              <div
+                className="ds-input-box"
+                style={{
+                  opacity: hasIndexedFiles ? 1 : 0.55,
+                  gap: "var(--space-2)",
+                }}
+              >
+                <Search
+                  size={14}
+                  style={{ color: "var(--text-tertiary)", flexShrink: 0 }}
+                />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  disabled={!hasIndexedFiles}
+                  value={query}
+                  onFocus={() => setShowHistory(true)}
+                  onBlur={() => setTimeout(() => setShowHistory(false), 180)}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={
+                    hasIndexedFiles
+                      ? 'Search sounds ("slow wooden floor creak, large empty house") or dur:2-8 -voice'
+                      : "Search becomes available once your first sound file is indexed"
+                  }
+                  className="ds-input"
+                />
+                {history.length > 0 && hasIndexedFiles && (
+                  <button
+                    type="button"
+                    onClick={() => setShowHistory((prev) => !prev)}
+                    className="sfx-icon-btn"
+                    title="Recent queries"
+                  >
+                    <History size={13} />
+                  </button>
+                )}
+              </div>
 
-              {/* History dropdown */}
-              {showHistory && history.length > 0 && (
-                <div className="absolute left-0 right-0 top-full z-30 mt-1 rounded-lg border border-zinc-800 bg-zinc-900 py-1 shadow-xl">
-                  <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
-                    Recent Queries
-                  </div>
+              {showHistory && history.length > 0 && hasIndexedFiles && (
+                <div
+                  className="ds-menu"
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    top: "calc(100% + 4px)",
+                    zIndex: 40,
+                  }}
+                >
+                  <div className="ds-menu-header">Recent queries</div>
                   {history.map((hItem) => (
                     <button
                       key={hItem}
@@ -426,10 +589,10 @@ export const App: React.FC = () => {
                         setShowHistory(false);
                         runSearch(hItem);
                       }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                      className="ds-menu-item"
                     >
-                      <Clock className="h-3 w-3 text-zinc-500" />
-                      {hItem}
+                      <Clock size={13} />
+                      <span className="l">{hItem}</span>
                     </button>
                   ))}
                 </div>
@@ -437,77 +600,89 @@ export const App: React.FC = () => {
             </div>
 
             <select
+              disabled={!hasIndexedFiles}
               value={mode}
               onChange={(e) => {
                 const nextMode = e.target.value as SearchMode;
                 setMode(nextMode);
-                runSearch(query, nextMode, filters);
+                if (hasIndexedFiles) {
+                  runSearch(query, nextMode, filters);
+                }
               }}
-              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-200 focus:border-amber-500 focus:outline-none"
+              className="ds-select-field"
+              style={{ width: 155 }}
             >
               <option value="hybrid">Hybrid (RRF)</option>
-              <option value="audio_only">Audio Semantic (CLAP)</option>
+              <option value="audio_only">Audio (CLAP)</option>
               <option value="keyword_only">Keyword (BM25)</option>
             </select>
 
             <button
               type="submit"
-              disabled={loading}
-              className="rounded-lg bg-amber-500 px-4 py-2 text-xs font-semibold text-zinc-950 transition hover:bg-amber-400 disabled:opacity-50"
+              disabled={!hasIndexedFiles || loading}
+              className="ds-btn ds-btn-primary"
             >
-              {loading ? "Searching..." : "Search"}
+              {loading ? "Searching" : "Search"}
             </button>
 
             <button
               type="button"
+              disabled={!hasIndexedFiles}
               onClick={() => setShowFilters((prev) => !prev)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition ${
-                showFilters
-                  ? "border-amber-500/60 bg-amber-500/15 text-amber-300"
-                  : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+              className={`ds-btn ${
+                showFilters ? "ds-btn-secondary" : "ds-btn-ghost"
               }`}
             >
-              <Filter className="h-3.5 w-3.5" />
+              <Filter size={14} />
               Filters
             </button>
           </form>
 
-          {/* Playback transport toggles */}
-          <div className="flex items-center gap-2 text-xs">
-            <button
-              type="button"
+          {/* Transport & Library Actions */}
+          <div className="sfx-transport-controls">
+            <label
+              className="ds-switch-item"
               onClick={() => setStartAtBestOffset((prev) => !prev)}
-              className={`rounded-md border px-2.5 py-1.5 font-medium transition ${
-                startAtBestOffset
-                  ? "border-amber-500/50 bg-amber-500/15 text-amber-300"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-400"
-              }`}
-              title="Start playback at best-matching 10s window offset vs 0:00"
+              title="Start playback at best-matching 10s window offset"
             >
-              {startAtBestOffset ? "Start @ Best Match" : "Start @ 0:00"}
-            </button>
+              <div className={`ds-switch-track ${startAtBestOffset ? "on" : ""}`}>
+                <div className="ds-switch-thumb" />
+              </div>
+              <span
+                className="ds-switch-label"
+                style={{ fontSize: "var(--font-size-xs)" }}
+              >
+                Best offset
+              </span>
+            </label>
 
             <button
               type="button"
               onClick={() => setLoopEnabled((prev) => !prev)}
-              className={`flex items-center gap-1 rounded-md border px-2.5 py-1.5 font-medium transition ${
-                loopEnabled
-                  ? "border-sky-500/50 bg-sky-500/15 text-sky-300"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-400"
+              className={`ds-btn ds-btn-sm ${
+                loopEnabled ? "ds-btn-primary" : "ds-btn-ghost"
               }`}
-              title="Toggle loop playback"
+              title="Loop playback"
             >
-              <Repeat className="h-3.5 w-3.5" />
+              <Repeat size={14} />
               Loop
             </button>
 
-            <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-zinc-300 hover:bg-zinc-800">
-              <Upload className="h-3.5 w-3.5 text-amber-400" />
-              <span>Drop / Upload Ref</span>
+            <label
+              className={`ds-btn ds-btn-secondary ds-btn-sm ${
+                !hasIndexedFiles ? "disabled" : ""
+              }`}
+              style={{
+                pointerEvents: hasIndexedFiles ? "auto" : "none",
+                opacity: hasIndexedFiles ? 1 : 0.5,
+              }}
+            >
+              <Upload size={14} />
+              Match audio
               <input
                 type="file"
                 accept="audio/*"
-                className="hidden"
+                style={{ display: "none" }}
                 onChange={(e) => {
                   const f = e.target.files?.[0];
                   if (f) {
@@ -516,104 +691,115 @@ export const App: React.FC = () => {
                 }}
               />
             </label>
+
+            <button
+              type="button"
+              onClick={() => setLibraryModalOpen(true)}
+              className="ds-btn ds-btn-secondary ds-btn-sm"
+            >
+              <FolderOpen size={14} />
+              Library ({roots.length})
+            </button>
           </div>
         </div>
 
-        {/* Collapsible Filter Panel */}
-        {showFilters && (
-          <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-zinc-800/80 pt-3 text-xs">
-            <div>
-              <label className="mb-1 block text-[11px] text-zinc-400">
-                Duration (s)
-              </label>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="Min"
-                  value={filters.minDuration}
-                  onChange={(e) =>
-                    setFilters({ ...filters, minDuration: e.target.value })
-                  }
-                  className="w-20 rounded border border-zinc-700 bg-zinc-950 px-2 py-1"
-                />
-                <span className="text-zinc-500">–</span>
-                <input
-                  type="number"
-                  step="0.5"
-                  placeholder="Max"
-                  value={filters.maxDuration}
-                  onChange={(e) =>
-                    setFilters({ ...filters, maxDuration: e.target.value })
-                  }
-                  className="w-20 rounded border border-zinc-700 bg-zinc-950 px-2 py-1"
-                />
+        {/* Collapsible Filter Drawer */}
+        {showFilters && hasIndexedFiles && (
+          <div className="sfx-filter-drawer">
+            <div className="ds-input-field">
+              <label className="ds-microlabel">Duration (s)</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div className="ds-input-box" style={{ width: 76 }}>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="Min"
+                    value={filters.minDuration}
+                    onChange={(e) =>
+                      setFilters({ ...filters, minDuration: e.target.value })
+                    }
+                    className="ds-input ds-tnum"
+                  />
+                </div>
+                <span style={{ color: "var(--text-tertiary)" }}>–</span>
+                <div className="ds-input-box" style={{ width: 76 }}>
+                  <input
+                    type="number"
+                    step="0.5"
+                    placeholder="Max"
+                    value={filters.maxDuration}
+                    onChange={(e) =>
+                      setFilters({ ...filters, maxDuration: e.target.value })
+                    }
+                    className="ds-input ds-tnum"
+                  />
+                </div>
               </div>
             </div>
 
-            <div>
-              <label className="mb-1 block text-[11px] text-zinc-400">
-                Loudness (LUFS)
-              </label>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  step="1"
-                  placeholder="-40"
-                  value={filters.minLufs}
-                  onChange={(e) =>
-                    setFilters({ ...filters, minLufs: e.target.value })
-                  }
-                  className="w-20 rounded border border-zinc-700 bg-zinc-950 px-2 py-1"
-                />
-                <span className="text-zinc-500">–</span>
-                <input
-                  type="number"
-                  step="1"
-                  placeholder="0"
-                  value={filters.maxLufs}
-                  onChange={(e) =>
-                    setFilters({ ...filters, maxLufs: e.target.value })
-                  }
-                  className="w-20 rounded border border-zinc-700 bg-zinc-950 px-2 py-1"
-                />
+            <div className="ds-input-field">
+              <label className="ds-microlabel">Loudness (LUFS)</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div className="ds-input-box" style={{ width: 76 }}>
+                  <input
+                    type="number"
+                    step="1"
+                    placeholder="-40"
+                    value={filters.minLufs}
+                    onChange={(e) =>
+                      setFilters({ ...filters, minLufs: e.target.value })
+                    }
+                    className="ds-input ds-tnum"
+                  />
+                </div>
+                <span style={{ color: "var(--text-tertiary)" }}>–</span>
+                <div className="ds-input-box" style={{ width: 76 }}>
+                  <input
+                    type="number"
+                    step="1"
+                    placeholder="0"
+                    value={filters.maxLufs}
+                    onChange={(e) =>
+                      setFilters({ ...filters, maxLufs: e.target.value })
+                    }
+                    className="ds-input ds-tnum"
+                  />
+                </div>
               </div>
             </div>
 
-            <div>
-              <label className="mb-1 block text-[11px] text-zinc-400">
-                Format
-              </label>
+            <div className="ds-input-field">
+              <label className="ds-microlabel">Format</label>
               <select
                 value={filters.format}
                 onChange={(e) =>
                   setFilters({ ...filters, format: e.target.value })
                 }
-                className="rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-zinc-200"
+                className="ds-select-field"
+                style={{ width: 120 }}
               >
-                <option value="">All Formats</option>
-                {(availFilters?.formats || ["wav", "flac", "mp3", "ogg", "aiff"]).map(
-                  (fmt) => (
-                    <option key={fmt} value={fmt}>
-                      {fmt.toUpperCase()}
-                    </option>
-                  )
-                )}
+                <option value="">All formats</option>
+                {(
+                  availFilters?.formats || ["wav", "flac", "mp3", "ogg", "aiff"]
+                ).map((fmt) => (
+                  <option key={fmt} value={fmt}>
+                    {fmt.toUpperCase()}
+                  </option>
+                ))}
               </select>
             </div>
 
-            <div>
-              <label className="mb-1 block text-[11px] text-zinc-400">
-                Source Root
-              </label>
+            <div className="ds-input-field">
+              <label className="ds-microlabel">Folder root</label>
               <select
                 value={filters.root}
                 onChange={(e) =>
                   setFilters({ ...filters, root: e.target.value })
                 }
-                className="max-w-[200px] truncate rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-zinc-200"
+                className="ds-select-field"
+                style={{ width: 180 }}
               >
-                <option value="">All Roots</option>
+                <option value="">All roots</option>
                 {(availFilters?.roots || []).map((rt) => (
                   <option key={rt} value={rt}>
                     {rt}
@@ -622,36 +808,35 @@ export const App: React.FC = () => {
               </select>
             </div>
 
-            <div>
-              <label className="mb-1 block text-[11px] text-zinc-400">
-                Min Loop Score
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                max="1"
-                placeholder="0.0 - 1.0"
-                value={filters.minLoopScore}
-                onChange={(e) =>
-                  setFilters({ ...filters, minLoopScore: e.target.value })
-                }
-                className="w-24 rounded border border-zinc-700 bg-zinc-950 px-2 py-1"
-              />
+            <div className="ds-input-field">
+              <label className="ds-microlabel">Min loop score</label>
+              <div className="ds-input-box" style={{ width: 90 }}>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="1"
+                  placeholder="0.0–1.0"
+                  value={filters.minLoopScore}
+                  onChange={(e) =>
+                    setFilters({ ...filters, minLoopScore: e.target.value })
+                  }
+                  className="ds-input ds-tnum"
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="mb-1 block text-[11px] text-zinc-400">
-                User Tag
-              </label>
+            <div className="ds-input-field">
+              <label className="ds-microlabel">User tag</label>
               <select
                 value={filters.userTag}
                 onChange={(e) =>
                   setFilters({ ...filters, userTag: e.target.value })
                 }
-                className="rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-zinc-200"
+                className="ds-select-field"
+                style={{ width: 120 }}
               >
-                <option value="">Any Tag</option>
+                <option value="">Any tag</option>
                 {(availFilters?.user_tags || []).map((t) => (
                   <option key={t} value={t}>
                     #{t}
@@ -660,22 +845,30 @@ export const App: React.FC = () => {
               </select>
             </div>
 
-            <label className="flex cursor-pointer items-center gap-1.5 rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1 text-zinc-200">
-              <input
-                type="checkbox"
-                checked={filters.favoritesOnly}
-                onChange={(e) =>
-                  setFilters({ ...filters, favoritesOnly: e.target.checked })
-                }
-              />
-              <Heart className="h-3.5 w-3.5 text-rose-400" />
-              Favorites Only
+            <label
+              className="ds-check"
+              style={{ height: "var(--control-height-md)" }}
+              onClick={() =>
+                setFilters({ ...filters, favoritesOnly: !filters.favoritesOnly })
+              }
+            >
+              <div
+                className={`ds-checkbox ${filters.favoritesOnly ? "on" : ""}`}
+              >
+                {filters.favoritesOnly && <div className="ds-checkbox-inner" />}
+              </div>
+              <span
+                className="ds-check-label"
+                style={{ fontSize: "var(--font-size-sm)" }}
+              >
+                Favorites only
+              </span>
             </label>
 
             <button
               type="button"
               onClick={() => runSearch(query, mode, filters)}
-              className="rounded bg-amber-500/20 px-3 py-1 font-medium text-amber-300 hover:bg-amber-500/30"
+              className="ds-btn ds-btn-primary ds-btn-sm"
             >
               Apply
             </button>
@@ -686,44 +879,213 @@ export const App: React.FC = () => {
                 setFilters(DEFAULT_FILTERS);
                 runSearch(query, mode, DEFAULT_FILTERS);
               }}
-              className="flex items-center gap-1 rounded px-2.5 py-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              className="ds-btn ds-btn-ghost ds-btn-sm"
             >
-              <RotateCcw className="h-3 w-3" />
+              <RotateCcw size={13} />
               Reset
             </button>
           </div>
         )}
       </header>
 
-      {/* Main Content Area: Results List + Optional Detail Panel */}
-      <div className="flex flex-1 overflow-hidden">
-        <main className="flex flex-1 flex-col overflow-hidden">
+      {/* Background Indexing Progress Banner */}
+      {isIndexing && indexing && (
+        <div className="sfx-index-banner">
+          <span className="ds-spinner" style={{ width: 14, height: 14 }} />
+          <div style={{ flex: 1 }}>
+            <div className="ds-progress-row">
+              <div className="ds-progress-label">
+                <span style={{ color: "var(--text-primary)" }}>
+                  Scanning library in background:{" "}
+                  <strong className="ds-tnum">
+                    {doneFiles} / {totalToIndex || "scanning..."}
+                  </strong>{" "}
+                  files indexed
+                  {hasIndexedFiles
+                    ? " — search is live while indexing continues"
+                    : " — search unlocks as soon as the first file finishes"}
+                </span>
+                <span className="ds-progress-pct ds-tnum">
+                  {indexing.files_per_min > 0
+                    ? `${indexing.files_per_min.toFixed(0)} files/min · ETA ${indexing.eta_seconds.toFixed(
+                        0
+                      )}s · `
+                    : ""}
+                  {progressPct}%
+                </span>
+              </div>
+              <div className="ds-progress-track">
+                <div
+                  className="ds-progress-fill"
+                  style={{ width: `${Math.max(3, progressPct)}%` }}
+                />
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLibraryModalOpen(true)}
+            className="ds-btn ds-btn-ghost ds-btn-sm"
+          >
+            Details
+          </button>
+        </div>
+      )}
+
+      {/* Main Workspace */}
+      <div className="sfx-workspace">
+        <main className="sfx-main">
           {/* Status bar */}
-          <div className="flex items-center justify-between border-b border-zinc-900 bg-zinc-950 px-5 py-1.5 text-xs text-zinc-400">
-            <span>
+          <div className="sfx-statusbar">
+            <span className="ds-tnum">
               {statusLabel ||
-                `${results.length} result${results.length === 1 ? "" : "s"}`}
+                (hasIndexedFiles
+                  ? `${results.length} result${results.length === 1 ? "" : "s"}`
+                  : roots.length === 0
+                  ? "Awaiting library folder selection"
+                  : "Indexing initial audio files...")}
             </span>
-            <span className="text-[11px] text-zinc-500">
-              Shortcuts: <kbd className="rounded bg-zinc-800 px-1">↑</kbd>{" "}
-              <kbd className="rounded bg-zinc-800 px-1">↓</kbd> navigate ·{" "}
-              <kbd className="rounded bg-zinc-800 px-1">Space</kbd> play/pause ·{" "}
-              <kbd className="rounded bg-zinc-800 px-1">Enter</kbd> details ·{" "}
-              <kbd className="rounded bg-zinc-800 px-1">/</kbd> search
+            <span>
+              <kbd className="sfx-kbd">↑</kbd> <kbd className="sfx-kbd">↓</kbd>{" "}
+              navigate · <kbd className="sfx-kbd">Space</kbd> play/pause ·{" "}
+              <kbd className="sfx-kbd">Enter</kbd> inspector ·{" "}
+              <kbd className="sfx-kbd">/</kbd> search
             </span>
           </div>
 
-          {/* Results rows */}
-          <div className="flex-1 divide-y divide-zinc-900 overflow-y-auto">
-            {results.length === 0 && !loading ? (
-              <div className="flex h-64 flex-col items-center justify-center gap-2 text-zinc-500">
-                <p className="text-sm">No matching sound effects found.</p>
-                <p className="text-xs">
-                  Try broadening your filters or indexing a folder with{" "}
-                  <code className="rounded bg-zinc-900 px-1.5 py-0.5 text-zinc-300">
-                    uv run sfxsearch index &lt;path&gt;
-                  </code>
-                </p>
+          {/* Content: Onboarding Empty State vs Results List */}
+          <div className="sfx-results-list ds-scroll">
+            {!hasIndexedFiles ? (
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minHeight: "100%",
+                  padding: "var(--space-8)",
+                }}
+              >
+                <div
+                  className="ds-panel"
+                  style={{ width: 520, maxWidth: "100%" }}
+                >
+                  <div className="ds-panel-head">
+                    <span className="ds-panel-title">Library setup</span>
+                    {isIndexing && (
+                      <span className="ds-badge ds-badge-accent">
+                        Scanning
+                      </span>
+                    )}
+                  </div>
+                  <div className="ds-panel-body">
+                    <div
+                      className="ds-empty"
+                      style={{ padding: "var(--space-4) 0 var(--space-5)" }}
+                    >
+                      <div className="ds-empty-icon">
+                        {isIndexing ? (
+                          <span className="ds-spinner" />
+                        ) : (
+                          <FolderPlus size={20} />
+                        )}
+                      </div>
+                      <div className="ds-empty-title">
+                        {roots.length === 0
+                          ? "Add your sound-effects folders"
+                          : "Indexing your first audio files"}
+                      </div>
+                      <div className="ds-empty-desc">
+                        {roots.length === 0
+                          ? "Define one or more folders containing your audio library. Files are decoded and embedded in the background, and search becomes available as soon as the first sound is indexed."
+                          : `Scanning ${roots.join(
+                              ", "
+                            )}. Search will activate automatically once the first file completes.`}
+                      </div>
+                    </div>
+
+                    <form
+                      onSubmit={handleOnboardingSubmit}
+                      className="ds-input-field"
+                    >
+                      <label className="ds-input-label">Folder path</label>
+                      <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                        <div
+                          className={`ds-input-box ${
+                            onboardingError ? "error" : ""
+                          }`}
+                          style={{ flex: 1 }}
+                        >
+                          <input
+                            type="text"
+                            value={onboardingInput}
+                            onChange={(e) => {
+                              setOnboardingInput(e.target.value);
+                              setOnboardingError("");
+                            }}
+                            placeholder="D:/SFX or C:/Projects/Audio"
+                            className="ds-input"
+                            style={{ fontFamily: "var(--font-mono)" }}
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={onboardingBusy || !onboardingInput.trim()}
+                          className="ds-btn ds-btn-primary"
+                        >
+                          <FolderPlus size={14} />
+                          Add folder
+                        </button>
+                        <button
+                          type="button"
+                          disabled={onboardingBusy}
+                          onClick={handleBrowseAndAddRoot}
+                          className="ds-btn ds-btn-secondary"
+                        >
+                          <FolderOpen size={14} />
+                          Browse
+                        </button>
+                      </div>
+                      {onboardingError && (
+                        <span className="ds-input-error">{onboardingError}</span>
+                      )}
+                    </form>
+
+                    {roots.length > 0 && (
+                      <div style={{ marginTop: "var(--space-4)" }}>
+                        <div
+                          className="ds-microlabel"
+                          style={{ marginBottom: "var(--space-2)" }}
+                        >
+                          Active folders
+                        </div>
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "var(--space-2)",
+                          }}
+                        >
+                          {roots.map((r) => (
+                            <span key={r} className="ds-badge ds-badge-neutral">
+                              {r}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : results.length === 0 && !loading ? (
+              <div className="ds-empty" style={{ marginTop: "var(--space-10)" }}>
+                <div className="ds-empty-icon">
+                  <Search size={20} />
+                </div>
+                <div className="ds-empty-title">No matching sounds</div>
+                <div className="ds-empty-desc">
+                  Adjust your query, switch search mode, or clear active
+                  filters.
+                </div>
               </div>
             ) : (
               results.map((hit, idx) => {
@@ -747,55 +1109,39 @@ export const App: React.FC = () => {
                       setSelectedIndex(idx);
                       setDetailOpen(true);
                     }}
-                    className={`group flex cursor-pointer items-center justify-between gap-4 px-5 py-2.5 transition ${
-                      isSelected
-                        ? "bg-zinc-900/90 ring-1 ring-inset ring-amber-500/40"
-                        : "hover:bg-zinc-900/40"
-                    }`}
+                    className={`sfx-row ${isSelected ? "selected" : ""}`}
                   >
-                    {/* Play button + Filename & Folder */}
-                    <div className="flex min-w-0 flex-1 items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedIndex(idx);
-                          playHit(hit);
-                        }}
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition ${
-                          isRowPlaying
-                            ? "bg-amber-500 text-zinc-950"
-                            : "bg-zinc-800 text-zinc-200 group-hover:bg-zinc-700"
-                        }`}
-                      >
-                        {isRowPlaying ? (
-                          <Pause className="h-4 w-4 fill-current" />
-                        ) : (
-                          <Play className="h-4 w-4 translate-x-0.5 fill-current" />
-                        )}
-                      </button>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedIndex(idx);
+                        playHit(hit);
+                      }}
+                      className={`sfx-play-btn ${
+                        isRowPlaying ? "playing" : ""
+                      }`}
+                      aria-label={isRowPlaying ? "Pause" : "Play"}
+                    >
+                      {isRowPlaying ? (
+                        <Pause size={14} />
+                      ) : (
+                        <Play size={14} />
+                      )}
+                    </button>
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-sm font-medium text-zinc-100">
-                            {hit.filename}
+                    <div className="sfx-row-info">
+                      <div className="sfx-row-title-line">
+                        <span className="sfx-row-filename">{hit.filename}</span>
+                        {hit.user_tags.map((t) => (
+                          <span key={t} className="ds-badge ds-badge-accent">
+                            {t}
                           </span>
-                          {hit.user_tags.map((t) => (
-                            <span
-                              key={t}
-                              className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
-                            >
-                              #{t}
-                            </span>
-                          ))}
-                        </div>
-                        <div className="truncate text-xs text-zinc-500">
-                          {hit.folder}
-                        </div>
+                        ))}
                       </div>
+                      <div className="sfx-row-folder">{hit.folder}</div>
                     </div>
 
-                    {/* Mini Waveform with best-offset marker */}
                     <MiniWaveform
                       fileId={hit.file_id}
                       durationS={hit.duration_s}
@@ -809,13 +1155,22 @@ export const App: React.FC = () => {
                       }}
                     />
 
-                    {/* Specs & Score breakdown on hover */}
-                    <div className="flex w-52 shrink-0 items-center justify-end gap-3 text-right font-mono text-xs">
-                      <div>
-                        <div className="text-zinc-200">
+                    <div className="sfx-row-metrics">
+                      <div style={{ textAlign: "right" }}>
+                        <div
+                          style={{
+                            fontSize: "var(--font-size-xs)",
+                            color: "var(--text-primary)",
+                          }}
+                        >
                           {hit.duration_s.toFixed(2)}s
                         </div>
-                        <div className="text-[10px] text-zinc-500">
+                        <div
+                          style={{
+                            fontSize: "var(--font-size-2xs)",
+                            color: "var(--text-tertiary)",
+                          }}
+                        >
                           {hit.format.split("/")[0].toUpperCase()} ·{" "}
                           {hit.best_offset_s > 0
                             ? `@${hit.best_offset_s.toFixed(1)}s`
@@ -823,43 +1178,34 @@ export const App: React.FC = () => {
                         </div>
                       </div>
 
-                      <div
-                        className="rounded bg-zinc-900 px-2 py-1 text-[11px] text-zinc-300"
+                      <span
+                        className="ds-badge ds-badge-neutral ds-tnum"
                         title={`RRF: ${hit.rrf_score.toFixed(5)} | CLAP: ${
                           hit.clap_score !== null
                             ? hit.clap_score.toFixed(3)
-                            : "-"
+                            : "—"
                         } | BM25: ${
                           hit.bm25_score !== null
                             ? hit.bm25_score.toFixed(2)
-                            : "-"
+                            : "—"
                         }`}
                       >
-                        <div className="text-amber-400">
-                          {hit.clap_score !== null
-                            ? `${(hit.clap_score * 100).toFixed(0)}%`
-                            : hit.rrf_score.toFixed(3)}
-                        </div>
-                        <div className="hidden text-[9px] text-zinc-500 group-hover:block">
-                          C:{hit.clap_score?.toFixed(2) ?? "-"} B:
-                          {hit.bm25_score?.toFixed(1) ?? "-"}
-                        </div>
-                      </div>
+                        {hit.clap_score !== null
+                          ? `${(hit.clap_score * 100).toFixed(0)}%`
+                          : hit.rrf_score.toFixed(3)}
+                      </span>
 
                       <button
                         type="button"
                         onClick={(e) => handleToggleFavoriteRow(e, hit)}
-                        className={`rounded p-1.5 transition ${
-                          hit.favorite
-                            ? "text-rose-400"
-                            : "text-zinc-600 hover:text-zinc-300"
+                        className={`sfx-icon-btn ${
+                          hit.favorite ? "fav-active" : ""
                         }`}
                         title="Toggle favorite"
                       >
                         <Heart
-                          className={`h-4 w-4 ${
-                            hit.favorite ? "fill-current" : ""
-                          }`}
+                          size={14}
+                          fill={hit.favorite ? "currentColor" : "none"}
                         />
                       </button>
 
@@ -869,10 +1215,10 @@ export const App: React.FC = () => {
                           e.stopPropagation();
                           handleFindSimilarFile(hit.file_id);
                         }}
-                        className="rounded p-1.5 text-zinc-500 hover:bg-zinc-800 hover:text-amber-400"
+                        className="sfx-icon-btn"
                         title="Find similar sounds"
                       >
-                        <Sparkles className="h-4 w-4" />
+                        <Sparkles size={14} />
                       </button>
                     </div>
                   </div>
@@ -882,7 +1228,7 @@ export const App: React.FC = () => {
           </div>
         </main>
 
-        {/* Detail Drawer */}
+        {/* Inspector Drawer */}
         {detailOpen && selectedHit && (
           <DetailPanel
             hit={selectedHit}

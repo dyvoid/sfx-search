@@ -1,0 +1,44 @@
+/* Behavior layer. Components carry inline styles for their *appearance*;
+   states that inline styles cannot express (:hover, :active, :focus-visible,
+   reduced motion) live here and read per-instance values the component sets
+   as inline custom properties. Nothing here paints unless the matching
+   data-ds-* attribute is present. */
+
+[data-ds-hover]:not(:disabled):hover { background: var(--_bg-hover); }
+[data-ds-hover]:not(:disabled):hover [data-ds-hover-fg] { color: var(--_fg-hover, inherit); }
+
+[data-ds-press]:not(:disabled):active { transform: translateY(1px); box-shadow: var(--_shadow-press, none); }
+
+[data-ds-focus]:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+[data-ds-focus]:focus:not(:focus-visible) { outline: none; }
+
+/* Visually hidden native control that still receives keyboard focus. */
+[data-ds-peer] { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; pointer-events: none; }
+[data-ds-peer]:focus-visible + [data-ds-peer-target] { box-shadow: var(--focus-ring); }
+
+/* Range input is transparent; ring the track that wraps it instead. */
+[data-ds-track]:has(:focus-visible) { box-shadow: var(--focus-ring); }
+
+/* Native browser surfaces. The token layer owns these so every consuming
+   app inherits a themed selection, caret, placeholder and accent without
+   per-component work. Values read the color tokens, so they flip with
+   [data-theme] automatically. */
+::selection { background: var(--primary-muted-bg); color: var(--text-primary); }
+:where(input, textarea, [contenteditable="true"]) { caret-color: var(--primary); }
+:where(input, textarea)::placeholder { color: var(--text-disabled); }
+:where(input[type="checkbox"], input[type="radio"], input[type="range"]) { accent-color: var(--primary); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Spinner is a loading indicator, not decorative motion.
+     A stationary spinner reads as "stuck" — keep it spinning. */
+  .ds-spinner {
+    animation-duration: 0.9s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

@@ -2,6 +2,8 @@ import {
   AvailableFilters,
   FileDetail,
   FilterState,
+  IndexingProgress,
+  LibraryStateResponse,
   LibraryStats,
   SearchHit,
   SearchMode,
@@ -128,4 +130,67 @@ export async function fetchAvailableFilters(): Promise<AvailableFilters> {
     throw new Error("Failed to fetch filters");
   }
   return (await res.json()) as AvailableFilters;
+}
+
+export async function fetchLibraryState(): Promise<LibraryStateResponse> {
+  const res = await fetch("/api/library");
+  if (!res.ok) {
+    throw new Error("Failed to fetch library state");
+  }
+  return (await res.json()) as LibraryStateResponse;
+}
+
+export async function addLibraryRoot(
+  path: string
+): Promise<{ roots: string[]; indexing: IndexingProgress }> {
+  const res = await fetch("/api/library/roots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || "Failed to add folder");
+  }
+  return await res.json();
+}
+
+export async function removeLibraryRoot(
+  path: string,
+  removeIndexedFiles: boolean = true
+): Promise<LibraryStateResponse> {
+  const res = await fetch("/api/library/roots", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, remove_indexed_files: removeIndexedFiles }),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to remove folder");
+  }
+  return await res.json();
+}
+
+export async function rescanLibrary(
+  reindex: boolean = false
+): Promise<{ roots: string[]; indexing: IndexingProgress }> {
+  const res = await fetch("/api/library/rescan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reindex }),
+  });
+  if (!res.ok) {
+    throw new Error("Failed to trigger rescan");
+  }
+  return await res.json();
+}
+
+export async function pickNativeFolder(): Promise<string | null> {
+  const res = await fetch("/api/library/pick-folder", {
+    method: "POST",
+  });
+  if (!res.ok) {
+    return null;
+  }
+  const data = await res.json();
+  return (data.path as string) || null;
 }

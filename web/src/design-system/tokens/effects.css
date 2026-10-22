@@ -1,0 +1,42 @@
+:root {
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius-full: 999px;
+  /* Window frame — the one rounded container; controls and panels stay sharp. */
+  --radius-win: 10px;
+
+  --border-width: 1px;
+  --blur-panel: 20px;
+
+  /* ============================================================
+     PRESENCE SCALE (0.0 = Flat/Obsidian, 0.5 = Tactile, 1.0 = Lush Depth)
+     Single knob consumed by shadow, highlight, and muted-bg tokens.
+     0 = original flat baseline, 1 = heightened dramatic ceiling.
+     ============================================================ */
+  --presence: 0.5;
+}
+
+:root,
+[data-theme="dark"] {
+  /* Rich multi-layer drop shadows for elevated surfaces */
+  --shadow-sm: 0 1px 2px oklch(0% 0 0 / calc(0.30 * var(--presence))), 0 3px 8px oklch(0% 0 0 / calc(0.42 * var(--presence)));
+  --shadow-md: 0 2px 4px oklch(0% 0 0 / calc(0.38 * var(--presence))), 0 8px 24px oklch(0% 0 0 / calc(0.62 * var(--presence)));
+  --shadow-lg: 0 4px 8px oklch(0% 0 0 / calc(0.45 * var(--presence))), 0 18px 48px oklch(0% 0 0 / calc(0.80 * var(--presence)));
+
+  --inset-highlight: inset 0 1px 0 oklch(100% 0 0 / calc(0.20 * var(--presence)));
+  --inset-rail: inset 0 1px 3px oklch(0% 0 0 / calc(0.70 * var(--presence)));
+  --focus-ring: 0 0 0 1px var(--surface-app), 0 0 0 2px oklch(from var(--primary-seed) l c h / 0.55), 0 0 0 4px oklch(from var(--primary-seed) l c h / 0.18);
+}
+
+[data-theme="light"] {
+  --shadow-sm: 0 1px 2px oklch(20% 0.012 260 / calc(0.10 * var(--presence))), 0 3px 8px oklch(20% 0.012 260 / calc(0.14 * var(--presence)));
+  --shadow-md: 0 2px 4px oklch(20% 0.012 260 / calc(0.14 * var(--presence))), 0 8px 24px oklch(20% 0.012 260 / calc(0.22 * var(--presence)));
+  --shadow-lg: 0 4px 8px oklch(20% 0.012 260 / calc(0.16 * var(--presence))), 0 18px 48px oklch(20% 0.012 260 / calc(0.32 * var(--presence)));
+
+  --inset-highlight: inset 0 1px 0 oklch(100% 0 0 / calc(1.0 * var(--presence)));
+  --inset-rail: inset 0 1px 3px oklch(20% 0.012 260 / calc(0.40 * var(--presence)));
+  --focus-ring: 0 0 0 1px var(--surface-app), 0 0 0 2px oklch(from var(--primary-seed) l c h / 0.5), 0 0 0 4px oklch(from var(--primary-seed) l c h / 0.16);
+}
