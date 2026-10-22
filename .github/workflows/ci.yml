@@ -16,6 +16,8 @@ jobs:
   backend:
     name: Backend (Python 3.12 · Ruff · Black · Mypy · Pytest)
     runs-on: ubuntu-latest
+    env:
+      UV_NO_SYNC: "1"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,8 +33,10 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - name: Install dependencies (CPU-only torch; tests don't need CUDA)
+        run: |
+          uv sync --extra dev --no-install-package torch
+          uv pip install --torch-backend=cpu torch
 
       - name: Lint with Ruff
         run: uv run ruff check backend tests

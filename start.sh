@@ -25,9 +25,7 @@ uv sync
 
 echo "[sfx-search] Installing and building Web UI..."
 pushd web >/dev/null
-if [ ! -d "node_modules" ]; then
-    npm install
-fi
+npm install --no-audit --no-fund
 npm run build
 popd >/dev/null
 

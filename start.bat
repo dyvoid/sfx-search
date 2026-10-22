@@ -35,14 +35,12 @@ if errorlevel 1 (
 
 echo [sfx-search] Installing and building Web UI...
 pushd web
-if not exist "node_modules" (
-    call npm install
-    if errorlevel 1 (
-        popd
-        echo [ERROR] 'npm install' failed.
-        pause
-        exit /b 1
-    )
+call npm install --no-audit --no-fund
+if errorlevel 1 (
+    popd
+    echo [ERROR] 'npm install' failed.
+    pause
+    exit /b 1
 )
 call npm run build
 if errorlevel 1 (
@@ -55,4 +53,4 @@ popd
 
 echo [sfx-search] Starting server at http://127.0.0.1:8765 ...
 start "" "http://127.0.0.1:8765"
-call uv run sfxsearch serve
+call uv run sfxsearch serve %*
