@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import mimetypes
 import os
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -26,15 +28,15 @@ from .features import compute_waveform_peaks
 from .indexer import IndexStats, run_indexer
 from .scan import normalize_path, to_os_path
 from .search import SearchEngine, SearchMode, SortMode
-from .store import SearchFilters, SfxStore, UserDataRecord
+from .store import ModelMismatchError, SearchFilters, SfxStore, UserDataRecord
 
 NATIVE_BROWSER_EXTS: set[str] = {".mp3", ".ogg", ".opus", ".m4a", ".aac", ".flac"}
 
 
 class SearchRequestBody(BaseModel):
     query: str = ""
-    k: int = 50
-    offset: int = 0
+    k: int = Field(50, ge=1, le=500)
+    offset: int = Field(0, ge=0)
     mode: SearchMode = "hybrid"
     sort: SortMode = "relevance"
     min_duration: float | None = None
@@ -54,12 +56,6 @@ class UserDataUpdateBody(BaseModel):
     favorite: bool | None = None
     user_tags: list[str] | None = None
     note: str | None = None
-
-
-class BatchSearchBody(BaseModel):
-    queries: list[str] = Field(default_factory=list)
-    k: int = 20
-    mode: SearchMode = "hybrid"
 
 
 class RootAddBody(BaseModel):
@@ -143,8 +139,9 @@ class BackgroundIndexManager:
                 return
 
             def _on_progress(st: IndexStats) -> None:
+                # Snapshot: the indexer thread keeps mutating `st` after the call.
                 with self._lock:
-                    self._latest_stats = st
+                    self._latest_stats = dataclasses.replace(st)
 
             try:
                 final_stats = run_indexer(
@@ -232,7 +229,7 @@ def _ensure_transcoded_wav(
 
     src_os = to_os_path(str(file_row["path"]))
     out_channels = min(2, max(1, int(file_row.get("channels") or 1)))
-    tmp_path = transcode_dir / f"{fid}_{mtime_ns}.tmp.wav"
+    tmp_path = transcode_dir / f"{fid}_{mtime_ns}.{os.getpid()}_{threading.get_ident()}.tmp.wav"
     cmd = [
         ffmpeg_bin,
         "-nostdin",
@@ -253,9 +250,43 @@ def _ensure_transcoded_wav(
     proc = subprocess.run(cmd, capture_output=True, timeout=120.0, check=False)
     if proc.returncode != 0 or not tmp_path.is_file():
         stderr_txt = proc.stderr.decode("utf-8", errors="replace").strip()
+        tmp_path.unlink(missing_ok=True)
         raise HTTPException(status_code=500, detail=f"Audio transcode failed: {stderr_txt}")
-    tmp_path.replace(cached_path)
+    try:
+        tmp_path.replace(cached_path)
+    except OSError:
+        # Another request may be streaming cached_path; serve it if valid.
+        if not (cached_path.is_file() and cached_path.stat().st_size > 44):
+            raise
+    finally:
+        tmp_path.unlink(missing_ok=True)
+    _prune_transcode_cache(transcode_dir)
     return cached_path
+
+
+def _prune_transcode_cache(transcode_dir: Path, max_files: int = 256) -> None:
+    try:
+        now = time.time()
+        wavs: list[Path] = []
+        for p in transcode_dir.iterdir():
+            if p.suffix == ".tmp" or p.name.endswith(".tmp.wav"):
+                try:
+                    if now - p.stat().st_mtime > 600:
+                        p.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                continue
+            if p.suffix == ".wav":
+                wavs.append(p)
+        if len(wavs) > max_files:
+            wavs.sort(key=lambda p: p.stat().st_mtime)
+            for p in wavs[: len(wavs) - max_files]:
+                try:
+                    p.unlink(missing_ok=True)
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
 
 def _iter_file_range(
@@ -346,17 +377,41 @@ def create_app(
     app = FastAPI(title="sfx-search API", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ],
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
     )
 
+    @app.middleware("http")
+    async def local_origin_guard(request: Request, call_next: Any) -> Response:
+        # Browsers always send Origin on mutating requests; local tools don't.
+        # Rejects browser-originated CSRF from arbitrary websites.
+        if request.method in ("POST", "PUT", "DELETE", "PATCH"):
+            origin = request.headers.get("origin") or ""
+            if origin:
+                from urllib.parse import urlsplit
+
+                try:
+                    host = urlsplit(origin).hostname or ""
+                except ValueError:
+                    host = ""
+                if host not in {"localhost", "127.0.0.1", "::1"}:
+                    return JSONResponse(status_code=403, content={"detail": "Forbidden origin"})
+        return await call_next(request)
+
     app.state.config = cfg
     app.state.store = st
     app.state.engine = engine
     app.state.index_mgr = index_mgr
+
+    @app.exception_handler(ModelMismatchError)
+    async def model_mismatch_handler(request: Request, exc: ModelMismatchError) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     @app.get("/api/library")
     def api_get_library() -> dict[str, Any]:
@@ -390,6 +445,8 @@ def create_app(
 
     @app.delete("/api/library/roots")
     def api_remove_library_root(body: RootRemoveBody) -> dict[str, Any]:
+        if not body.path.strip():
+            raise HTTPException(status_code=400, detail="Path must not be empty")
         norm = normalize_path(body.path.strip())
         current = [
             normalize_path(r)
@@ -530,22 +587,40 @@ def create_app(
         file: UploadFile = File(...),
         k: int = Query(30, ge=1, le=500),
     ) -> dict[str, Any]:
+        from starlette.concurrency import run_in_threadpool
+
         suffix = Path(file.filename or "upload.wav").suffix or ".wav"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            content = await file.read()
-            tmp.write(content)
-            tmp_path = Path(tmp.name)
+        max_bytes = 256 * 1024 * 1024
+        too_large = False
+        tmp_path: Path | None = None
         try:
-            hits = engine.find_similar_from_audio_file(tmp_path, k=k)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                tmp_path = Path(tmp.name)
+                written = 0
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        too_large = True
+                        break
+                    tmp.write(chunk)
+            if too_large:
+                raise HTTPException(status_code=413, detail="Upload too large")
+            hits = await run_in_threadpool(engine.find_similar_from_audio_file, tmp_path, k=k)
+        except (HTTPException, ModelMismatchError):
+            raise
         except Exception as exc:
             raise HTTPException(
                 status_code=400, detail=f"Failed to process uploaded audio: {exc}"
             ) from exc
         finally:
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
         return {
             "source_filename": file.filename,
             "count": len(hits),
@@ -609,12 +684,31 @@ def create_app(
         }
 
     @app.get("/api/audio/{file_id}")
+    @app.head("/api/audio/{file_id}", include_in_schema=False)
     def api_stream_audio(file_id: str, request: Request) -> Response:
         f_row = st.get_file_by_id_or_path(file_id)
         if f_row is None:
             raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
 
+        if str(f_row.get("status") or "ok") != "ok" or not os.path.isfile(
+            to_os_path(str(f_row["path"]))
+        ):
+            raise HTTPException(status_code=404, detail="Audio file missing on disk")
+
         if _needs_transcode(f_row):
+            if request.method == "HEAD":
+                # Avoid running ffmpeg just for headers; report the
+                # transcode cache entry's size when it already exists.
+                fid = str(f_row["file_id"])
+                mtime_ns = int(f_row.get("mtime_ns") or 0)
+                cached = cfg.transcode_dir / f"{fid}_{mtime_ns}.wav"
+                headers = {
+                    "Content-Type": "audio/wav",
+                    "Accept-Ranges": "bytes",
+                }
+                if cached.is_file():
+                    headers["Content-Length"] = str(cached.stat().st_size)
+                return Response(status_code=200, headers=headers)
             target_path = _ensure_transcoded_wav(
                 f_row,
                 transcode_dir=cfg.transcode_dir,
@@ -652,10 +746,12 @@ def create_app(
         if cache_file.is_file():
             try:
                 payload = json.loads(cache_file.read_text(encoding="utf-8"))
-                return JSONResponse(
-                    content=payload,
-                    headers={"Cache-Control": "public, max-age=86400"},
-                )
+                cached_mtime = payload.get("mtime_ns")
+                if cached_mtime is None or int(cached_mtime) == int(f_row.get("mtime_ns") or 0):
+                    return JSONResponse(
+                        content=payload,
+                        headers={"Cache-Control": "public, max-age=86400"},
+                    )
             except Exception:
                 pass
 
@@ -667,15 +763,26 @@ def create_app(
             )
             peaks = compute_waveform_peaks(samples, num_bins=bins)
         except Exception:
-            peaks = [0.0] * bins
+            return JSONResponse(
+                content={
+                    "file_id": fid,
+                    "mtime_ns": int(f_row.get("mtime_ns") or 0),
+                    "duration_s": round(float(f_row.get("duration_s") or 0.0), 4),
+                    "peaks": [0.0] * bins,
+                },
+                headers={"Cache-Control": "no-store"},
+            )
 
         payload = {
             "file_id": fid,
+            "mtime_ns": int(f_row.get("mtime_ns") or 0),
             "duration_s": round(float(f_row.get("duration_s") or 0.0), 4),
             "peaks": peaks,
         }
         try:
-            cache_file.write_text(json.dumps(payload), encoding="utf-8")
+            cache_tmp = cache_file.with_suffix(".json.tmp")
+            cache_tmp.write_text(json.dumps(payload), encoding="utf-8")
+            cache_tmp.replace(cache_file)
         except OSError:
             pass
         return JSONResponse(
@@ -711,8 +818,11 @@ def create_app(
         win_path = os.path.normpath(raw_path.replace("/", "\\"))
         if not os.path.exists(to_os_path(win_path)):
             raise HTTPException(status_code=404, detail=f"File not found on disk: {win_path}")
-        if sys.platform == "win32":
-            subprocess.Popen(["explorer.exe", f"/select,{win_path}"])
+        if sys.platform != "win32":
+            raise HTTPException(
+                status_code=501, detail="Reveal in Explorer is only supported on Windows"
+            )
+        subprocess.Popen(["explorer.exe", f"/select,{win_path}"])
         return {"revealed": True, "path": raw_path}
 
     @app.get("/api/stats")
@@ -728,7 +838,12 @@ def create_app(
     def api_filters() -> dict[str, Any]:
         return st.get_available_filters()
 
-    web_dist = Path(__file__).resolve().parent.parent / "web" / "dist"
+    web_dist_env = os.environ.get("SFXSEARCH_WEB_DIST")
+    web_dist = (
+        Path(web_dist_env).resolve()
+        if web_dist_env
+        else Path(__file__).resolve().parent.parent / "web" / "dist"
+    ).resolve()
     if web_dist.is_dir():
         assets_dir = web_dist / "assets"
         if assets_dir.is_dir():
@@ -736,8 +851,10 @@ def create_app(
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def serve_spa(full_path: str) -> Response:
-            candidate = web_dist / full_path
-            if full_path and candidate.is_file():
+            if full_path.split("/", 1)[0] == "api":
+                raise HTTPException(status_code=404, detail="Not found")
+            candidate = (web_dist / full_path).resolve()
+            if full_path and candidate.is_relative_to(web_dist) and candidate.is_file():
                 return FileResponse(str(candidate))
             index_html = web_dist / "index.html"
             if index_html.is_file():
