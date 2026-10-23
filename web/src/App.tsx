@@ -751,11 +751,9 @@ export const App: React.FC = () => {
         e.preventDefault();
         const currentHit = results[selectedIndex];
         if (currentHit) {
-          revealInExplorer(currentHit.file_id)
-            .then(() =>
-              setStatusLabel(`Revealed '${currentHit.filename}' in Explorer`)
-            )
-            .catch(() => setStatusLabel("Reveal failed"));
+          revealInExplorer(currentHit.file_id).catch(() =>
+            setStatusLabel("Reveal failed")
+          );
         }
       } else if (
         (e.key === "f" || e.key === "F") &&
@@ -942,7 +940,6 @@ export const App: React.FC = () => {
     e.stopPropagation();
     try {
       await revealInExplorer(hit.file_id);
-      setStatusLabel(`Revealed '${hit.filename}' in Explorer`);
     } catch {
       setStatusLabel(`Could not reveal '${hit.filename}'`);
     }
