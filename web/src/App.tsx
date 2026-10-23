@@ -1721,9 +1721,8 @@ export const App: React.FC = () => {
                     {doneFiles} / {totalToIndex || "scanning..."}
                   </strong>{" "}
                   files indexed
-                  {hasIndexedFiles
-                    ? " — search is live while indexing continues"
-                    : " — search unlocks as soon as the first file finishes"}
+                  {!hasIndexedFiles &&
+                    " — search unlocks as soon as the first file finishes"}
                 </span>
                 <span className="ds-progress-pct ds-tnum">
                   {indexing.files_per_min > 0
