@@ -737,8 +737,15 @@ body.sfx-resizing-x {
   flex-shrink: 0;
 }
 
-.sfx-statusbar-shortcuts {
+.sfx-statusbar > span {
+  min-width: 0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sfx-statusbar-shortcuts {
+  flex-shrink: 0;
 }
 
 .sfx-kbd {
@@ -852,6 +859,23 @@ body.sfx-resizing-x {
   font-feature-settings: var(--tnum);
   white-space: nowrap;
   margin-left: auto;
+}
+
+.sfx-similar-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.sfx-similar-actions .ds-btn {
+  min-width: 0;
+}
+
+.sfx-btn-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 6-cell Studio Parameter Readout Grid */

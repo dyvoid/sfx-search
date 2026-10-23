@@ -282,22 +282,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             </div>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                hit.duration_s > 12.5 ? "1fr 1fr" : "1fr",
-              gap: "var(--space-2)",
-              marginTop: "var(--space-3)",
-            }}
-          >
+          <div className="sfx-similar-actions">
             <button
               type="button"
               onClick={() => onFindSimilarFile(hit.file_id)}
               className="ds-btn ds-btn-secondary ds-btn-sm"
             >
               <Sparkles size={14} />
-              Find similar sounds
+              <span className="sfx-btn-label">Find similar sounds</span>
             </button>
             {hit.duration_s > 12.5 && (
               <button
@@ -308,7 +300,9 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 className="ds-btn ds-btn-secondary ds-btn-sm"
               >
                 <Sparkles size={14} />
-                Similar chunk #{selectedChunkIdx}
+                <span className="sfx-btn-label">
+                  Similar chunk #{selectedChunkIdx}
+                </span>
               </button>
             )}
           </div>

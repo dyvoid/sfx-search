@@ -300,7 +300,11 @@ export const App: React.FC = () => {
   const [statusLabel, setStatusLabel] = useState<string>("");
 
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
-  const [detailOpen, setDetailOpen] = useState<boolean>(true);
+  // Below the 960px breakpoint the inspector is a blocking overlay, so it
+  // starts collapsed there -- the edge tab (or Enter) opens it explicitly.
+  const [detailOpen, setDetailOpen] = useState<boolean>(
+    () => window.innerWidth >= 960
+  );
 
   const [playingFileId, setPlayingFileId] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -705,6 +709,14 @@ export const App: React.FC = () => {
         "button, a, [role='button'], [role='option'], [role='menuitem'], [role='switch'], [role='checkbox']"
       );
       if (onControl && (e.key === " " || e.key === "Enter")) {
+        return;
+      }
+
+      if (e.key === "Escape") {
+        // Not inside an input (handled above); an open dropdown owns Escape.
+        if (!document.querySelector('[role="listbox"]')) {
+          setDetailOpen(false);
+        }
         return;
       }
 
