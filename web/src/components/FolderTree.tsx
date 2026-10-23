@@ -14,6 +14,7 @@ interface FolderTreeProps {
   folders: FolderEntry[];
   roots: string[];
   selected: string[];
+  filterText: string;
   onToggle: (path: string) => void;
 }
 
@@ -237,41 +238,77 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
   folders,
   roots,
   selected,
+  filterText,
   onToggle,
 }) => {
   const tree = useMemo(() => buildTree(folders, roots), [folders, roots]);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [openSet, setOpenSet] = useState<Set<string>>(() => new Set());
+  const [closedSet, setClosedSet] = useState<Set<string>>(() => new Set());
 
-  // Every node is expanded unless the user collapsed it; ancestors of
-  // selected folders can never end up collapsed, so the selection stays
-  // visible when the pane re-renders.
+  // While a filter term is active, keep only matching nodes and their
+  // ancestors so the match path stays visible.
+  const filtered = useMemo(() => {
+    const t = filterText.trim().toLowerCase();
+    if (!t) {
+      return null;
+    }
+    const keep = (n: FolderNode): FolderNode | null => {
+      const kids = n.children
+        .map(keep)
+        .filter((k): k is FolderNode => k !== null);
+      if (n.name.toLowerCase().includes(t) || kids.length > 0) {
+        return { ...n, children: kids };
+      }
+      return null;
+    };
+    return tree.map(keep).filter((k): k is FolderNode => k !== null);
+  }, [tree, filterText]);
+
+  // Nodes are collapsed by default except top-level roots (one level open,
+  // like a file explorer). The user opens/closes deeper nodes; ancestors of
+  // selected folders are always forced open so the selection stays visible.
   const expanded = useMemo(() => {
     const set = new Set<string>();
     const sel = selected.map(normKey);
-    const collect = (nodes: FolderNode[]) => {
+    const collect = (nodes: FolderNode[], depth: number) => {
       for (const n of nodes) {
         const k = normKey(n.path);
         const holdsSelection = sel.some(
           (s) => s === k || s.startsWith(k + "/")
         );
-        if (!collapsed.has(k) || holdsSelection) {
+        const open =
+          filtered !== null ||
+          holdsSelection ||
+          openSet.has(k) ||
+          (depth === 0 && !closedSet.has(k));
+        if (open) {
           set.add(k);
-          collect(n.children);
+          collect(n.children, depth + 1);
         }
       }
     };
-    collect(tree);
+    collect(filtered ?? tree, 0);
     return set;
-  }, [tree, collapsed, selected]);
+  }, [tree, filtered, openSet, closedSet, selected]);
 
   const toggleExpand = (path: string) => {
     const key = normKey(path);
-    setCollapsed((prev) => {
+    const isOpen = expanded.has(key);
+    setOpenSet((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) {
+      if (isOpen) {
         next.delete(key);
       } else {
         next.add(key);
+      }
+      return next;
+    });
+    setClosedSet((prev) => {
+      const next = new Set(prev);
+      if (isOpen) {
+        next.add(key);
+      } else {
+        next.delete(key);
       }
       return next;
     });
@@ -288,9 +325,13 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
     return selected.some((s) => lp.startsWith(normKey(s) + "/"));
   };
 
+  const visible = filtered ?? tree;
   return (
     <div className="sfx-ft-tree">
-      {tree.map((n) => (
+      {filtered !== null && filtered.length === 0 && (
+        <div className="sfx-ft-empty">No folders match</div>
+      )}
+      {visible.map((n) => (
         <NodeRow
           key={normKey(n.path)}
           node={n}

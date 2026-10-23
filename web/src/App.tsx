@@ -278,6 +278,7 @@ export const App: React.FC = () => {
   const [indexing, setIndexing] = useState<IndexingProgress | null>(null);
   const [availFilters, setAvailFilters] = useState<AvailableFilters | null>(null);
   const [folderIndex, setFolderIndex] = useState<FolderEntry[]>([]);
+  const [folderFilterText, setFolderFilterText] = useState<string>("");
   const [libraryModalOpen, setLibraryModalOpen] = useState<boolean>(false);
 
   const [results, setResults] = useState<SearchHit[]>([]);
@@ -1770,11 +1771,22 @@ export const App: React.FC = () => {
                 </button>
               )}
             </div>
+            <div className="sfx-folder-search ds-input-box">
+              <input
+                type="text"
+                className="ds-input"
+                value={folderFilterText}
+                onChange={(e) => setFolderFilterText(e.target.value)}
+                placeholder="Filter folders..."
+                spellCheck={false}
+              />
+            </div>
             <div className="sfx-ft-scroll ds-scroll">
               <FolderTree
                 folders={folderIndex}
                 roots={roots}
                 selected={filters.folders}
+                filterText={folderFilterText}
                 onToggle={toggleFolderFilter}
               />
             </div>
