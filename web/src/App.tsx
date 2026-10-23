@@ -1,14 +1,15 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
   Clock,
   Filter,
   FolderOpen,
   FolderPlus,
   Heart,
   History,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightOpen,
   Pause,
   Play,
   Repeat,
@@ -975,13 +976,12 @@ export const App: React.FC = () => {
     runSearch(query, mode, next, sort);
   }, [filters, query, mode, sort, runSearch]);
 
-  const handleRailPointerDown =
+  const handlePaneDragDown =
     (side: "l" | "r") => (e: React.PointerEvent<HTMLDivElement>) => {
-      if ((e.target as HTMLElement).closest("button")) {
-        return;
-      }
       e.preventDefault();
       e.currentTarget.setPointerCapture(e.pointerId);
+      e.currentTarget.classList.add("dragging");
+      document.body.classList.add("sfx-resizing-x");
       paneDragRef.current = {
         side,
         startX: e.clientX,
@@ -989,7 +989,7 @@ export const App: React.FC = () => {
       };
     };
 
-  const handleRailPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const handlePaneDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const d = paneDragRef.current;
     if (!d) {
       return;
@@ -1002,8 +1002,10 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleRailPointerUp = () => {
+  const handlePaneDragUp = (e: React.PointerEvent<HTMLDivElement>) => {
     paneDragRef.current = null;
+    e.currentTarget.classList.remove("dragging");
+    document.body.classList.remove("sfx-resizing-x");
   };
 
   const toggleFavoriteFile = async (hit: SearchHit) => {
@@ -1788,16 +1790,27 @@ export const App: React.FC = () => {
           <aside className="sfx-folder-pane" style={{ width: folderPaneW }}>
             <div className="sfx-folder-head">
               <span className="ds-panel-title">Folders</span>
-              {filters.folders.length > 0 && (
+              <div className="sfx-folder-head-actions">
+                {filters.folders.length > 0 && (
+                  <button
+                    type="button"
+                    className="ds-btn ds-btn-ghost ds-btn-sm"
+                    onClick={clearFolderFilters}
+                    title="Clear folder selection"
+                  >
+                    Clear ({filters.folders.length})
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="ds-btn ds-btn-ghost ds-btn-sm"
-                  onClick={clearFolderFilters}
-                  title="Clear folder selection"
+                  className="sfx-icon-btn"
+                  onClick={() => setFolderPaneOpen(false)}
+                  aria-label="Collapse folder panel"
+                  title="Collapse folder panel"
                 >
-                  Clear ({filters.folders.length})
+                  <PanelLeftClose size={15} />
                 </button>
-              )}
+              </div>
             </div>
             <div className="sfx-folder-search ds-input-box">
               <input
@@ -1820,34 +1833,28 @@ export const App: React.FC = () => {
             </div>
           </aside>
         )}
-        {hasIndexedFiles && (
+        {hasIndexedFiles && folderPaneOpen && (
           <div
-            className="sfx-pane-rail"
+            className="sfx-pane-divider"
             role="separator"
             aria-orientation="vertical"
-            onPointerDown={handleRailPointerDown("l")}
-            onPointerMove={handleRailPointerMove}
-            onPointerUp={handleRailPointerUp}
-            onPointerCancel={handleRailPointerUp}
+            onPointerDown={handlePaneDragDown("l")}
+            onPointerMove={handlePaneDragMove}
+            onPointerUp={handlePaneDragUp}
+            onPointerCancel={handlePaneDragUp}
+          />
+        )}
+        {hasIndexedFiles && !folderPaneOpen && (
+          <button
+            type="button"
+            className="sfx-pane-tab"
+            onClick={() => setFolderPaneOpen(true)}
+            aria-label="Expand folder panel"
+            title="Expand folder panel"
           >
-            <button
-              type="button"
-              className="sfx-rail-btn"
-              onClick={() => setFolderPaneOpen((v) => !v)}
-              aria-label={
-                folderPaneOpen ? "Collapse folder panel" : "Expand folder panel"
-              }
-              title={
-                folderPaneOpen ? "Collapse folder panel" : "Expand folder panel"
-              }
-            >
-              {folderPaneOpen ? (
-                <ChevronLeft size={13} />
-              ) : (
-                <ChevronRight size={13} />
-              )}
-            </button>
-          </div>
+            <PanelLeftOpen size={14} />
+            <span className="sfx-pane-tab-label">Folders</span>
+          </button>
         )}
         <main className="sfx-main">
           {/* Sticky Column Header when files exist */}
@@ -2243,38 +2250,28 @@ export const App: React.FC = () => {
           </footer>
         </main>
 
-        {hasIndexedFiles && (
+        {detailOpen && selectedHit && (
           <div
-            className="sfx-pane-rail"
+            className="sfx-pane-divider"
             role="separator"
             aria-orientation="vertical"
-            onPointerDown={handleRailPointerDown("r")}
-            onPointerMove={handleRailPointerMove}
-            onPointerUp={handleRailPointerUp}
-            onPointerCancel={handleRailPointerUp}
+            onPointerDown={handlePaneDragDown("r")}
+            onPointerMove={handlePaneDragMove}
+            onPointerUp={handlePaneDragUp}
+            onPointerCancel={handlePaneDragUp}
+          />
+        )}
+        {hasIndexedFiles && (!detailOpen || !selectedHit) && (
+          <button
+            type="button"
+            className="sfx-pane-tab sfx-pane-tab-right"
+            onClick={() => setDetailOpen(true)}
+            aria-label="Expand inspector"
+            title="Expand inspector"
           >
-            <button
-              type="button"
-              className="sfx-rail-btn"
-              onClick={() => setDetailOpen((v) => !v)}
-              aria-label={
-                detailOpen && selectedHit
-                  ? "Collapse inspector"
-                  : "Expand inspector"
-              }
-              title={
-                detailOpen && selectedHit
-                  ? "Collapse inspector"
-                  : "Expand inspector"
-              }
-            >
-              {detailOpen && selectedHit ? (
-                <ChevronRight size={13} />
-              ) : (
-                <ChevronLeft size={13} />
-              )}
-            </button>
-          </div>
+            <PanelRightOpen size={14} />
+            <span className="sfx-pane-tab-label">Inspector</span>
+          </button>
         )}
 
         {/* Right Inspector Drawer */}
