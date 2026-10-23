@@ -31,12 +31,4 @@ popd >/dev/null
 
 URL="http://127.0.0.1:8765"
 echo "[sfx-search] Starting server at ${URL} ..."
-if command -v explorer.exe >/dev/null 2>&1; then
-    explorer.exe "$URL" >/dev/null 2>&1 || true
-elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$URL" >/dev/null 2>&1 || true
-elif command -v open >/dev/null 2>&1; then
-    open "$URL" >/dev/null 2>&1 || true
-fi
-
-exec uv run sfxsearch serve "$@"
+exec uv run sfxsearch serve --open "$@"

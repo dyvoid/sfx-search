@@ -292,6 +292,13 @@ def cmd_serve(
         Path | None,
         typer.Option("--config", "-c", help="Path to config.toml."),
     ] = None,
+    open_browser: Annotated[
+        bool,
+        typer.Option(
+            "--open/--no-open",
+            help="Open the web UI in the default browser once the server answers.",
+        ),
+    ] = False,
 ) -> None:
     """Start the FastAPI web server (or MCP server with --mcp)."""
     import uvicorn
@@ -307,11 +314,46 @@ def cmd_serve(
         run_mcp_server(transport=mcp_transport, host=bind_host, port=bind_port, config=cfg)
         return
 
+    if open_browser:
+        _open_browser_when_ready(bind_host, bind_port)
+
     fastapi_app = create_app(config=cfg)
     console.print(
         f"[bold green]Starting sfx-search server on http://{bind_host}:{bind_port}[/bold green]"
     )
     uvicorn.run(fastapi_app, host=bind_host, port=bind_port, log_level="info")
+
+
+def _open_browser_when_ready(host: str, port: int) -> None:
+    """Open the web UI in the default browser once the server answers."""
+    import threading
+    import time
+    import urllib.error
+    import urllib.request
+    import webbrowser
+
+    display_host = host if host not in ("0.0.0.0", "::", "") else "127.0.0.1"
+    url = f"http://{display_host}:{port}"
+
+    def wait_and_open() -> None:
+        deadline = time.monotonic() + 120.0
+        while time.monotonic() < deadline:
+            try:
+                urllib.request.urlopen(f"{url}/api/library", timeout=2)
+                break
+            except urllib.error.HTTPError:
+                # Server is up even if the endpoint itself errored.
+                break
+            except OSError:
+                time.sleep(0.25)
+        else:
+            console.print(
+                f"[yellow]Timed out waiting for the server; open {url} manually.[/yellow]"
+            )
+            return
+        webbrowser.open(url)
+
+    threading.Thread(target=wait_and_open, daemon=True).start()
 
 
 @app.command("eval")
