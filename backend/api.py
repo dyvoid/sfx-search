@@ -381,6 +381,9 @@ def create_app(
             "http://localhost:5173",
             "http://127.0.0.1:5173",
         ],
+        # Other local tools (e.g. web UIs on other dev-server ports) may fetch
+        # dropped audio URLs cross-origin.
+        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -688,6 +691,14 @@ def create_app(
     @app.get("/api/audio/{file_id}")
     @app.head("/api/audio/{file_id}", include_in_schema=False)
     def api_stream_audio(file_id: str, request: Request) -> Response:
+        return _stream_audio(file_id, request)
+
+    @app.get("/api/audio/{file_id}/{fname}")
+    @app.head("/api/audio/{file_id}/{fname}", include_in_schema=False)
+    def api_stream_audio_named(file_id: str, fname: str, request: Request) -> Response:
+        return _stream_audio(file_id, request)
+
+    def _stream_audio(file_id: str, request: Request) -> Response:
         f_row = st.get_file_by_id_or_path(file_id)
         if f_row is None:
             raise HTTPException(status_code=404, detail=f"File not found: {file_id}")

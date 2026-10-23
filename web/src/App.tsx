@@ -83,6 +83,162 @@ function formatQuietFolder(folder: string, root: string): string {
   return parts.slice(-2).join(" / ");
 }
 
+const BROWSER_NATIVE_EXTS = new Set([
+  ".mp3",
+  ".ogg",
+  ".opus",
+  ".m4a",
+  ".aac",
+  ".flac",
+]);
+
+// Mirrors _needs_transcode() and the MIME table in api_stream_audio so the
+// drag payload advertises the filename/type /api/audio actually serves —
+// transcoded sources leave the backend as WAV regardless of on-disk format.
+function audioDragPayload(hit: SearchHit): { filename: string; mime: string } {
+  const ext = (hit.path.match(/\.[^.\\/]+$/)?.[0] || "").toLowerCase();
+  const fmt = (hit.format || "").toLowerCase();
+  const ch = hit.channels || 1;
+  let transcoded: boolean;
+  if (ext === ".aif" || ext === ".aiff" || ext === ".wma") {
+    transcoded = true;
+  } else if (ext === ".wav") {
+    transcoded =
+      ch > 2 ||
+      fmt.includes("pcm_s24") ||
+      fmt.includes("pcm_s32") ||
+      fmt.includes("pcm_f64") ||
+      fmt.includes("adpcm");
+  } else if (BROWSER_NATIVE_EXTS.has(ext)) {
+    transcoded = ch > 2;
+  } else {
+    transcoded = true;
+  }
+  if (transcoded) {
+    return {
+      filename: `${hit.filename.replace(/\.[^.]+$/, "")}.wav`,
+      mime: "audio/wav",
+    };
+  }
+  const mimeByExt: Record<string, string> = {
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/mp4",
+  };
+  return {
+    filename: hit.filename,
+    mime: mimeByExt[ext] || "application/octet-stream",
+  };
+}
+
+const DRAG_FILE_MAX_SECONDS = 120;
+const DRAG_FILE_CACHE_MAX_ENTRIES = 32;
+const DRAG_FILE_CACHE_MAX_BYTES = 64 * 1024 * 1024;
+const dragFileCache = new Map<string, File>();
+const dragFileInflight = new Set<string>();
+
+function audioUrlFor(hit: SearchHit): string {
+  // Trailing filename segment is ignored by the backend but makes URL drops
+  // carry a real name/extension to receivers that derive both from the URL.
+  const { filename } = audioDragPayload(hit);
+  return `${window.location.origin}/api/audio/${encodeURIComponent(
+    hit.file_id
+  )}/${encodeURIComponent(filename)}`;
+}
+
+// Page-to-page drops only deliver a real File when one is attached via
+// items.add() during dragstart — DownloadURL and uri-list payloads never
+// materialize as dataTransfer.files on the receiving page. Bytes therefore
+// must be in hand before the drag begins: prefetched on row press, with the
+// sync fetch below as last resort.
+function prefetchDragFile(hit: SearchHit): void {
+  if (
+    hit.duration_s > DRAG_FILE_MAX_SECONDS ||
+    dragFileCache.has(hit.file_id) ||
+    dragFileInflight.has(hit.file_id)
+  ) {
+    return;
+  }
+  const { filename, mime } = audioDragPayload(hit);
+  dragFileInflight.add(hit.file_id);
+  void fetch(audioUrlFor(hit))
+    .then((res) => (res.ok ? res.blob() : Promise.reject(res)))
+    .then((blob) => {
+      if (blob.size > DRAG_FILE_CACHE_MAX_BYTES) {
+        return;
+      }
+      if (dragFileCache.size >= DRAG_FILE_CACHE_MAX_ENTRIES) {
+        const oldest = dragFileCache.keys().next().value;
+        if (oldest !== undefined) {
+          dragFileCache.delete(oldest);
+        }
+      }
+      dragFileCache.set(hit.file_id, new File([blob], filename, { type: mime }));
+    })
+    .catch(() => {})
+    .finally(() => dragFileInflight.delete(hit.file_id));
+}
+
+// items.add() must run before dragstart returns, so when the prefetch hasn't
+// landed yet a synchronous XHR is the only way to still get the bytes. Sync
+// XHR forbids responseType on window globals; x-user-defined keeps raw bytes.
+function fetchDragFileSync(hit: SearchHit): File | null {
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", audioUrlFor(hit), false);
+    xhr.overrideMimeType("text/plain; charset=x-user-defined");
+    xhr.send();
+    if (xhr.status < 200 || xhr.status >= 300) {
+      return null;
+    }
+    const text = xhr.responseText;
+    const bytes = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) {
+      bytes[i] = text.charCodeAt(i) & 0xff;
+    }
+    const { filename, mime } = audioDragPayload(hit);
+    return new File([bytes], filename, { type: mime });
+  } catch {
+    return null;
+  }
+}
+
+function handleRowDragStart(e: React.DragEvent, hit: SearchHit) {
+  const { filename, mime } = audioDragPayload(hit);
+  const url = audioUrlFor(hit);
+  const dt = e.dataTransfer;
+  dt.effectAllowed = "copy";
+
+  let fileAttached = false;
+  if (hit.duration_s <= DRAG_FILE_MAX_SECONDS) {
+    const file = dragFileCache.get(hit.file_id) ?? fetchDragFileSync(hit);
+    if (file) {
+      try {
+        dt.items.add(file);
+        fileAttached = true;
+      } catch {
+        // items.add(File) unsupported — URL payloads below still apply
+      }
+    }
+  }
+  if (!fileAttached) {
+    // Chromium-only DownloadURL ("mime:name:url") exposes the drag as a real
+    // file to desktop apps, streamed from the audio endpoint on drop.
+    dt.setData(
+      "DownloadURL",
+      `${mime}:${filename.replace(/:/g, "_")}:${url}`
+    );
+  }
+  dt.setData("text/uri-list", url);
+  dt.setData("text/plain", url);
+  dt.setData("application/x-sfxsearch-file-id", hit.file_id);
+  dt.setData("application/x-sfxsearch-filename", filename);
+}
+
 export const App: React.FC = () => {
   const [query, setQuery] = useState<string>("");
   const [mode, setMode] = useState<SearchMode>("hybrid");
@@ -861,9 +1017,43 @@ export const App: React.FC = () => {
       onDrop={(e) => {
         e.preventDefault();
         setIsDraggingFile(false);
+        if (!hasIndexedFiles) {
+          return;
+        }
+        const selfFileId = e.dataTransfer.getData(
+          "application/x-sfxsearch-file-id"
+        );
+        if (selfFileId) {
+          void handleFindSimilarFile(selfFileId);
+          return;
+        }
         const f = e.dataTransfer.files?.[0];
-        if (f && hasIndexedFiles) {
+        if (f) {
           handleDropFile(f);
+          return;
+        }
+        const uri =
+          e.dataTransfer.getData("text/uri-list") ||
+          e.dataTransfer.getData("text/plain");
+        try {
+          const u = new URL(uri);
+          if (
+            u.origin === window.location.origin &&
+            u.pathname.startsWith("/api/audio/")
+          ) {
+            void fetch(u)
+              .then((res) => (res.ok ? res.blob() : Promise.reject(res)))
+              .then((blob) =>
+                handleDropFile(
+                  new File([blob], "dropped-audio", {
+                    type: blob.type || "application/octet-stream",
+                  })
+                )
+              )
+              .catch(() => setStatusLabel("Dropped audio URL failed to load"));
+          }
+        } catch {
+          // not a URL payload — nothing to do
         }
       }}
     >
@@ -1709,6 +1899,10 @@ export const App: React.FC = () => {
                       ref={(el) => {
                         rowRefs.current[idx] = el;
                       }}
+                      draggable
+                      onPointerDown={() => prefetchDragFile(hit)}
+                      onDragStart={(e) => handleRowDragStart(e, hit)}
+                      onDragEnd={() => setIsDraggingFile(false)}
                       onClick={(e) => {
                         if (e.detail > 1) {
                           return;
@@ -1915,7 +2109,7 @@ export const App: React.FC = () => {
                   : "Indexing initial audio files...")}
             </span>
             <span className="sfx-statusbar-shortcuts">
-              ↑↓ navigate · Space play · R reveal · F favorite · Enter inspector · / search
+              ↑↓ navigate · Space play · R reveal · F favorite · Enter inspector · / search · drag row to export
             </span>
           </footer>
         </main>

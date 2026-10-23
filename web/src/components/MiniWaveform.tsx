@@ -311,6 +311,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
     e.stopPropagation();
     isScrubbingRef.current = true;
     try {
@@ -358,6 +359,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       <canvas
         ref={canvasRef}
         onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.preventDefault()}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
