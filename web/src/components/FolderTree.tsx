@@ -97,8 +97,6 @@ function buildTree(folders: FolderEntry[], roots: string[]): FolderNode[] {
       const rootNode = ensureNode(byPath, root);
       if (normKey(clean) === normKey(root)) {
         rootNode.count += entry.count;
-      } else {
-        link(clean, root);
       }
       topKeys.add(normKey(root));
     } else {
