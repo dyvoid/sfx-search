@@ -824,7 +824,7 @@ def create_app(
             raise HTTPException(
                 status_code=501, detail="Reveal in Explorer is only supported on Windows"
             )
-        subprocess.Popen(["explorer.exe", f"/select,{win_path}"])
+        subprocess.Popen(["explorer.exe", "/select,", win_path])
         return {"revealed": True, "path": raw_path}
 
     @app.get("/api/stats")
