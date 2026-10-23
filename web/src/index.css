@@ -324,6 +324,31 @@ body.sfx-resizing-x {
   user-select: none;
 }
 
+.sfx-divider-collapse {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 17px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-raised);
+  border: var(--border-width) solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  z-index: 1;
+  transition: color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.sfx-divider-collapse:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
 .sfx-pane-tab {
   width: 28px;
   flex-shrink: 0;
@@ -332,10 +357,10 @@ body.sfx-resizing-x {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-3) 0;
-  background: var(--surface-app);
+  background: var(--surface-panel);
   border: none;
   border-right: var(--border-width) solid var(--border-subtle);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-standard),
     color var(--duration-fast) var(--ease-standard);

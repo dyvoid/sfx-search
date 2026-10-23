@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Filter,
   FolderOpen,
@@ -1842,7 +1844,18 @@ export const App: React.FC = () => {
             onPointerMove={handlePaneDragMove}
             onPointerUp={handlePaneDragUp}
             onPointerCancel={handlePaneDragUp}
-          />
+          >
+            <button
+              type="button"
+              className="sfx-divider-collapse"
+              onClick={() => setFolderPaneOpen(false)}
+              onPointerDown={(e) => e.stopPropagation()}
+              aria-label="Collapse folder panel"
+              title="Collapse folder panel"
+            >
+              <ChevronLeft size={12} />
+            </button>
+          </div>
         )}
         {hasIndexedFiles && !folderPaneOpen && (
           <button
@@ -1852,7 +1865,7 @@ export const App: React.FC = () => {
             aria-label="Expand folder panel"
             title="Expand folder panel"
           >
-            <PanelLeftOpen size={14} />
+            <PanelLeftOpen size={16} />
             <span className="sfx-pane-tab-label">Folders</span>
           </button>
         )}
@@ -2259,7 +2272,18 @@ export const App: React.FC = () => {
             onPointerMove={handlePaneDragMove}
             onPointerUp={handlePaneDragUp}
             onPointerCancel={handlePaneDragUp}
-          />
+          >
+            <button
+              type="button"
+              className="sfx-divider-collapse"
+              onClick={() => setDetailOpen(false)}
+              onPointerDown={(e) => e.stopPropagation()}
+              aria-label="Collapse inspector"
+              title="Collapse inspector"
+            >
+              <ChevronRight size={12} />
+            </button>
+          </div>
         )}
         {hasIndexedFiles && (!detailOpen || !selectedHit) && (
           <button
@@ -2269,7 +2293,7 @@ export const App: React.FC = () => {
             aria-label="Expand inspector"
             title="Expand inspector"
           >
-            <PanelRightOpen size={14} />
+            <PanelRightOpen size={16} />
             <span className="sfx-pane-tab-label">Inspector</span>
           </button>
         )}
