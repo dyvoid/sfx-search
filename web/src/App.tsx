@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Filter,
   FolderOpen,
   FolderPlus,
   Heart,
   History,
-  PanelRight,
   Pause,
   Play,
   Repeat,
@@ -279,6 +280,14 @@ export const App: React.FC = () => {
   const [availFilters, setAvailFilters] = useState<AvailableFilters | null>(null);
   const [folderIndex, setFolderIndex] = useState<FolderEntry[]>([]);
   const [folderFilterText, setFolderFilterText] = useState<string>("");
+  const [folderPaneOpen, setFolderPaneOpen] = useState<boolean>(true);
+  const [folderPaneW, setFolderPaneW] = useState<number>(236);
+  const [inspectorW, setInspectorW] = useState<number>(410);
+  const paneDragRef = useRef<{
+    side: "l" | "r";
+    startX: number;
+    startW: number;
+  } | null>(null);
   const [libraryModalOpen, setLibraryModalOpen] = useState<boolean>(false);
 
   const [results, setResults] = useState<SearchHit[]>([]);
@@ -966,6 +975,37 @@ export const App: React.FC = () => {
     runSearch(query, mode, next, sort);
   }, [filters, query, mode, sort, runSearch]);
 
+  const handleRailPointerDown =
+    (side: "l" | "r") => (e: React.PointerEvent<HTMLDivElement>) => {
+      if ((e.target as HTMLElement).closest("button")) {
+        return;
+      }
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      paneDragRef.current = {
+        side,
+        startX: e.clientX,
+        startW: side === "l" ? folderPaneW : inspectorW,
+      };
+    };
+
+  const handleRailPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const d = paneDragRef.current;
+    if (!d) {
+      return;
+    }
+    const dx = e.clientX - d.startX;
+    if (d.side === "l") {
+      setFolderPaneW(Math.min(480, Math.max(170, d.startW + dx)));
+    } else {
+      setInspectorW(Math.min(720, Math.max(300, d.startW - dx)));
+    }
+  };
+
+  const handleRailPointerUp = () => {
+    paneDragRef.current = null;
+  };
+
   const toggleFavoriteFile = async (hit: SearchHit) => {
     if (favPendingRef.current.has(hit.file_id)) {
       return;
@@ -1244,20 +1284,6 @@ export const App: React.FC = () => {
               <Rows3 size={15} />
             </button>
 
-            {hasIndexedFiles && (
-              <button
-                type="button"
-                onClick={() => setDetailOpen((prev) => !prev)}
-                className="sfx-icon-btn"
-                style={{
-                  color: detailOpen ? "var(--primary-400)" : undefined,
-                }}
-                aria-label={detailOpen ? "Hide inspector" : "Show inspector"}
-                title={detailOpen ? "Hide inspector" : "Show inspector"}
-              >
-                <PanelRight size={15} />
-              </button>
-            )}
           </div>
         </div>
 
@@ -1755,9 +1781,12 @@ export const App: React.FC = () => {
       )}
 
       {/* Main Workspace */}
-      <div className="sfx-workspace">
-        {hasIndexedFiles && (
-          <aside className="sfx-folder-pane">
+      <div
+        className="sfx-workspace"
+        style={{ "--sfx-inspector-w": `${inspectorW}px` } as React.CSSProperties}
+      >
+        {hasIndexedFiles && folderPaneOpen && (
+          <aside className="sfx-folder-pane" style={{ width: folderPaneW }}>
             <div className="sfx-folder-head">
               <span className="ds-panel-title">Folders</span>
               {filters.folders.length > 0 && (
@@ -1791,6 +1820,35 @@ export const App: React.FC = () => {
               />
             </div>
           </aside>
+        )}
+        {hasIndexedFiles && (
+          <div
+            className="sfx-pane-rail"
+            role="separator"
+            aria-orientation="vertical"
+            onPointerDown={handleRailPointerDown("l")}
+            onPointerMove={handleRailPointerMove}
+            onPointerUp={handleRailPointerUp}
+            onPointerCancel={handleRailPointerUp}
+          >
+            <button
+              type="button"
+              className="sfx-rail-btn"
+              onClick={() => setFolderPaneOpen((v) => !v)}
+              aria-label={
+                folderPaneOpen ? "Collapse folder panel" : "Expand folder panel"
+              }
+              title={
+                folderPaneOpen ? "Collapse folder panel" : "Expand folder panel"
+              }
+            >
+              {folderPaneOpen ? (
+                <ChevronLeft size={13} />
+              ) : (
+                <ChevronRight size={13} />
+              )}
+            </button>
+          </div>
         )}
         <main className="sfx-main">
           {/* Sticky Column Header when files exist */}
@@ -2185,6 +2243,40 @@ export const App: React.FC = () => {
             </span>
           </footer>
         </main>
+
+        {hasIndexedFiles && (
+          <div
+            className="sfx-pane-rail"
+            role="separator"
+            aria-orientation="vertical"
+            onPointerDown={handleRailPointerDown("r")}
+            onPointerMove={handleRailPointerMove}
+            onPointerUp={handleRailPointerUp}
+            onPointerCancel={handleRailPointerUp}
+          >
+            <button
+              type="button"
+              className="sfx-rail-btn"
+              onClick={() => setDetailOpen((v) => !v)}
+              aria-label={
+                detailOpen && selectedHit
+                  ? "Collapse inspector"
+                  : "Expand inspector"
+              }
+              title={
+                detailOpen && selectedHit
+                  ? "Collapse inspector"
+                  : "Expand inspector"
+              }
+            >
+              {detailOpen && selectedHit ? (
+                <ChevronRight size={13} />
+              ) : (
+                <ChevronLeft size={13} />
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Right Inspector Drawer */}
         {detailOpen && selectedHit && (
