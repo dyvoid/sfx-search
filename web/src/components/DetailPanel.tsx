@@ -202,7 +202,18 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     <aside className="sfx-inspector">
       <div className="ds-panel-head sfx-inspector-head">
         <div className="sfx-inspector-head-row">
-          <span className="ds-panel-title">Inspector</span>
+          <div className="sfx-inspector-head-lead">
+            <button
+              type="button"
+              onClick={onClose}
+              className="sfx-panel-btn"
+              aria-label="Collapse inspector"
+              title="Collapse inspector"
+            >
+              <PanelRightClose size={16} />
+            </button>
+            <span className="ds-panel-title">Inspector</span>
+          </div>
           <div className="sfx-inspector-head-actions">
             <button
               type="button"
@@ -221,15 +232,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               title={copied ? "Copied!" : "Copy full path"}
             >
               <Copy size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="sfx-panel-btn"
-              aria-label="Collapse inspector"
-              title="Collapse inspector"
-            >
-              <PanelRightClose size={16} />
             </button>
           </div>
         </div>

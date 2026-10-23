@@ -2270,7 +2270,7 @@ export const App: React.FC = () => {
             onPointerCancel={handlePaneDragUp}
           />
         )}
-        {hasIndexedFiles && (!detailOpen || !selectedHit) && (
+        {hasIndexedFiles && selectedHit && !detailOpen && (
           <button
             type="button"
             className="sfx-pane-tab sfx-pane-tab-right"
