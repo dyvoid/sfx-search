@@ -47,6 +47,7 @@ class SearchRequestBody(BaseModel):
     channels: list[int] | None = None
     formats: list[str] | None = None
     roots: list[str] | None = None
+    folders: list[str] | None = None
     favorites_only: bool = False
     user_tag: str | None = None
     min_loop_score: float | None = None
@@ -499,6 +500,7 @@ def create_app(
         channels: int | None = Query(None),
         format: str | None = Query(None),
         root: str | None = Query(None),
+        folder: str | None = Query(None),
         favorites: bool = Query(False),
         user_tag: str | None = Query(None),
         min_loop: float | None = Query(None),
@@ -513,6 +515,7 @@ def create_app(
             channels=[channels] if channels is not None else None,
             formats=[format] if format else None,
             roots=[root] if root else None,
+            folders=[folder] if folder else None,
             favorites_only=favorites,
             user_tag=user_tag,
             min_loop_score=min_loop,
@@ -546,6 +549,7 @@ def create_app(
             channels=body.channels,
             formats=body.formats,
             roots=body.roots,
+            folders=body.folders,
             favorites_only=body.favorites_only,
             user_tag=body.user_tag,
             min_loop_score=body.min_loop_score,
@@ -850,6 +854,10 @@ def create_app(
     @app.get("/api/filters")
     def api_filters() -> dict[str, Any]:
         return st.get_available_filters()
+
+    @app.get("/api/folders")
+    def api_folders() -> dict[str, Any]:
+        return {"folders": st.get_folder_index()}
 
     web_dist_env = os.environ.get("SFXSEARCH_WEB_DIST")
     web_dist = (

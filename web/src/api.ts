@@ -2,6 +2,7 @@ import {
   AvailableFilters,
   FileDetail,
   FilterState,
+  FolderEntry,
   IndexingProgress,
   LibraryStateResponse,
   LibraryStats,
@@ -31,6 +32,7 @@ export async function searchSounds(
     max_lufs: filters.maxLufs ? parseFloat(filters.maxLufs) : null,
     formats: filters.format ? [filters.format] : null,
     roots: filters.root ? [filters.root] : null,
+    folders: filters.folders.length ? filters.folders : null,
     favorites_only: filters.favoritesOnly,
     user_tag: filters.userTag || null,
     min_loop_score: filters.minLoopScore ? parseFloat(filters.minLoopScore) : null,
@@ -135,6 +137,15 @@ export async function fetchStats(): Promise<LibraryStats> {
     throw new Error("Failed to fetch stats");
   }
   return (await res.json()) as LibraryStats;
+}
+
+export async function fetchFolders(): Promise<FolderEntry[]> {
+  const res = await fetch("/api/folders");
+  if (!res.ok) {
+    throw new Error("Failed to fetch folders");
+  }
+  const data = await res.json();
+  return (data.folders as FolderEntry[]) || [];
 }
 
 export async function fetchAvailableFilters(): Promise<AvailableFilters> {

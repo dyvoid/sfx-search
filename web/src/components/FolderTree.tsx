@@ -1,0 +1,307 @@
+import React, { useMemo, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { FolderEntry } from "../types";
+
+interface FolderNode {
+  path: string;
+  name: string;
+  count: number;
+  total: number;
+  children: FolderNode[];
+}
+
+interface FolderTreeProps {
+  folders: FolderEntry[];
+  roots: string[];
+  selected: string[];
+  onToggle: (path: string) => void;
+}
+
+const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+const normKey = (p: string) => norm(p).toLowerCase();
+
+function ensureNode(
+  byPath: Map<string, FolderNode>,
+  path: string
+): FolderNode {
+  const key = normKey(path);
+  let node = byPath.get(key);
+  if (!node) {
+    const clean = norm(path);
+    node = {
+      path: clean,
+      name: clean.split("/").pop() || clean,
+      count: 0,
+      total: 0,
+      children: [],
+    };
+    byPath.set(key, node);
+  }
+  return node;
+}
+
+function buildTree(folders: FolderEntry[], roots: string[]): FolderNode[] {
+  const byPath = new Map<string, FolderNode>();
+  const childOf = new Map<string, string>(); // child key -> parent key
+  const topKeys = new Set<string>();
+
+  const sortedRoots = roots
+    .map(norm)
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length);
+  const rootFor = (path: string): string | null => {
+    const lp = normKey(path);
+    for (const r of sortedRoots) {
+      const lr = r.toLowerCase();
+      if (lp === lr || lp.startsWith(lr + "/")) {
+        return r;
+      }
+    }
+    return null;
+  };
+
+  const link = (childPath: string, parentPath: string) => {
+    const ck = normKey(childPath);
+    const pk = normKey(parentPath);
+    if (ck !== pk) {
+      childOf.set(ck, pk);
+    }
+  };
+
+  for (const entry of folders) {
+    const clean = norm(entry.path);
+    if (!clean) {
+      continue;
+    }
+    const leaf = ensureNode(byPath, clean);
+    leaf.count += entry.count;
+
+    const root = rootFor(clean);
+    const parts = clean.split("/");
+    // Walk ancestors from the leaf up to its root (or drive prefix when the
+    // folder sits outside every configured root).
+    const stopAt = root ? normKey(root) : normKey(parts[0]);
+    let cur = clean;
+    while (normKey(cur) !== stopAt) {
+      const sep = cur.lastIndexOf("/");
+      if (sep <= 0) {
+        break;
+      }
+      const parent = cur.slice(0, sep);
+      ensureNode(byPath, parent);
+      link(cur, parent);
+      cur = parent;
+    }
+    if (root) {
+      const rootNode = ensureNode(byPath, root);
+      if (normKey(clean) === normKey(root)) {
+        rootNode.count += entry.count;
+      } else {
+        link(clean, root);
+      }
+      topKeys.add(normKey(root));
+    } else {
+      // Anchor to the drive/share prefix so loose folders still surface.
+      const anchor = parts[0];
+      ensureNode(byPath, anchor);
+      if (normKey(clean) !== normKey(anchor)) {
+        link(cur === clean ? clean : cur, anchor);
+      }
+      topKeys.add(normKey(anchor));
+    }
+  }
+
+  const resolveTop = (key: string): string => {
+    // climb to the highest ancestor key
+    let k = key;
+    while (childOf.has(k)) {
+      k = childOf.get(k)!;
+    }
+    return k;
+  };
+
+  const tops = new Map<string, FolderNode>();
+  for (const key of topKeys) {
+    const topKey = resolveTop(key);
+    tops.set(topKey, byPath.get(topKey)!);
+  }
+  for (const node of byPath.values()) {
+    const parentKey = childOf.get(normKey(node.path));
+    if (parentKey) {
+      byPath.get(parentKey)!.children.push(node);
+    }
+  }
+  const finalize = (n: FolderNode): number => {
+    n.total = n.count;
+    for (const c of n.children) {
+      n.total += finalize(c);
+    }
+    n.children.sort((a, b) => a.name.localeCompare(b.name));
+    return n.total;
+  };
+  const result = [...tops.values()];
+  result.forEach(finalize);
+  result.sort((a, b) => a.name.localeCompare(b.name));
+  return result;
+}
+
+interface NodeRowProps {
+  node: FolderNode;
+  depth: number;
+  expanded: Set<string>;
+  onExpand: (path: string) => void;
+  isIncluded: (path: string) => boolean;
+  isViaAncestor: (path: string) => boolean;
+  onToggle: (path: string) => void;
+}
+
+const NodeRow: React.FC<NodeRowProps> = ({
+  node,
+  depth,
+  expanded,
+  onExpand,
+  isIncluded,
+  isViaAncestor,
+  onToggle,
+}) => {
+  const key = normKey(node.path);
+  const hasChildren = node.children.length > 0;
+  const open = expanded.has(key);
+  const checked = isIncluded(node.path);
+  const viaAncestor = isViaAncestor(node.path);
+
+  return (
+    <>
+      <div
+        className={`sfx-ft-node ${checked ? "selected" : ""}`}
+        style={{ paddingLeft: `calc(var(--space-3) + ${depth * 15}px)` }}
+      >
+        {hasChildren ? (
+          <button
+            type="button"
+            className="sfx-ft-chevron"
+            onClick={() => onExpand(node.path)}
+            aria-label={open ? "Collapse folder" : "Expand folder"}
+          >
+            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </button>
+        ) : (
+          <span className="sfx-ft-chevron-spacer" />
+        )}
+        <button
+          type="button"
+          className="sfx-ft-check"
+          onClick={() => onToggle(node.path)}
+          disabled={viaAncestor}
+          title={
+            viaAncestor
+              ? "Included via a selected parent folder"
+              : checked
+              ? "Stop filtering to this folder"
+              : "Show only files in this folder (and subfolders)"
+          }
+          aria-label={`Filter to ${node.path}`}
+          aria-pressed={checked}
+        >
+          <span className={`ds-checkbox ${checked ? "on" : ""}`}>
+            {checked && <span className="ds-checkbox-inner" />}
+          </span>
+        </button>
+        <span
+          className="sfx-ft-label"
+          title={node.path}
+          onClick={() => !viaAncestor && onToggle(node.path)}
+        >
+          {node.name}
+        </span>
+        <span className="sfx-ft-count ds-tnum">{node.total}</span>
+      </div>
+      {open &&
+        node.children.map((c) => (
+          <NodeRow
+            key={normKey(c.path)}
+            node={c}
+            depth={depth + 1}
+            expanded={expanded}
+            onExpand={onExpand}
+            isIncluded={isIncluded}
+            isViaAncestor={isViaAncestor}
+            onToggle={onToggle}
+          />
+        ))}
+    </>
+  );
+};
+
+export const FolderTree: React.FC<FolderTreeProps> = ({
+  folders,
+  roots,
+  selected,
+  onToggle,
+}) => {
+  const tree = useMemo(() => buildTree(folders, roots), [folders, roots]);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+
+  // Every node is expanded unless the user collapsed it; ancestors of
+  // selected folders can never end up collapsed, so the selection stays
+  // visible when the pane re-renders.
+  const expanded = useMemo(() => {
+    const set = new Set<string>();
+    const sel = selected.map(normKey);
+    const collect = (nodes: FolderNode[]) => {
+      for (const n of nodes) {
+        const k = normKey(n.path);
+        const holdsSelection = sel.some(
+          (s) => s === k || s.startsWith(k + "/")
+        );
+        if (!collapsed.has(k) || holdsSelection) {
+          set.add(k);
+          collect(n.children);
+        }
+      }
+    };
+    collect(tree);
+    return set;
+  }, [tree, collapsed, selected]);
+
+  const toggleExpand = (path: string) => {
+    const key = normKey(path);
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const isIncluded = (path: string) => {
+    const lp = normKey(path);
+    return selected.some(
+      (s) => lp === normKey(s) || lp.startsWith(normKey(s) + "/")
+    );
+  };
+  const isViaAncestor = (path: string) => {
+    const lp = normKey(path);
+    return selected.some((s) => lp.startsWith(normKey(s) + "/"));
+  };
+
+  return (
+    <div className="sfx-ft-tree">
+      {tree.map((n) => (
+        <NodeRow
+          key={normKey(n.path)}
+          node={n}
+          depth={0}
+          expanded={expanded}
+          onExpand={toggleExpand}
+          isIncluded={isIncluded}
+          isViaAncestor={isViaAncestor}
+          onToggle={onToggle}
+        />
+      ))}
+    </div>
+  );
+};

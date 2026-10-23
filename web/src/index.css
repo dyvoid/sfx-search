@@ -281,6 +281,114 @@ body,
   container-name: main-list;
 }
 
+/* ===== Folder Browser Pane ===== */
+.sfx-folder-pane {
+  width: 236px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: var(--border-width) solid var(--border-subtle);
+  background: var(--surface-app);
+}
+
+.sfx-folder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.sfx-ft-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sfx-ft-tree {
+  padding: var(--space-1) 0 var(--space-4);
+}
+
+.sfx-ft-node {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3) 4px var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+  min-width: 0;
+}
+
+[data-density="compact"] .sfx-ft-node {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+.sfx-ft-node:hover {
+  background: var(--surface-hover);
+}
+
+.sfx-ft-node.selected,
+.sfx-ft-node.selected .sfx-ft-label {
+  color: var(--text-primary);
+}
+
+.sfx-ft-chevron {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.sfx-ft-chevron:hover {
+  color: var(--text-primary);
+}
+
+.sfx-ft-chevron-spacer {
+  width: 15px;
+  flex-shrink: 0;
+}
+
+.sfx-ft-check {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-shrink: 0;
+}
+
+.sfx-ft-check:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.sfx-ft-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sfx-ft-count {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
 /* Sticky Table Column Header */
 .sfx-list-head {
   display: grid;

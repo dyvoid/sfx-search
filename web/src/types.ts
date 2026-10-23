@@ -67,6 +67,12 @@ export interface FilterState {
   favoritesOnly: boolean;
   userTag: string;
   minLoopScore: string;
+  folders: string[];
+}
+
+export interface FolderEntry {
+  path: string;
+  count: number;
 }
 
 export interface AvailableFilters {
@@ -133,4 +139,5 @@ export const DEFAULT_FILTERS: FilterState = {
   favoritesOnly: false,
   userTag: "",
   minLoopScore: "",
+  folders: [],
 };

@@ -21,6 +21,7 @@ import {
 import {
   addLibraryRoot,
   fetchAvailableFilters,
+  fetchFolders,
   fetchLibraryState,
   findSimilarById,
   findSimilarByUpload,
@@ -33,6 +34,7 @@ import {
 } from "./api";
 import { DetailPanel } from "./components/DetailPanel";
 import { DsSelect } from "./components/DsSelect";
+import { FolderTree } from "./components/FolderTree";
 import { LibraryModal } from "./components/LibraryModal";
 import { MiniWaveform } from "./components/MiniWaveform";
 import { SpectrumMeter } from "./components/SpectrumMeter";
@@ -40,6 +42,7 @@ import {
   AvailableFilters,
   DEFAULT_FILTERS,
   FilterState,
+  FolderEntry,
   IndexingProgress,
   LibraryStats,
   SearchHit,
@@ -274,6 +277,7 @@ export const App: React.FC = () => {
   const [stats, setStats] = useState<LibraryStats | null>(null);
   const [indexing, setIndexing] = useState<IndexingProgress | null>(null);
   const [availFilters, setAvailFilters] = useState<AvailableFilters | null>(null);
+  const [folderIndex, setFolderIndex] = useState<FolderEntry[]>([]);
   const [libraryModalOpen, setLibraryModalOpen] = useState<boolean>(false);
 
   const [results, setResults] = useState<SearchHit[]>([]);
@@ -528,6 +532,7 @@ export const App: React.FC = () => {
 
       if (nextOk !== prevOk) {
         fetchAvailableFilters().then(setAvailFilters).catch(() => {});
+        fetchFolders().then(setFolderIndex).catch(() => {});
         if (prevOk === 0 && nextOk > 0) {
           runSearch();
         } else if (
@@ -555,6 +560,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshLibraryState();
     fetchAvailableFilters().then(setAvailFilters).catch(() => {});
+    fetchFolders().then(setFolderIndex).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -931,6 +937,34 @@ export const App: React.FC = () => {
     }
   };
 
+  const toggleFolderFilter = useCallback(
+    (path: string) => {
+      const normPath = path.replace(/\\/g, "/").replace(/\/+$/, "");
+      const sel = new Set(filters.folders);
+      if (sel.has(normPath)) {
+        sel.delete(normPath);
+      } else {
+        sel.add(normPath);
+        const lowerPrefix = normPath.toLowerCase() + "/";
+        for (const p of [...sel]) {
+          if (p !== normPath && p.toLowerCase().startsWith(lowerPrefix)) {
+            sel.delete(p);
+          }
+        }
+      }
+      const next = { ...filters, folders: [...sel].sort() };
+      setFilters(next);
+      runSearch(query, mode, next, sort);
+    },
+    [filters, query, mode, sort, runSearch]
+  );
+
+  const clearFolderFilters = useCallback(() => {
+    const next = { ...filters, folders: [] };
+    setFilters(next);
+    runSearch(query, mode, next, sort);
+  }, [filters, query, mode, sort, runSearch]);
+
   const toggleFavoriteFile = async (hit: SearchHit) => {
     if (favPendingRef.current.has(hit.file_id)) {
       return;
@@ -997,6 +1031,7 @@ export const App: React.FC = () => {
     filters.minLoopScore,
     filters.userTag,
     filters.favoritesOnly ? "fav" : "",
+    filters.folders.length ? "folders" : "",
   ].filter(Boolean).length;
 
   return (
@@ -1720,6 +1755,31 @@ export const App: React.FC = () => {
 
       {/* Main Workspace */}
       <div className="sfx-workspace">
+        {hasIndexedFiles && (
+          <aside className="sfx-folder-pane">
+            <div className="sfx-folder-head">
+              <span className="ds-panel-title">Folders</span>
+              {filters.folders.length > 0 && (
+                <button
+                  type="button"
+                  className="ds-btn ds-btn-ghost ds-btn-sm"
+                  onClick={clearFolderFilters}
+                  title="Clear folder selection"
+                >
+                  Clear ({filters.folders.length})
+                </button>
+              )}
+            </div>
+            <div className="sfx-ft-scroll ds-scroll">
+              <FolderTree
+                folders={folderIndex}
+                roots={roots}
+                selected={filters.folders}
+                onToggle={toggleFolderFilter}
+              />
+            </div>
+          </aside>
+        )}
         <main className="sfx-main">
           {/* Sticky Column Header when files exist */}
           {hasIndexedFiles && (

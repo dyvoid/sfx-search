@@ -28,7 +28,7 @@ from sfxsearch.scan import (
     walk_roots,
 )
 from sfxsearch.search import SearchEngine
-from sfxsearch.store import ModelMismatchError, SfxStore
+from sfxsearch.store import ModelMismatchError, SearchFilters, SfxStore
 
 from .conftest import FakeEmbedder, append_bwf_and_ixml_chunks, write_sine_wav
 
@@ -280,6 +280,58 @@ def test_hybrid_search_filters_and_similarity(tmp_path: Path) -> None:
     eval_summary = evaluate_queries(cfg, store, eq, embedder=embedder, variant_name="hybrid")
     assert eval_summary.mean_recall_at_10 == 1.0
     assert eval_summary.mean_mrr > 0.0
+
+
+def test_folder_filter_and_folder_index(tmp_path: Path) -> None:
+    lib_root = tmp_path / "sfx"
+    data_dir = tmp_path / "data"
+
+    w1 = write_sine_wav(
+        lib_root / "Foley" / "Wood" / "creak_floor.wav", freq_hz=200.0, duration_s=1.0
+    )
+    w2 = write_sine_wav(
+        lib_root / "Foley" / "Wood" / "Deep" / "creak_deep.wav",
+        freq_hz=210.0,
+        duration_s=1.0,
+    )
+    w3 = write_sine_wav(lib_root / "Impacts" / "clang_hit.wav", freq_hz=800.0, duration_s=1.0)
+
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(data_dir)),
+    )
+    store = SfxStore(cfg.db_dir)
+    run_indexer(config=cfg, store=store, embedder=FakeEmbedder(embedding_dim=16))
+    engine = SearchEngine(config=cfg, store=store, embedder=FakeEmbedder(embedding_dim=16))
+
+    foley_wood = normalize_path(str(lib_root / "Foley" / "Wood"))
+    impacts = normalize_path(str(lib_root / "Impacts"))
+
+    folder_paths = {e["path"] for e in store.get_folder_index()}
+    assert foley_wood in folder_paths
+    assert f"{foley_wood}/Deep" in folder_paths
+    assert impacts in folder_paths
+
+    # A selected folder matches itself and all descendant folders
+    hits = engine.search("", k=10, mode="keyword_only", filters=SearchFilters(folders=[foley_wood]))
+    ids = {h.file_id for h in hits}
+    assert compute_file_id(w1) in ids
+    assert compute_file_id(w2) in ids
+    assert compute_file_id(w3) not in ids
+
+    # Multi-select unions folders; matching is case-insensitive
+    hits_multi = engine.search(
+        "",
+        k=10,
+        mode="keyword_only",
+        filters=SearchFilters(folders=[foley_wood.lower(), impacts]),
+    )
+    ids_multi = {h.file_id for h in hits_multi}
+    assert ids_multi == {
+        compute_file_id(w1),
+        compute_file_id(w2),
+        compute_file_id(w3),
+    }
 
 
 def test_parse_query_phrases_exclusions_and_filters() -> None:

@@ -73,6 +73,7 @@ class SearchFilters:
     channels: list[int] | None = None
     formats: list[str] | None = None
     roots: list[str] | None = None
+    folders: list[str] | None = None
     favorites_only: bool = False
     user_tag: str | None = None
     min_loop_score: float | None = None
@@ -82,6 +83,11 @@ class SearchFilters:
 
 def _sql_escape(val: str) -> str:
     return val.replace("'", "''")
+
+
+def _sql_like_escape(val: str) -> str:
+    # Lance only accepts the backslash as LIKE ESCAPE char.
+    return val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def make_files_schema(embedding_dim: int, embedding_model: str) -> pa.Schema:
@@ -528,20 +534,27 @@ class SfxStore:
                 fmt_clauses = []
                 for fmt in filters.formats:
                     clean = _sql_escape(fmt.lower().lstrip("."))
-                    like_clean = clean.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+                    like_clean = _sql_like_escape(clean)
                     fmt_clauses.append(
-                        f"(LOWER(format) = '{clean}' OR LOWER(format) LIKE '{like_clean}/%' ESCAPE '!' OR LOWER(format) LIKE '%/{like_clean}' ESCAPE '!')"
+                        f"(LOWER(format) = '{clean}' OR LOWER(format) LIKE '{like_clean}/%' ESCAPE '\\' OR LOWER(format) LIKE '%/{like_clean}' ESCAPE '\\')"
                     )
                 clauses.append("(" + " OR ".join(fmt_clauses) + ")")
             if filters.roots:
                 root_clauses = []
                 for rt in filters.roots:
                     clean_rt = _sql_escape(rt.replace("\\", "/").rstrip("/"))
-                    like_rt = clean_rt.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+                    like_rt = _sql_like_escape(clean_rt)
                     root_clauses.append(
-                        f"(LOWER(root) = LOWER('{clean_rt}') OR LOWER(path) LIKE LOWER('{like_rt}/%') ESCAPE '!')"
+                        f"(LOWER(root) = LOWER('{clean_rt}') OR LOWER(path) LIKE LOWER('{like_rt}/%') ESCAPE '\\')"
                     )
                 clauses.append("(" + " OR ".join(root_clauses) + ")")
+            if filters.folders:
+                folder_clauses = []
+                for fd in filters.folders:
+                    clean_fd = _sql_escape(fd.replace("\\", "/").rstrip("/"))
+                    like_fd = _sql_like_escape(clean_fd)
+                    folder_clauses.append(f"LOWER(path) LIKE LOWER('{like_fd}/%') ESCAPE '\\'")
+                clauses.append("(" + " OR ".join(folder_clauses) + ")")
             if (v := _f(filters.min_loop_score)) is not None:
                 clauses.append(f"loop_score IS NOT NULL AND loop_score >= {float(v)}")
 
@@ -1046,3 +1059,34 @@ class SfxStore:
             "max_lufs": round(max(lufs_vals), 1) if lufs_vals else 0.0,
             "user_tags": sorted(tags_set),
         }
+
+    def get_folder_index(self) -> list[dict[str, Any]]:
+        """Folders containing ok files, with per-folder file counts.
+
+        Entries carry the directory of each indexed file only; intermediate
+        ancestor folders without direct files are synthesized by the caller.
+        Case variants of the same folder merge under the first-seen spelling.
+        """
+        if "files" not in self.table_names():
+            return []
+        files_tbl = self.db.open_table("files")
+        total = files_tbl.count_rows()
+        if total == 0:
+            return []
+        rows = (
+            files_tbl.search().where("status = 'ok'").select(["path"]).limit(total + 100).to_list()
+        )
+        counts: dict[str, tuple[str, int]] = {}
+        for r in rows:
+            path_str = str(r.get("path") or "")
+            sep = path_str.rfind("/")
+            if sep <= 0:
+                continue
+            folder = path_str[:sep]
+            key = folder.lower()
+            prev = counts.get(key)
+            counts[key] = (folder, (prev[1] if prev else 0) + 1)
+        return [
+            {"path": path, "count": count}
+            for path, count in sorted(counts.values(), key=lambda kv: kv[0].lower())
+        ]
