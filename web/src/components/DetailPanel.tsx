@@ -3,10 +3,10 @@ import {
   Copy,
   FolderOpen,
   Heart,
+  PanelRightClose,
   Pause,
   Play,
   Sparkles,
-  X,
 } from "lucide-react";
 import {
   fetchFileDetail,
@@ -200,63 +200,46 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
 
   return (
     <aside className="sfx-inspector">
-      <div className="ds-panel-head">
-        <div style={{ minWidth: 0, flex: 1, paddingRight: "var(--space-3)" }}>
-          <div
-            style={{
-              fontSize: "var(--font-size-base)",
-              fontWeight: 600,
-              color: "var(--text-primary)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-            title={hit.filename}
-          >
-            {hit.filename}
-          </div>
-          <div
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "var(--font-size-2xs)",
-              color: "var(--text-tertiary)",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              marginTop: 2,
-            }}
-            title={hit.path}
-          >
-            {hit.folder}
+      <div className="ds-panel-head sfx-inspector-head">
+        <div className="sfx-inspector-head-row">
+          <span className="ds-panel-title">Inspector</span>
+          <div className="sfx-inspector-head-actions">
+            <button
+              type="button"
+              onClick={() => revealInExplorer(hit.file_id).catch(() => {})}
+              className="sfx-icon-btn"
+              aria-label="Reveal file in Explorer"
+              title="Reveal file in Explorer"
+            >
+              <FolderOpen size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyPath}
+              className="sfx-icon-btn"
+              aria-label="Copy file path"
+              title={copied ? "Copied!" : "Copy full path"}
+            >
+              <Copy size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="sfx-panel-btn"
+              aria-label="Collapse inspector"
+              title="Collapse inspector"
+            >
+              <PanelRightClose size={16} />
+            </button>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <button
-            type="button"
-            onClick={() => revealInExplorer(hit.file_id).catch(() => {})}
-            className="sfx-icon-btn"
-            aria-label="Reveal file in Explorer"
-            title="Reveal file in Explorer"
-          >
-            <FolderOpen size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={handleCopyPath}
-            className="sfx-icon-btn"
-            aria-label="Copy file path"
-            title={copied ? "Copied!" : "Copy full path"}
-          >
-            <Copy size={14} />
-          </button>
-          <button
-            onClick={onClose}
-            className="sfx-icon-btn"
-            aria-label="Close inspector"
-            title="Close inspector"
-          >
-            <X size={14} />
-          </button>
+        <div className="sfx-inspector-file">
+          <div className="sfx-inspector-filename" title={hit.filename}>
+            {hit.filename}
+          </div>
+          <div className="sfx-inspector-filepath" title={hit.path}>
+            {hit.folder}
+          </div>
         </div>
       </div>
 

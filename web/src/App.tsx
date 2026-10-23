@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
   Clock,
   Filter,
   FolderOpen,
@@ -1805,12 +1803,12 @@ export const App: React.FC = () => {
                 )}
                 <button
                   type="button"
-                  className="sfx-icon-btn"
+                  className="sfx-panel-btn"
                   onClick={() => setFolderPaneOpen(false)}
                   aria-label="Collapse folder panel"
                   title="Collapse folder panel"
                 >
-                  <PanelLeftClose size={15} />
+                  <PanelLeftClose size={16} />
                 </button>
               </div>
             </div>
@@ -1844,18 +1842,7 @@ export const App: React.FC = () => {
             onPointerMove={handlePaneDragMove}
             onPointerUp={handlePaneDragUp}
             onPointerCancel={handlePaneDragUp}
-          >
-            <button
-              type="button"
-              className="sfx-divider-collapse"
-              onClick={() => setFolderPaneOpen(false)}
-              onPointerDown={(e) => e.stopPropagation()}
-              aria-label="Collapse folder panel"
-              title="Collapse folder panel"
-            >
-              <ChevronLeft size={12} />
-            </button>
-          </div>
+          />
         )}
         {hasIndexedFiles && !folderPaneOpen && (
           <button
@@ -2272,18 +2259,7 @@ export const App: React.FC = () => {
             onPointerMove={handlePaneDragMove}
             onPointerUp={handlePaneDragUp}
             onPointerCancel={handlePaneDragUp}
-          >
-            <button
-              type="button"
-              className="sfx-divider-collapse"
-              onClick={() => setDetailOpen(false)}
-              onPointerDown={(e) => e.stopPropagation()}
-              aria-label="Collapse inspector"
-              title="Collapse inspector"
-            >
-              <ChevronRight size={12} />
-            </button>
-          </div>
+          />
         )}
         {hasIndexedFiles && (!detailOpen || !selectedHit) && (
           <button

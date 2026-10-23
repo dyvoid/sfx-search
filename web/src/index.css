@@ -324,31 +324,6 @@ body.sfx-resizing-x {
   user-select: none;
 }
 
-.sfx-divider-collapse {
-  position: absolute;
-  top: 34px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 17px;
-  height: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--surface-raised);
-  border: var(--border-width) solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-tertiary);
-  cursor: pointer;
-  z-index: 1;
-  transition: color var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard);
-}
-
-.sfx-divider-collapse:hover {
-  color: var(--text-primary);
-  border-color: var(--border-strong);
-}
-
 .sfx-pane-tab {
   width: 28px;
   flex-shrink: 0;
@@ -388,6 +363,35 @@ body.sfx-resizing-x {
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+/* Proper-size panel collapse button (matches ds-btn-sm height, visible border) */
+.sfx-panel-btn {
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--border-subtle);
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.sfx-panel-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.sfx-panel-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* ===== Folder Browser Pane ===== */
@@ -770,6 +774,48 @@ body.sfx-resizing-x {
   flex-direction: column;
   min-height: 0;
   animation: sfx-inspector-in var(--duration-slow) var(--ease-out) both;
+}
+
+.sfx-inspector-head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+}
+
+.sfx-inspector-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.sfx-inspector-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.sfx-inspector-file {
+  min-width: 0;
+}
+
+.sfx-inspector-filename {
+  font-size: var(--font-size-base);
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sfx-inspector-filepath {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
 }
 
 .sfx-inspector-section {
