@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { FolderEntry } from "../types";
 
@@ -263,20 +263,14 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
   }, [tree, filterText]);
 
   // Nodes are collapsed by default except top-level roots (one level open,
-  // like a file explorer). The user opens/closes deeper nodes; ancestors of
-  // selected folders are always forced open so the selection stays visible.
+  // like a file explorer). The user opens/closes deeper nodes freely.
   const expanded = useMemo(() => {
     const set = new Set<string>();
-    const sel = selected.map(normKey);
     const collect = (nodes: FolderNode[], depth: number) => {
       for (const n of nodes) {
         const k = normKey(n.path);
-        const holdsSelection = sel.some(
-          (s) => s === k || s.startsWith(k + "/")
-        );
         const open =
           filtered !== null ||
-          holdsSelection ||
           openSet.has(k) ||
           (depth === 0 && !closedSet.has(k));
         if (open) {
@@ -287,7 +281,40 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
     };
     collect(filtered ?? tree, 0);
     return set;
-  }, [tree, filtered, openSet, closedSet, selected]);
+  }, [tree, filtered, openSet, closedSet]);
+
+  // Selecting a folder expands its ancestors once so the selection becomes
+  // visible, but nothing is pinned open -- the user can collapse anything.
+  const lastSelectedRef = useRef<string[]>([]);
+  useEffect(() => {
+    const added = selected.filter((s) => !lastSelectedRef.current.includes(s));
+    lastSelectedRef.current = selected;
+    if (added.length === 0) {
+      return;
+    }
+    const addedKeys = new Set(added.map(normKey));
+    const ancestors = new Set<string>();
+    const walk = (nodes: FolderNode[], trail: string[]) => {
+      for (const n of nodes) {
+        const k = normKey(n.path);
+        if (addedKeys.has(k)) {
+          trail.forEach((t) => ancestors.add(t));
+          ancestors.add(k);
+        }
+        walk(n.children, [...trail, k]);
+      }
+    };
+    walk(tree, []);
+    if (ancestors.size === 0) {
+      return;
+    }
+    setOpenSet((prev) => new Set([...prev, ...ancestors]));
+    setClosedSet((prev) => {
+      const next = new Set(prev);
+      ancestors.forEach((a) => next.delete(a));
+      return next;
+    });
+  }, [selected, tree]);
 
   const toggleExpand = (path: string) => {
     const key = normKey(path);
