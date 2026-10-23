@@ -996,7 +996,7 @@ export const App: React.FC = () => {
     }
     const dx = e.clientX - d.startX;
     if (d.side === "l") {
-      setFolderPaneW(Math.min(480, Math.max(170, d.startW + dx)));
+      setFolderPaneW(Math.min(480, Math.max(220, d.startW + dx)));
     } else {
       setInspectorW(Math.min(720, Math.max(300, d.startW - dx)));
     }
