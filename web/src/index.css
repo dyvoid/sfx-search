@@ -732,6 +732,8 @@ body.sfx-resizing-x {
   width: var(--sfx-inspector-w, 410px);
   max-width: 100%;
   flex-shrink: 0;
+  container-type: inline-size;
+  container-name: inspector;
   border-left: var(--border-width) solid var(--border-subtle);
   background: linear-gradient(
     170deg,
@@ -750,6 +752,12 @@ body.sfx-resizing-x {
   border-bottom: var(--border-width) solid var(--border-subtle);
 }
 
+@container inspector (max-width: 340px) {
+  .sfx-inspector-section {
+    padding: var(--space-4);
+  }
+}
+
 .sfx-audition-bay {
   padding: var(--space-4);
   border-radius: var(--radius-sm);
@@ -757,10 +765,28 @@ body.sfx-resizing-x {
   border: var(--border-width) solid var(--border-subtle);
 }
 
+.sfx-audition-transport {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.sfx-audition-time {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+  font-feature-settings: var(--tnum);
+  white-space: nowrap;
+  margin-left: auto;
+}
+
 /* 6-cell Studio Parameter Readout Grid */
 .sfx-param-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
   gap: var(--space-4) var(--space-5);
 }
 
@@ -768,6 +794,7 @@ body.sfx-resizing-x {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
 .sfx-param-label {
@@ -776,6 +803,7 @@ body.sfx-resizing-x {
   text-transform: uppercase;
   letter-spacing: var(--tracking-wide);
   color: var(--text-tertiary);
+  white-space: nowrap;
 }
 
 .sfx-param-val {

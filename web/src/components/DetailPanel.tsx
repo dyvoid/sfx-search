@@ -276,14 +276,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               selectedChunkRange={selectedChunkRange}
               onSeek={handleSeekAndSelectChunk}
             />
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginTop: "var(--space-3)",
-              }}
-            >
+            <div className="sfx-audition-transport">
               <button
                 type="button"
                 onClick={onTogglePlay}
@@ -292,14 +285,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 {isPlaying ? <Pause size={14} /> : <Play size={14} />}
                 {isPlaying ? "Pause" : "Audition"}
               </button>
-              <span
-                className="ds-tnum"
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "var(--font-size-xs)",
-                  color: "var(--text-tertiary)",
-                }}
-              >
+              <span className="sfx-audition-time">
                 {currentTimeS !== null
                   ? `${currentTimeS.toFixed(2)}s / ${hit.duration_s.toFixed(2)}s`
                   : hit.duration_s > 12.5
