@@ -417,6 +417,10 @@ def create_app(
     async def model_mismatch_handler(request: Request, exc: ModelMismatchError) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
+    @app.get("/api/health")
+    def api_health() -> dict[str, Any]:
+        return {"status": "ok"}
+
     @app.get("/api/library")
     def api_get_library() -> dict[str, Any]:
         stats = st.get_library_stats()

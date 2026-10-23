@@ -339,7 +339,7 @@ def _open_browser_when_ready(host: str, port: int) -> None:
         deadline = time.monotonic() + 120.0
         while time.monotonic() < deadline:
             try:
-                urllib.request.urlopen(f"{url}/api/library", timeout=2)
+                urllib.request.urlopen(f"{url}/api/health", timeout=2)
                 break
             except urllib.error.HTTPError:
                 # Server is up even if the endpoint itself errored.

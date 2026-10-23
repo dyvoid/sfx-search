@@ -21,6 +21,19 @@ from sfxsearch.store import SfxStore
 from .conftest import FakeEmbedder, write_sine_wav
 
 
+def test_health_endpoint(tmp_path: Path) -> None:
+    cfg = Config(
+        library=LibraryConfig(roots=[str(tmp_path / "sfx")]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    app = create_app(config=cfg, store=store, embedder=FakeEmbedder(embedding_dim=16))
+    client = TestClient(app)
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+
+
 def test_fastapi_endpoints_range_and_transcode(tmp_path: Path) -> None:
     lib_root = tmp_path / "sfx"
     data_dir = tmp_path / "data"
