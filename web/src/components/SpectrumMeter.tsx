@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from "react";
 
 interface SpectrumMeterProps {
-  audioElement: HTMLAudioElement | null;
+  audioElement?: HTMLAudioElement | null;
+  analyserNode?: AnalyserNode | null;
   isPlaying: boolean;
 }
 
@@ -20,7 +21,8 @@ function readToken(varName: string, fallback: string): string {
 }
 
 export const SpectrumMeter: React.FC<SpectrumMeterProps> = ({
-  audioElement,
+  audioElement = null,
+  analyserNode = null,
   isPlaying,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -60,47 +62,56 @@ export const SpectrumMeter: React.FC<SpectrumMeterProps> = ({
       }
     };
 
-    if (!isPlaying || !audioElement) {
+    if (!isPlaying || (!audioElement && !analyserNode)) {
       drawIdle();
       return;
     }
 
-    let graph = graphMap.get(audioElement);
-    if (!graph) {
-      try {
-        const AudioCtx =
-          window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext })
-            .webkitAudioContext;
-        const audioCtx = new AudioCtx();
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 64;
-        analyser.smoothingTimeConstant = 0.76;
-        const source = audioCtx.createMediaElementSource(audioElement);
-        source.connect(analyser);
-        analyser.connect(audioCtx.destination);
-        graph = { ctx: audioCtx, analyser };
-        graphMap.set(audioElement, graph);
-      } catch {
-        drawIdle();
-        return;
+    let activeAnalyser: AnalyserNode | null = analyserNode;
+    if (!activeAnalyser && audioElement) {
+      let graph = graphMap.get(audioElement);
+      if (!graph) {
+        try {
+          const AudioCtx =
+            window.AudioContext ||
+            (window as unknown as { webkitAudioContext: typeof AudioContext })
+              .webkitAudioContext;
+          const audioCtx = new AudioCtx();
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 64;
+          analyser.smoothingTimeConstant = 0.76;
+          const source = audioCtx.createMediaElementSource(audioElement);
+          source.connect(analyser);
+          analyser.connect(audioCtx.destination);
+          graph = { ctx: audioCtx, analyser };
+          graphMap.set(audioElement, graph);
+        } catch {
+          drawIdle();
+          return;
+        }
       }
+
+      if (graph.ctx.state === "suspended") {
+        graph.ctx.resume().catch(() => {});
+      }
+      activeAnalyser = graph.analyser;
     }
 
-    if (graph.ctx.state === "suspended") {
-      graph.ctx.resume().catch(() => {});
+    if (!activeAnalyser) {
+      drawIdle();
+      return;
     }
 
-    const freqData = new Uint8Array(graph.analyser.frequencyBinCount);
+    const freqData = new Uint8Array(activeAnalyser.frequencyBinCount);
     const hold = peaksHoldRef.current;
     let rafId = 0;
 
     const renderFrame = () => {
       rafId = window.requestAnimationFrame(renderFrame);
-      if (!graph || document.hidden) {
+      if (!activeAnalyser || document.hidden) {
         return;
       }
-      graph.analyser.getByteFrequencyData(freqData);
+      activeAnalyser.getByteFrequencyData(freqData);
       ctx2d.clearRect(0, 0, width, height);
 
       for (let i = 0; i < bands; i++) {
@@ -129,7 +140,7 @@ export const SpectrumMeter: React.FC<SpectrumMeterProps> = ({
     return () => {
       window.cancelAnimationFrame(rafId);
     };
-  }, [audioElement, isPlaying]);
+  }, [audioElement, analyserNode, isPlaying]);
 
   return (
     <canvas

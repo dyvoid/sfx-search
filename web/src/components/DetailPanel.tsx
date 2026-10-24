@@ -6,6 +6,7 @@ import {
   PanelRightClose,
   Pause,
   Play,
+  Sliders,
   Sparkles,
 } from "lucide-react";
 import {
@@ -23,6 +24,7 @@ interface DetailPanelProps {
   onTogglePlay: () => void;
   onSeek: (timeS: number) => void;
   onClose: () => void;
+  onOpenEditor: () => void;
   onFindSimilarFile: (fileId: string) => void;
   onFindSimilarChunk: (fileId: string, chunkIdx: number) => void;
   onToggleFavorite: () => void;
@@ -41,6 +43,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   onTogglePlay,
   onSeek,
   onClose,
+  onOpenEditor,
   onFindSimilarFile,
   onFindSimilarChunk,
   onToggleFavorite,
@@ -285,6 +288,15 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           </div>
 
           <div className="sfx-similar-actions">
+            <button
+              type="button"
+              onClick={onOpenEditor}
+              className="ds-btn ds-btn-primary ds-btn-sm"
+              title="Open in Audio Studio Editor (E)"
+            >
+              <Sliders size={14} />
+              <span className="sfx-btn-label">Edit / Loop Studio (E)</span>
+            </button>
             <button
               type="button"
               onClick={() => onFindSimilarFile(hit.file_id)}

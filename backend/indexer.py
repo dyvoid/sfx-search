@@ -20,7 +20,14 @@ from .decode import DecodeError, decode_file
 from .embed import AudioWindow, EmbedderProtocol, compute_mean_file_vec, slice_audio_windows
 from .features import AcousticFeatures, compute_waveform_peaks, extract_features
 from .metadata import extract_metadata
-from .scan import ScannedFile, diff_manifest, normalize_path, walk_roots
+from .scan import (
+    ScannedFile,
+    compute_file_id,
+    diff_manifest,
+    normalize_path,
+    to_os_path,
+    walk_roots,
+)
 from .store import ChunkRecord, FileRecord, SfxStore
 
 
@@ -139,6 +146,111 @@ def _get_gpu_memory_mb() -> float:
         return round(float(max(alloc, reserved)) / (1024.0 * 1024.0), 1)
     except Exception:
         return 0.0
+
+
+def index_single_file(
+    path: str | Path,
+    root: str | Path,
+    config: Config,
+    store: SfxStore,
+    embedder: EmbedderProtocol,
+) -> FileRecord:
+    """Decode, extract features/metadata, embed, and upsert a single audio file."""
+    import os
+
+    norm_file = normalize_path(path)
+    norm_root = normalize_path(root)
+    os_file = to_os_path(norm_file)
+    st = os.stat(os_file)
+    ext = os.path.splitext(norm_file)[1].lower().lstrip(".")
+    scanned = ScannedFile(
+        file_id=compute_file_id(norm_file),
+        path=norm_file,
+        root=norm_root,
+        size_bytes=int(st.st_size),
+        mtime_ns=int(st.st_mtime_ns),
+        ext=ext or "wav",
+    )
+
+    store.verify_or_init_tables(
+        embedding_model=embedder.model_id,
+        embedding_dim=embedder.embedding_dim,
+        reset=False,
+    )
+
+    decoded_item = _decode_worker_fn(
+        item=scanned,
+        ffmpeg_bin=config.paths.ffmpeg,
+        ffprobe_bin=config.paths.ffprobe,
+        window_s=config.embedding.window_s,
+        hop_s=config.embedding.hop_s,
+        max_chunks_per_file=config.embedding.max_chunks_per_file,
+    )
+
+    now_utc = datetime.now(UTC)
+    if decoded_item.error is not None:
+        raise DecodeError(decoded_item.error)
+
+    win_arrays = [w.samples for w in decoded_item.windows]
+    chunk_vecs_np = embedder.embed_windows(win_arrays)
+    file_vec_np = compute_mean_file_vec(chunk_vecs_np)
+
+    chunks = [
+        ChunkRecord(
+            file_id=scanned.file_id,
+            chunk_idx=w.chunk_idx,
+            start_s=w.start_s,
+            end_s=w.end_s,
+            vec=np.asarray(cvec, dtype=np.float32),
+        )
+        for w, cvec in zip(decoded_item.windows, chunk_vecs_np, strict=True)
+    ]
+
+    f_rec = FileRecord(
+        file_id=scanned.file_id,
+        path=scanned.path,
+        root=scanned.root,
+        size_bytes=scanned.size_bytes,
+        mtime_ns=scanned.mtime_ns,
+        format=decoded_item.format_name,
+        duration_s=decoded_item.features.duration_s,
+        sample_rate=decoded_item.sample_rate,
+        channels=decoded_item.channels,
+        lufs_integrated=decoded_item.features.lufs_integrated,
+        peak_dbfs=decoded_item.features.peak_dbfs,
+        loop_score=decoded_item.features.loop_score,
+        tags_json=decoded_item.tags_json,
+        search_text=decoded_item.search_text,
+        file_vec=[float(x) for x in file_vec_np],
+        embedding_model=embedder.model_id,
+        status="ok",
+        error=None,
+        indexed_at=now_utc,
+    )
+
+    peaks_dir = config.peaks_dir
+    peaks_dir.mkdir(parents=True, exist_ok=True)
+    if decoded_item.peaks is not None:
+        peak_file = peaks_dir / f"{scanned.file_id}.json"
+        try:
+            peak_tmp = peaks_dir / f"{scanned.file_id}.json.tmp"
+            peak_tmp.write_text(
+                json.dumps(
+                    {
+                        "file_id": scanned.file_id,
+                        "mtime_ns": scanned.mtime_ns,
+                        "duration_s": round(decoded_item.features.duration_s, 4),
+                        "peaks": decoded_item.peaks,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            peak_tmp.replace(peak_file)
+        except OSError:
+            pass
+
+    store.upsert_batch([f_rec], chunks, rebuild_fts=True)
+    return f_rec
 
 
 def run_indexer(

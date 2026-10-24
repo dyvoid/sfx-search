@@ -16,6 +16,7 @@ import {
   RotateCcw,
   Rows3,
   Search,
+  Sliders,
   Sparkles,
   Upload,
   Volume2,
@@ -40,6 +41,7 @@ import { FolderTree } from "./components/FolderTree";
 import { LibraryModal } from "./components/LibraryModal";
 import { MiniWaveform } from "./components/MiniWaveform";
 import { SpectrumMeter } from "./components/SpectrumMeter";
+import { StudioView } from "./editor/StudioView";
 import {
   AvailableFilters,
   DEFAULT_FILTERS,
@@ -300,6 +302,7 @@ export const App: React.FC = () => {
   const [statusLabel, setStatusLabel] = useState<string>("");
 
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
+  const [appView, setAppView] = useState<"library" | "editor">("library");
   // Below the 960px breakpoint the inspector is a blocking overlay, so it
   // starts collapsed there -- the edge tab (or Enter) opens it explicitly.
   const [detailOpen, setDetailOpen] = useState<boolean>(
@@ -686,9 +689,23 @@ export const App: React.FC = () => {
     [playingFileId, startAtBestOffset, loopEnabled]
   );
 
+  const openEditorForHit = useCallback((idx?: number) => {
+    if (idx !== undefined) {
+      setSelectedIndex(idx);
+    }
+    if (audioRef.current && !audioRef.current.paused) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+    setAppView("editor");
+  }, []);
+
   // Keyboard navigation
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (appView === "editor") {
+        return;
+      }
       if (libraryModalOpen) {
         if (e.key === "Escape") {
           setLibraryModalOpen(false);
@@ -754,6 +771,17 @@ export const App: React.FC = () => {
           setDetailOpen((prev) => !prev);
         }
       } else if (
+        (e.key === "e" || e.key === "E") &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        !e.repeat
+      ) {
+        e.preventDefault();
+        if (results[selectedIndex]) {
+          openEditorForHit(selectedIndex);
+        }
+      } else if (
         (e.key === "r" || e.key === "R") &&
         !e.ctrlKey &&
         !e.metaKey &&
@@ -787,7 +815,7 @@ export const App: React.FC = () => {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [results, selectedIndex, playHit, libraryModalOpen]);
+  }, [results, selectedIndex, playHit, libraryModalOpen, appView, openEditorForHit]);
 
   const handleAddRoot = async (path: string) => {
     const res = await addLibraryRoot(path);
@@ -1063,6 +1091,24 @@ export const App: React.FC = () => {
     fetchAvailableFilters().then(setAvailFilters).catch(() => {});
   };
 
+  const handleSavedToLibrary = useCallback(
+    (newHit: SearchHit) => {
+      setResults((prev) => {
+        const existingIdx = prev.findIndex((h) => h.file_id === newHit.file_id);
+        if (existingIdx >= 0) {
+          const next = [...prev];
+          next[existingIdx] = newHit;
+          return next;
+        }
+        return [newHit, ...prev];
+      });
+      setTotalResults((prev) => prev + 1);
+      setSelectedIndex(0);
+      void refreshLibraryState();
+    },
+    []
+  );
+
   const hasIndexedFiles = (stats?.ok_files || 0) > 0;
   const isIndexing = indexing?.state === "running";
   const doneFiles = (indexing?.indexed_ok || 0) + (indexing?.indexed_errors || 0);
@@ -1192,111 +1238,143 @@ export const App: React.FC = () => {
         onRescan={handleRescan}
       />
 
-      {/* Top Two-Tier Studio Header: Row 1 = Transport & Utilities, Row 2 = Hero Search Command Bar */}
-      <header className="sfx-toolbar">
-        {/* Tier 1: Brand + Digital Transport Readout + Workspace Controls */}
-        <div className="sfx-topbar">
-          <div className="sfx-brand">
-            <div className="sfx-brand-mark">
-              <Volume2 size={15} />
-            </div>
-            <span className="sfx-brand-title">sfx-search</span>
-            <span className="sfx-brand-count ds-tnum">
-              {stats ? `${stats.ok_files.toLocaleString()} sounds` : ""}
-            </span>
-          </div>
-
-          <div className="sfx-transport-strip" aria-label="Playback transport">
-            <span className="sfx-readout-val warm">
-              {(() => {
-                const activeHit =
-                  (isPlaying && playingHit) || selectedHit || playingHit;
-                if (!activeHit) {
-                  return "00.00s / 00.0s";
-                }
-                const pos =
-                  playingFileId === activeHit.file_id
-                    ? currentTimeS
-                    : activeHit.best_offset_s;
-                return `${pos.toFixed(2).padStart(5, "0")}s / ${activeHit.duration_s
-                  .toFixed(1)
-                  .padStart(4, "0")}s`;
-              })()}
-            </span>
-
-            <SpectrumMeter
-              audioElement={audioRef.current}
-              isPlaying={isPlaying}
-            />
-
-            <div className="sfx-divider-v" />
-
-            <label
-              className="ds-switch-item"
-              onClick={() => setStartAtBestOffset((prev) => !prev)}
-              title="Start playback at best-matching 10s window offset"
-            >
-              <div className={`ds-switch-track ${startAtBestOffset ? "on" : ""}`}>
-                <div className="ds-switch-thumb" />
+      {appView === "editor" ? (
+        <StudioView
+          hit={selectedHit}
+          hasPrev={selectedIndex > 0}
+          hasNext={selectedIndex < results.length - 1}
+          onPrevHit={() =>
+            setSelectedIndex((prev) => Math.max(0, prev - 1))
+          }
+          onNextHit={() =>
+            setSelectedIndex((prev) =>
+              Math.min(results.length - 1, prev + 1)
+            )
+          }
+          onBackToLibrary={() => setAppView("library")}
+          onFindSimilarFromAudio={(file) => {
+            setAppView("library");
+            void handleDropFile(file);
+          }}
+          onSavedToLibrary={handleSavedToLibrary}
+        />
+      ) : (
+        <>
+          {/* Top Two-Tier Studio Header: Row 1 = Transport & Utilities, Row 2 = Hero Search Command Bar */}
+          <header className="sfx-toolbar">
+            {/* Tier 1: Brand + Digital Transport Readout + Workspace Controls */}
+            <div className="sfx-topbar">
+              <div className="sfx-brand">
+                <div className="sfx-brand-mark">
+                  <Volume2 size={15} />
+                </div>
+                <span className="sfx-brand-title">sfx-search</span>
+                <span className="sfx-brand-count ds-tnum">
+                  {stats ? `${stats.ok_files.toLocaleString()} sounds` : ""}
+                </span>
               </div>
-              <span
-                className="ds-switch-label"
-                style={{
-                  fontSize: "var(--font-size-xs)",
-                  color: "var(--text-secondary)",
-                }}
-              >
-                Best offset
-              </span>
-            </label>
 
-            <button
-              type="button"
-              onClick={() => setLoopEnabled((prev) => !prev)}
-              className={`ds-btn ds-btn-sm ${
-                loopEnabled ? "ds-btn-primary" : "ds-btn-ghost"
-              }`}
-              title="Loop playback"
-            >
-              <Repeat size={13} />
-              Loop
-            </button>
-          </div>
+              <div className="sfx-transport-strip" aria-label="Playback transport">
+                <span className="sfx-readout-val warm">
+                  {(() => {
+                    const activeHit =
+                      (isPlaying && playingHit) || selectedHit || playingHit;
+                    if (!activeHit) {
+                      return "00.00s / 00.0s";
+                    }
+                    const pos =
+                      playingFileId === activeHit.file_id
+                        ? currentTimeS
+                        : activeHit.best_offset_s;
+                    return `${pos.toFixed(2).padStart(5, "0")}s / ${activeHit.duration_s
+                      .toFixed(1)
+                      .padStart(4, "0")}s`;
+                  })()}
+                </span>
 
-          <div className="sfx-workspace-tools">
-            <button
-              type="button"
-              onClick={() => setLibraryModalOpen(true)}
-              className="ds-btn ds-btn-secondary ds-btn-sm"
-              title="Configure scanned library folders"
-            >
-              <FolderOpen size={14} />
-              Folders ({roots.length})
-            </button>
+                <SpectrumMeter
+                  audioElement={audioRef.current}
+                  isPlaying={isPlaying}
+                />
 
-            <button
-              type="button"
-              onClick={() => setCompactDensity((prev) => !prev)}
-              className="sfx-icon-btn"
-              style={{
-                color: compactDensity ? "var(--primary-400)" : undefined,
-              }}
-              aria-label={
-                compactDensity
-                  ? "Switch to spacious density"
-                  : "Switch to compact density"
-              }
-              title={
-                compactDensity
-                  ? "Switch to spacious density"
-                  : "Switch to compact density"
-              }
-            >
-              <Rows3 size={15} />
-            </button>
+                <div className="sfx-divider-v" />
 
-          </div>
-        </div>
+                <label
+                  className="ds-switch-item"
+                  onClick={() => setStartAtBestOffset((prev) => !prev)}
+                  title="Start playback at best-matching 10s window offset"
+                >
+                  <div className={`ds-switch-track ${startAtBestOffset ? "on" : ""}`}>
+                    <div className="ds-switch-thumb" />
+                  </div>
+                  <span
+                    className="ds-switch-label"
+                    style={{
+                      fontSize: "var(--font-size-xs)",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
+                    Best offset
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => setLoopEnabled((prev) => !prev)}
+                  className={`ds-btn ds-btn-sm ${
+                    loopEnabled ? "ds-btn-primary" : "ds-btn-ghost"
+                  }`}
+                  title="Loop playback"
+                >
+                  <Repeat size={13} />
+                  Loop
+                </button>
+              </div>
+
+              <div className="sfx-workspace-tools">
+                <button
+                  type="button"
+                  onClick={() => openEditorForHit(selectedIndex)}
+                  className="ds-btn ds-btn-primary ds-btn-sm"
+                  title="Open Audio Studio Editor & Loop Workstation (E)"
+                >
+                  <Sliders size={14} />
+                  Edit Studio
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setLibraryModalOpen(true)}
+                  className="ds-btn ds-btn-secondary ds-btn-sm"
+                  title="Configure scanned library folders"
+                >
+                  <FolderOpen size={14} />
+                  Folders ({roots.length})
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCompactDensity((prev) => !prev)}
+                  className="sfx-icon-btn"
+                  style={{
+                    color: compactDensity ? "var(--primary-400)" : undefined,
+                  }}
+                  aria-label={
+                    compactDensity
+                      ? "Switch to spacious density"
+                      : "Switch to compact density"
+                  }
+                  title={
+                    compactDensity
+                      ? "Switch to spacious density"
+                      : "Switch to compact density"
+                  }
+                >
+                  <Rows3 size={15} />
+                </button>
+
+              </div>
+            </div>
 
         {/* Tier 2: Full-Width Hero Search Command Bar */}
         <form
@@ -2159,6 +2237,19 @@ export const App: React.FC = () => {
                       <div className="sfx-row-actions">
                         <button
                           type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditorForHit(idx);
+                          }}
+                          className="sfx-icon-btn"
+                          aria-label="Open in Edit Studio"
+                          title="Open in Edit Studio / Loop Workstation (E)"
+                        >
+                          <Sliders size={14} />
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={(e) => handleRevealRow(e, hit)}
                           className="sfx-icon-btn sfx-reveal-btn"
                           aria-label="Reveal file in Explorer"
@@ -2254,7 +2345,7 @@ export const App: React.FC = () => {
                   : "Indexing initial audio files...")}
             </span>
             <span className="sfx-statusbar-shortcuts">
-              ↑↓ navigate · Space play · R reveal · F favorite · Enter inspector · / search · drag row to export
+              ↑↓ navigate · Space play · E edit studio · R reveal · F favorite · Enter inspector · / search · drag row to export
             </span>
           </footer>
         </main>
@@ -2300,6 +2391,7 @@ export const App: React.FC = () => {
               onTogglePlay={() => playHit(selectedHit)}
               onSeek={(timeS) => playHit(selectedHit, timeS)}
               onClose={() => setDetailOpen(false)}
+              onOpenEditor={() => openEditorForHit(selectedIndex)}
               onFindSimilarFile={handleFindSimilarFile}
               onFindSimilarChunk={handleFindSimilarChunk}
               onToggleFavorite={() => void toggleFavoriteFile(selectedHit)}
@@ -2308,6 +2400,8 @@ export const App: React.FC = () => {
           </>
         )}
       </div>
+      </>
+      )}
     </div>
   );
 };

@@ -8,6 +8,7 @@
 | **M2: Evaluation & Tuning** | Done | Implemented `sfxsearch eval` harness (`Recall@10/50`, `MRR`, `nDCG@20`, `--show-misses`) with 24 queries in `eval/queries.example.yaml` and benchmarked `hybrid`, `audio_only`, `keyword_only`, `vec_heavy`, and `kw_heavy` variants | — |
 | **M3: HTTP API + Studio Web UI** | Done | Implemented FastAPI endpoints with HTTP Range streaming, background folder indexing, native folder picker, `offset`/`limit` pagination, sort modes, and React/Vite SPA (`dyvoided.2` design system, continuous mirror-envelope `MiniWaveform`, live FFT spectrum meter, infinite scroll, and keyboard-first auditioning) | — |
 | **M4: MCP Server + CI** | Done | Implemented `mcp_server.py` (`search_sounds`, `batch_search`, `find_similar`, `get_sound`, `library_stats`) over stdio and streamable HTTP, one-step launcher scripts (`start.bat`, `start.sh`), and GitHub Actions CI (`.github/workflows/ci.yml`) | — |
+| **Audio Studio & Seamless Loop Editor** | Done | Integrated dedicated Edit Mode (`StudioView`) with modular non-destructive DSP (`Seamless Loop` with Web Worker 3-band envelope + fine NCC pair/fixed-end search, crossfade curves, zero-crossing snap, and live seam oscilloscope; `Trim & Gain`; `3-Band Parametric EQ`; and direct `Save to Library` with instant single-file CLAP indexing + DAW drag-out) | [ADR 0004](adr/0004-integrated-audio-editor-and-loop-module.md) |
 
 ---
 

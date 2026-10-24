@@ -25,7 +25,7 @@ from .config import Config, load_config
 from .decode import decode_audio_pcm
 from .embed import EmbedderProtocol
 from .features import compute_waveform_peaks
-from .indexer import IndexStats, run_indexer
+from .indexer import IndexStats, index_single_file, run_indexer
 from .scan import normalize_path, to_os_path
 from .search import SearchEngine, SearchMode, SortMode
 from .store import ModelMismatchError, SearchFilters, SfxStore, UserDataRecord
@@ -845,6 +845,158 @@ def create_app(
             )
         subprocess.Popen(["explorer.exe", "/select,", win_path])
         return {"revealed": True, "path": raw_path}
+
+    @app.post("/api/files/{file_id}/save-edited")
+    async def api_save_edited_file(
+        file_id: str,
+        file: UploadFile = File(...),
+        suffix: str = Query(".loop"),
+        overwrite: bool = Query(False),
+        copy_user_data: bool = Query(True),
+    ) -> dict[str, Any]:
+        from starlette.concurrency import run_in_threadpool
+
+        f_row = st.get_file_by_id_or_path(file_id)
+        if f_row is None:
+            raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
+
+        source_fid = str(f_row["file_id"])
+        source_path = str(f_row["path"])
+        source_root = str(f_row.get("root") or "")
+        src_p = Path(source_path)
+        parent_dir = src_p.parent
+        os_parent = to_os_path(parent_dir)
+        if not os.path.isdir(os_parent):
+            raise HTTPException(
+                status_code=404, detail=f"Destination directory missing: {parent_dir}"
+            )
+
+        if overwrite:
+            target_norm = normalize_path(src_p)
+        else:
+            raw_suffix = suffix.strip() or ".loop"
+            safe_suffix = "".join(ch for ch in raw_suffix if ch.isalnum() or ch in (".", "_", "-"))
+            if not safe_suffix:
+                safe_suffix = ".loop"
+            if not safe_suffix.startswith((".", "_", "-")):
+                safe_suffix = f".{safe_suffix}"
+
+            stem = src_p.stem
+            # Avoid stacking .loop.loop when saving an already-looped file
+            if stem.lower().endswith(safe_suffix.lower()):
+                base_stem = stem
+            else:
+                base_stem = f"{stem}{safe_suffix}"
+
+            candidate = parent_dir / f"{base_stem}.wav"
+            counter = 2
+            while os.path.exists(to_os_path(candidate)):
+                candidate = parent_dir / f"{base_stem}_{counter}.wav"
+                counter += 1
+            target_norm = normalize_path(candidate)
+
+        max_bytes = 256 * 1024 * 1024
+        os_target = to_os_path(target_norm)
+        os_tmp = f"{os_target}.{os.getpid()}_{threading.get_ident()}.tmp"
+        try:
+            written = 0
+            with open(os_tmp, "wb") as out_f:
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise HTTPException(status_code=413, detail="Edited audio file too large")
+                    out_f.write(chunk)
+            if written < 44:
+                raise HTTPException(status_code=400, detail="Edited audio payload is empty")
+            os.replace(os_tmp, os_target)
+        except HTTPException:
+            try:
+                if os.path.exists(os_tmp):
+                    os.unlink(os_tmp)
+            except OSError:
+                pass
+            raise
+        except Exception as exc:
+            try:
+                if os.path.exists(os_tmp):
+                    os.unlink(os_tmp)
+            except OSError:
+                pass
+            raise HTTPException(
+                status_code=500, detail=f"Failed to write edited audio file: {exc}"
+            ) from exc
+
+        try:
+            f_rec = await run_in_threadpool(
+                index_single_file,
+                path=target_norm,
+                root=source_root or str(parent_dir),
+                config=cfg,
+                store=st,
+                embedder=engine.embedder,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500, detail=f"Saved file but indexing failed: {exc}"
+            ) from exc
+
+        u_map = st.get_user_data_map([source_fid])
+        src_u = u_map.get(source_fid, UserDataRecord(file_id=source_fid))
+        if copy_user_data:
+            next_tags = list(src_u.user_tags)
+            if "loop" not in [t.lower() for t in next_tags]:
+                next_tags.append("loop")
+            u_rec = st.set_user_data(
+                file_id=f_rec.file_id,
+                favorite=src_u.favorite,
+                user_tags=next_tags,
+                note=src_u.note,
+            )
+        else:
+            u_new_map = st.get_user_data_map([f_rec.file_id])
+            u_rec = u_new_map.get(f_rec.file_id, UserDataRecord(file_id=f_rec.file_id))
+
+        try:
+            tags_dict = json.loads(f_rec.tags_json or "{}")
+        except Exception:
+            tags_dict = {}
+
+        p_out = Path(f_rec.path)
+        hit_dict = {
+            "file_id": f_rec.file_id,
+            "path": f_rec.path,
+            "root": f_rec.root,
+            "filename": p_out.name,
+            "folder": str(p_out.parent).replace("\\", "/"),
+            "format": f_rec.format,
+            "duration_s": round(float(f_rec.duration_s), 3),
+            "sample_rate": int(f_rec.sample_rate),
+            "channels": int(f_rec.channels),
+            "lufs_integrated": (
+                round(float(f_rec.lufs_integrated), 2)
+                if f_rec.lufs_integrated is not None
+                else None
+            ),
+            "peak_dbfs": round(float(f_rec.peak_dbfs), 2),
+            "loop_score": (
+                round(float(f_rec.loop_score), 3) if f_rec.loop_score is not None else None
+            ),
+            "tags": tags_dict,
+            "search_text": f_rec.search_text,
+            "best_offset_s": 0.0,
+            "best_end_s": round(float(f_rec.duration_s), 3),
+            "best_chunk_idx": 0,
+            "clap_score": None,
+            "bm25_score": None,
+            "rrf_score": 1.0,
+            "favorite": u_rec.favorite,
+            "user_tags": u_rec.user_tags,
+            "note": u_rec.note,
+        }
+        return {"saved": True, "hit": hit_dict}
 
     @app.get("/api/stats")
     def api_stats() -> dict[str, Any]:

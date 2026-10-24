@@ -218,3 +218,43 @@ export async function pickNativeFolder(): Promise<string | null> {
   const data = await res.json();
   return (data.path as string) || null;
 }
+
+export async function saveEditedFileToLibrary(
+  fileId: string,
+  wavBuffer: ArrayBuffer,
+  filename: string,
+  options: {
+    suffix?: string;
+    overwrite?: boolean;
+    copyUserData?: boolean;
+  } = {}
+): Promise<SearchHit> {
+  const params = new URLSearchParams();
+  if (options.suffix !== undefined) {
+    params.set("suffix", options.suffix);
+  }
+  if (options.overwrite !== undefined) {
+    params.set("overwrite", String(options.overwrite));
+  }
+  if (options.copyUserData !== undefined) {
+    params.set("copy_user_data", String(options.copyUserData));
+  }
+
+  const form = new FormData();
+  const blob = new Blob([wavBuffer], { type: "audio/wav" });
+  form.append("file", blob, filename);
+
+  const res = await fetch(
+    `/api/files/${encodeURIComponent(fileId)}/save-edited?${params}`,
+    {
+      method: "POST",
+      body: form,
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Save failed: ${res.statusText}`);
+  }
+  const data = await res.json();
+  return data.hit as SearchHit;
+}

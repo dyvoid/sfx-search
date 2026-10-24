@@ -5,7 +5,7 @@ instead of archaeology.
 
 ## Current focus
 
-All milestones (**M1, M2, M3, M4**), UI/UX refinements, large-library infinite scroll + sorting, launcher scripts (`start.bat`, `start.sh`), and GitHub Actions CI (`.github/workflows/ci.yml`) are implemented, tested, and verified.
+All milestones (**M1, M2, M3, M4**), the integrated **Edit Mode / Audio Studio & Seamless Loop Workstation** (`task/audio-editor-loop-module`), UI/UX refinements, large-library infinite scroll + sorting, launcher scripts (`start.bat`, `start.sh`), and GitHub Actions CI (`.github/workflows/ci.yml`) are implemented, tested, and verified.
 
 ## State
 
@@ -20,6 +20,9 @@ All milestones (**M1, M2, M3, M4**), UI/UX refinements, large-library infinite s
     - Two-tier studio header with a full-width hero search command bar, inline syntax operator pills, search mode selector, sort selector (`Relevance`, `Name A–Z`, `Name Z–A`, `Shortest first`, `Longest first`, `Loudest first`, `Quietest first`), and live 16-band Web Audio FFT spectrum meter.
     - Decluttered result rows with continuous mirror-envelope `MiniWaveform` (viewport-lazy peak loading + pointer-drag scrubbing), per-row Reveal in Explorer (`R`), Find Similar, and Favorite (`F`) actions, and `IntersectionObserver` infinite scroll across large libraries.
   - **M4 (MCP Server):** Implemented `backend/mcp_server.py` (`search_sounds`, `batch_search`, `find_similar`, `get_sound`, `library_stats`) supporting `stdio` and `streamable-http`.
+  - **Audio Studio & Seamless Loop Editor (`web/src/editor/`, `POST /api/files/{file_id}/save-edited`):**
+    - Dedicated **Edit Studio** mode (`E` shortcut, row action, Inspector action, or top bar button) with modular non-destructive DSP rack (`Seamless Loop`, `Trim & Gain`, `Tone & EQ`, `Variations & Export`).
+    - Incorporates two-stage Web Worker automatic loop-point detection (`findLoopPairs` and `findLoopPoints`), sample-accurate crossfade baking (`auto`, `pre`, `post`, `head` with `equal-power`, `cosine`, `linear` curves), zero-crossing snapping, a real-time **Seam Continuity Scope**, a 3-band parametric EQ + HPF/LPF with live frequency response curve, DAW drag-out (`Drag WAV`), and one-click **Save to Library** with instant single-file CLAP indexing.
   - **CI & Launchers:** Added `start.bat`, `start.sh`, and `.github/workflows/ci.yml` running backend (`ruff`, `black --check`, `mypy`, `pytest`) and frontend (`npm run build`) checks on pushes and PRs to `main`.
 
 ## Next

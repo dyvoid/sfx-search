@@ -183,6 +183,35 @@ def test_fastapi_endpoints_range_and_transcode(tmp_path: Path) -> None:
     assert r_rem.status_code == 200
     assert len(r_rem.json()["roots"]) == 1
 
+    # 10. Save edited/looped audio back to library with immediate indexing & metadata inheritance
+    looped_wav_tmp = tmp_path / "looped_export.wav"
+    write_sine_wav(looped_wav_tmp, freq_hz=660.0, duration_s=1.0)
+    with looped_wav_tmp.open("rb") as f_loop:
+        r_save = client.post(
+            f"/api/files/{wav1_id}/save-edited",
+            params={"suffix": ".loop", "overwrite": "false", "copy_user_data": "true"},
+            files={"file": ("laser_zap_01.loop.wav", f_loop, "audio/wav")},
+        )
+    assert r_save.status_code == 200
+    saved_payload = r_save.json()
+    assert saved_payload["saved"] is True
+    saved_hit = saved_payload["hit"]
+    assert saved_hit["filename"] == "laser_zap_01.loop.wav"
+    assert saved_hit["favorite"] is True
+    assert "loop" in saved_hit["user_tags"]
+    assert "laser" in saved_hit["user_tags"]
+    assert (lib_root / "SciFi" / "laser_zap_01.loop.wav").is_file()
+
+    # Second save with same suffix auto-increments (_2) instead of colliding
+    with looped_wav_tmp.open("rb") as f_loop2:
+        r_save2 = client.post(
+            f"/api/files/{wav1_id}/save-edited",
+            params={"suffix": ".loop", "overwrite": "false"},
+            files={"file": ("laser_zap_01.loop.wav", f_loop2, "audio/wav")},
+        )
+    assert r_save2.status_code == 200
+    assert r_save2.json()["hit"]["filename"] == "laser_zap_01.loop_2.wav"
+
 
 @pytest.mark.asyncio
 async def test_mcp_server_tools(tmp_path: Path) -> None:
