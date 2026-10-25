@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-25T00:00:00Z",
+  "title": "Design System: SFX Search",
+  "extensions": {
+    "colorMeta": {
+      "intent-indigo": { "role": "primary", "displayName": "Intent Indigo", "canonical": "oklch(48% 0.17 275)", "tonalRamp": ["oklch(22% 0.06 275)","oklch(30% 0.10 275)","oklch(38% 0.14 275)","oklch(48% 0.17 275)","oklch(58% 0.14 275)","oklch(68% 0.10 275)","oklch(78% 0.06 275)","oklch(90% 0.03 275)"] },
+      "transform-amber": { "role": "accent", "displayName": "Transform Amber", "canonical": "oklch(72% 0.15 55)", "tonalRamp": ["oklch(25% 0.05 55)","oklch(35% 0.08 55)","oklch(48% 0.12 55)","oklch(60% 0.14 55)","oklch(72% 0.15 55)","oklch(80% 0.12 55)","oklch(87% 0.08 55)","oklch(93% 0.05 55)"] },
+      "signal-teal": { "role": "accent", "displayName": "Signal Teal", "canonical": "oklch(68% 0.10 190)", "tonalRamp": ["oklch(22% 0.04 190)","oklch(32% 0.06 190)","oklch(44% 0.08 190)","oklch(56% 0.09 190)","oklch(68% 0.10 190)","oklch(78% 0.08 190)","oklch(87% 0.05 190)","oklch(94% 0.03 190)"] },
+      "proposal-magenta": { "role": "accent", "displayName": "Proposal Magenta", "canonical": "oklch(64% 0.17 345)", "tonalRamp": ["oklch(22% 0.06 345)","oklch(32% 0.10 345)","oklch(44% 0.14 345)","oklch(54% 0.16 345)","oklch(64% 0.17 345)","oklch(74% 0.13 345)","oklch(84% 0.08 345)","oklch(92% 0.04 345)"] },
+      "surface-panel": { "role": "neutral", "displayName": "Panel Graphite", "canonical": "oklch(17% 0.02 260)", "tonalRamp": ["oklch(12% 0.012 260)","oklch(14% 0.022 260)","oklch(17% 0.02 260)","oklch(21% 0.024 260)","oklch(25% 0.024 260)","oklch(32% 0.022 260)","oklch(52% 0.015 260)","oklch(93% 0.007 260)"] },
+      "success": { "role": "functional", "displayName": "Success", "canonical": "oklch(62% 0.10 155)", "tonalRamp": ["oklch(22% 0.04 155)","oklch(32% 0.06 155)","oklch(44% 0.08 155)","oklch(52% 0.09 155)","oklch(62% 0.10 155)","oklch(72% 0.08 155)","oklch(84% 0.05 155)","oklch(93% 0.03 155)"] },
+      "danger": { "role": "functional", "displayName": "Danger", "canonical": "oklch(58% 0.14 25)", "tonalRamp": ["oklch(22% 0.05 25)","oklch(30% 0.08 25)","oklch(40% 0.11 25)","oklch(50% 0.13 25)","oklch(58% 0.14 25)","oklch(68% 0.125 25)","oklch(80% 0.08 25)","oklch(90% 0.04 25)"] },
+      "warning": { "role": "functional", "displayName": "Warning", "canonical": "oklch(70% 0.115 55)", "tonalRamp": ["oklch(24% 0.05 55)","oklch(34% 0.07 55)","oklch(46% 0.09 55)","oklch(58% 0.11 55)","oklch(70% 0.115 55)","oklch(78% 0.10 55)","oklch(87% 0.06 55)","oklch(94% 0.04 55)"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "File titles and hero numbers; Familjen Grotesk 600, negative tracking." },
+      "body": { "displayName": "Body", "purpose": "Labels, buttons, paragraphs; Hanken Grotesk 400/500." },
+      "label": { "displayName": "Label/Mono", "purpose": "Uppercase micro-labels and all measurements; JetBrains Mono with tabular figures." }
+    },
+    "shadows": [
+      { "name": "shadow-sm", "value": "var(--shadow-sm)", "purpose": "Resting elevation on raised controls." },
+      { "name": "shadow-md", "value": "var(--shadow-md)", "purpose": "Panels and popovers." },
+      { "name": "inset-rail", "value": "var(--inset-rail)", "purpose": "Recessed tracks and input fields." },
+      { "name": "inset-highlight", "value": "var(--inset-highlight)", "purpose": "Specular top edge on buttons and panels." }
+    ],
+    "motion": [
+      { "name": "duration-fast", "value": "120ms", "purpose": "Hover and press feedback." },
+      { "name": "duration-base", "value": "180ms", "purpose": "State changes and overlay entrances." },
+      { "name": "duration-slow", "value": "280ms", "purpose": "Dialogs and large transitions." }
+    ],
+    "breakpoints": [
+      { "name": "coarse-pointer", "value": "@media (pointer: coarse)", "purpose": "Enlarged hit areas (36px controls)." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "User-intent action; indigo gradient with specular edge.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Save</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 16px;font-size:14px;font-weight:500;border-radius:2px;border:1px solid transparent;cursor:pointer;font-family:var(--font-body);transition:background 120ms}.ds-btn-primary{background:linear-gradient(180deg,var(--primary-400),var(--primary-600));color:var(--text-on-accent);box-shadow:var(--inset-highlight)}.ds-btn-primary:hover{background:var(--primary-500)}.ds-btn:focus-visible{outline:none;box-shadow:var(--focus-ring)}"
+    },
+    {
+      "name": "Slider",
+      "kind": "input",
+      "refersTo": "slider",
+      "description": "Rack parameter control; transparent input over track/fill/knob.",
+      "html": "<div class=\"ds-slider-track\" data-ds-track=\"\"><div class=\"ds-slider-fill\" style=\"width:55%\"></div><div class=\"ds-slider-knob\" style=\"left:calc(55% - 7px)\"></div><input type=\"range\" min=\"0\" max=\"100\" value=\"55\" /></div>",
+      "css": ".ds-slider-track{height:4px;border-radius:2px;background:var(--control-track);position:relative;box-shadow:var(--inset-rail)}.ds-slider-fill{height:4px;border-radius:2px;position:absolute;left:0;top:0;background:linear-gradient(90deg,var(--primary),var(--primary-400))}.ds-slider-knob{position:absolute;top:-5px;width:14px;height:14px;box-sizing:border-box;border-radius:50%;background:linear-gradient(180deg,var(--gray-50),var(--gray-200));box-shadow:var(--shadow-sm);border:2px solid var(--primary)}.ds-slider-track input{position:absolute;inset:-7px 0;width:100%;height:22px;margin:0;opacity:0;cursor:pointer}[data-ds-track]:has(:focus-visible){box-shadow:var(--focus-ring)}"
+    },
+    {
+      "name": "Badge",
+      "kind": "chip",
+      "refersTo": "badge-accent",
+      "description": "Mono uppercase status/marker pill.",
+      "html": "<span class=\"ds-badge ds-badge-accent\">3 liked</span>",
+      "css": ".ds-badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:0.08em;text-transform:uppercase}.ds-badge-accent{background:var(--primary-muted-bg);color:var(--primary-hover)}"
+    },
+    {
+      "name": "Choice Pill",
+      "kind": "chip",
+      "refersTo": "choice-pill",
+      "description": "Mode/option picker; active = primary-muted fill.",
+      "html": "<button class=\"sfx-choice-pill active\">S-Curve</button><button class=\"sfx-choice-pill\">Fast Attack</button>",
+      "css": ".sfx-choice-pill{height:24px;padding:0 9px;border-radius:2px;border:1px solid var(--border-subtle);background:var(--surface-sunken);color:var(--text-secondary);font-size:12px;font-weight:500;cursor:pointer;transition:border-color 120ms,color 120ms}.sfx-choice-pill:hover{color:var(--text-primary);border-color:var(--border-strong)}.sfx-choice-pill.active{background:var(--primary-muted-bg);color:var(--text-primary);border-color:var(--primary-400)}.sfx-choice-pill:focus-visible{outline:none;box-shadow:var(--focus-ring)}"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Section container with signature top edge.",
+      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-head\"><span class=\"ds-panel-title\">Trim &amp; Gain</span></div><div class=\"ds-panel-body\">Body</div></section>",
+      "css": ".ds-panel{background:linear-gradient(180deg,var(--surface-raised),var(--surface-panel));border-top:1px solid var(--signature-500);border-radius:6px;box-shadow:var(--shadow-md),var(--inset-highlight)}.ds-panel-head{display:flex;align-items:center;justify-content:space-between;padding:16px 24px;border-bottom:1px solid var(--border-subtle)}.ds-panel-title{font-family:var(--font-mono);font-weight:500;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-secondary)}.ds-panel-body{padding:24px;color:var(--text-secondary);font-size:12px;line-height:1.6}"
+    },
+    {
+      "name": "Number Field",
+      "kind": "input",
+      "refersTo": "input-box",
+      "description": "Sunken numeric field paired with rack sliders.",
+      "html": "<input class=\"sfx-num-input\" type=\"number\" value=\"120\" aria-label=\"Crossfade (ms) value\" />",
+      "css": ".sfx-num-input{width:68px;height:26px;padding:0 8px;border-radius:2px;border:1px solid var(--border-subtle);background:var(--surface-sunken);color:var(--text-primary);font-family:var(--font-mono);font-size:11px}.sfx-num-input:focus-visible{outline:none;border-color:var(--primary);box-shadow:var(--focus-ring)}"
+    },
+    {
+      "name": "Module Tab",
+      "kind": "nav",
+      "refersTo": "module-tab",
+      "description": "Studio module switcher; dot marks configured modules.",
+      "html": "<button class=\"sfx-module-tab active\" role=\"tab\" aria-selected=\"true\"><span>Seamless Loop</span><span class=\"sfx-module-dot on\"></span></button>",
+      "css": ".sfx-module-tab{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid var(--border-subtle);border-radius:2px;background:var(--surface-sunken);color:var(--text-tertiary);font-size:12px;font-weight:500;cursor:pointer}.sfx-module-tab.active{color:var(--text-primary);font-weight:600;background:var(--surface-raised);border-color:var(--border-strong);box-shadow:var(--shadow-sm)}.sfx-module-tab:focus-visible{outline:none;box-shadow:var(--focus-ring)}.sfx-module-dot{width:6px;height:6px;border-radius:50%;background:var(--gray-600)}.sfx-module-dot.on{background:var(--success-500);box-shadow:0 0 6px var(--success-500)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Two-Room Studio",
+    "overview": "Two faces, one system. The library room is a dim space for fast auditioning — rows of waveforms, keyboard-first, nothing competing with the sound. The studio room is a workbench for shaping a found sound fast — trim, EQ, seamless loop, variation takes — dense controls that reward precision. dyvoided.2 carries both: cool graphite neutrals, four seed-driven accents assigned by category, presence 0.45 tactility.",
+    "keyCharacteristics": [
+      "Neutral graphite canvas; accents are semantic categories, not ornament",
+      "primary=user intent, accent-2=live audio signal, accent-1=processing, accent-3=machine-proposed",
+      "Custom canvas instruments share the DOM token palette",
+      "Keyboard-first, dark-only, compact density available"
+    ],
+    "rules": [
+      { "name": "The Category Rule", "body": "An accent hue means exactly one category app-wide. Teal never decorates; magenta never marks a user action. New color joins a category or stays neutral.", "section": "colors" },
+      { "name": "The Rarity Rule", "body": "The graphite canvas owns the room; accents appear where they inform. ~10% colored pixels on a screen preserves hierarchy.", "section": "colors" }
+    ],
+    "dos": [
+      "Do spend accents by category: teal for live audio, amber for processing, magenta for machine proposals, indigo for user intent.",
+      "Do render controls with the kit's compound markup (ds-slider-track/fill/knob, ds-select, ds-check).",
+      "Do keep numbers in mono with tabular figures and labels in uppercase mono micro-style.",
+      "Do give every interactive element a --focus-ring and an accessible name."
+    ],
+    "donts": [
+      "Don't color waveform channels differently — channels differentiate by position, not hue.",
+      "Don't hardcode hues or shadows — reference tokens; --presence owns tactility.",
+      "Don't use --signature for anything functional; it is the panel top-edge only.",
+      "Don't use emoji or unicode glyphs in place of drawn icons."
+    ]
+  }
+}
