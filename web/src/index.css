@@ -1150,6 +1150,23 @@ body.sfx-resizing-x {
   .sfx-row {
     min-height: 60px;
   }
+
+  .sfx-tp-icon-btn,
+  .sfx-var-mini-btn,
+  .sfx-hud-btn {
+    width: 36px;
+    height: 36px;
+  }
+
+  .sfx-var-stop-corner-btn {
+    width: 28px;
+    height: 28px;
+  }
+
+  .sfx-choice-pill,
+  .sfx-candidate-chip {
+    min-height: 36px;
+  }
 }
 
 /* ==========================================================================
