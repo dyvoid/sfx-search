@@ -358,6 +358,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     >
       <canvas
         ref={canvasRef}
+        aria-label="Waveform preview. Click and drag to seek."
         onClick={(e) => e.stopPropagation()}
         onMouseDown={(e) => e.preventDefault()}
         onPointerDown={handlePointerDown}
