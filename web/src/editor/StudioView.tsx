@@ -164,10 +164,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [varSpec, setVarSpec] = useState<VariationSpec>(DEFAULT_VARIATION_SPEC);
   const [variations, setVariations] = useState<GeneratedVariation[]>([]);
   const [activeVarIdx, setActiveVarIdx] = useState<number>(-1);
+  const [playingVarIdx, setPlayingVarIdx] = useState<number | null>(null);
+  const [varPlayRatio, setVarPlayRatio] = useState<number | null>(null);
   const [savingBatch, setSavingBatch] = useState<boolean>(false);
   const [isTestingRR, setIsTestingRR] = useState<boolean>(false);
   const rrTestingRef = useRef<boolean>(false);
   const rrTimerRef = useRef<number>(0);
+  const varSourceRef = useRef<{
+    source: AudioBufferSourceNode;
+    startedAt: number;
+    durationS: number;
+  } | null>(null);
 
   // Processed & Baked buffers
   const [processedChannels, setProcessedChannels] = useState<
@@ -220,12 +227,38 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return transportRef.current;
   }, []);
 
+  const stopVariationPlayback = useCallback(() => {
+    rrTestingRef.current = false;
+    setIsTestingRR(false);
+    window.clearTimeout(rrTimerRef.current);
+    const active = varSourceRef.current;
+    varSourceRef.current = null;
+    if (active) {
+      try {
+        active.source.onended = null;
+        active.source.stop();
+        active.source.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    setPlayingVarIdx(null);
+    setVarPlayRatio(null);
+  }, []);
+
   useEffect(() => {
     return () => {
       searchWorkerRef.current?.terminate();
       window.clearTimeout(bakeTimerRef.current);
       window.clearTimeout(rrTimerRef.current);
       rrTestingRef.current = false;
+      const active = varSourceRef.current;
+      varSourceRef.current = null;
+      try {
+        active?.source.stop();
+      } catch {
+        // ignore
+      }
       transportRef.current?.dispose();
       transportRef.current = null;
     };
@@ -258,7 +291,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         setSampleRate(sr);
         setBaseName(hit.filename.replace(/\.[^.]+$/, "") || "sound");
 
-        // Initialize loop region to full file (or best chunk if very long file)
+        // Reset variations & playhead
+        stopVariationPlayback();
         setLoopStart(0);
         setLoopEnd(len);
         setCandidates([]);
@@ -586,6 +620,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
           )
         );
       }
+
+      // Independent mini playhead for variation take cards
+      const varActive = varSourceRef.current;
+      if (varActive) {
+        const ctx = editorAudioContext();
+        const elapsed = Math.max(0, ctx.currentTime - varActive.startedAt);
+        const ratio = Math.min(
+          1,
+          elapsed / Math.max(0.01, varActive.durationS)
+        );
+        setVarPlayRatio(ratio);
+      }
+
       rafId = window.requestAnimationFrame(tick);
     };
     rafId = window.requestAnimationFrame(tick);
@@ -597,6 +644,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     if (!processedChannels) {
       return;
     }
+    stopVariationPlayback();
     const tp = ensureTransport();
     if (tp.playing) {
       tp.pause();
@@ -642,18 +690,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
   ]);
 
   const stopPlayback = useCallback(() => {
+    stopVariationPlayback();
     const tp = transportRef.current;
     if (!tp) {
       return;
     }
-    rrTestingRef.current = false;
-    setIsTestingRR(false);
-    window.clearTimeout(rrTimerRef.current);
     tp.stop();
     cursorRef.current = loopEnabled ? loopStart : 0;
     cursorVisibleRef.current = false;
     setIsPlaying(false);
-  }, [loopEnabled, loopStart]);
+  }, [loopEnabled, loopStart, stopVariationPlayback]);
 
   const restartLoop = useCallback(() => {
     const tp = transportRef.current;
@@ -956,28 +1002,67 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, [buildCurrentWav, onFindSimilarFromAudio]);
 
   // Procedural Variations & Round-Robin Generator actions
-  const stopRRTest = useCallback(() => {
-    rrTestingRef.current = false;
-    setIsTestingRR(false);
-    window.clearTimeout(rrTimerRef.current);
-    const tp = transportRef.current;
-    if (tp) {
-      tp.onEnded = () => setIsPlaying(false);
-    }
-  }, []);
+  const playVariationOnce = useCallback(
+    (
+      v: GeneratedVariation,
+      idx: number,
+      onDone?: () => void
+    ) => {
+      // Pause main transport if it was playing, without touching main playhead
+      if (transportRef.current?.playing) {
+        transportRef.current.pause();
+        setIsPlaying(false);
+      }
+      const prev = varSourceRef.current;
+      varSourceRef.current = null;
+      if (prev) {
+        try {
+          prev.source.onended = null;
+          prev.source.stop();
+          prev.source.disconnect();
+        } catch {
+          // ignore
+        }
+      }
+
+      const tp = ensureTransport();
+      const ctx = editorAudioContext();
+      if (ctx.state === "suspended") {
+        void ctx.resume();
+      }
+      const buf = tp.makeBuffer(v.channels, v.sampleRate);
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.connect(tp.analyser);
+
+      setActiveVarIdx(idx);
+      setPlayingVarIdx(idx);
+      setVarPlayRatio(0);
+      varSourceRef.current = {
+        source: src,
+        startedAt: ctx.currentTime,
+        durationS: Math.max(0.01, buf.duration),
+      };
+
+      src.onended = () => {
+        if (varSourceRef.current?.source === src) {
+          varSourceRef.current = null;
+          setPlayingVarIdx(null);
+          setVarPlayRatio(null);
+        }
+        onDone?.();
+      };
+      src.start(0);
+    },
+    [ensureTransport]
+  );
 
   const auditionVariation = useCallback(
     (v: GeneratedVariation, idx: number) => {
-      stopRRTest();
-      setActiveVarIdx(idx);
-      const tp = ensureTransport();
-      const buf = tp.makeBuffer(v.channels, v.sampleRate);
-      tp.setFileAudio(buf);
-      setAuditionMode("file");
-      cursorRef.current = 0;
-      cursorVisibleRef.current = true;
-      tp.playFile(0);
-      setIsPlaying(true);
+      rrTestingRef.current = false;
+      setIsTestingRR(false);
+      window.clearTimeout(rrTimerRef.current);
+      playVariationOnce(v, idx);
       setStatusMsg(
         `Auditioning ${v.name} (${
           v.meanSemitones >= 0
@@ -986,14 +1071,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
         } st · ${v.durationS.toFixed(2)}s)`
       );
     },
-    [ensureTransport, stopRRTest]
+    [playVariationOnce]
   );
 
   const toggleTestRoundRobin = useCallback(() => {
     if (rrTestingRef.current) {
-      stopRRTest();
-      transportRef.current?.stop();
-      setIsPlaying(false);
+      stopVariationPlayback();
       setStatusMsg("Stopped round-robin sequence test");
       return;
     }
@@ -1012,38 +1095,29 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
       const take = pool[step % pool.length];
       const fullIdx = variations.findIndex((x) => x.id === take.id);
-      setActiveVarIdx(fullIdx >= 0 ? fullIdx : 0);
+      const targetIdx = fullIdx >= 0 ? fullIdx : 0;
 
-      const tp = ensureTransport();
-      const buf = tp.makeBuffer(take.channels, take.sampleRate);
-      tp.setFileAudio(buf);
-      setAuditionMode("file");
-      cursorRef.current = 0;
-      cursorVisibleRef.current = true;
-      tp.onEnded = () => {
-        setIsPlaying(false);
-        if (!rrTestingRef.current) {
-          return;
-        }
-        step++;
-        if (step >= pool.length * 2) {
-          stopRRTest();
-          setStatusMsg("Completed 2x round-robin sequence test");
-          return;
-        }
-        rrTimerRef.current = window.setTimeout(playNext, 110);
-      };
-      tp.playFile(0);
-      setIsPlaying(true);
       setStatusMsg(
         `Round-Robin Test (${(step % pool.length) + 1}/${pool.length}): ${
           take.name
         }`
       );
+      playVariationOnce(take, targetIdx, () => {
+        if (!rrTestingRef.current) {
+          return;
+        }
+        step++;
+        if (step >= pool.length * 2) {
+          stopVariationPlayback();
+          setStatusMsg("Completed 2x round-robin sequence test");
+          return;
+        }
+        rrTimerRef.current = window.setTimeout(playNext, 110);
+      });
     };
 
     playNext();
-  }, [variations, ensureTransport, stopRRTest]);
+  }, [variations, playVariationOnce, stopVariationPlayback]);
 
   const handleGenerateVariations = useCallback(() => {
     const baseAudio = bakedChannels ?? processedChannels ?? sourceChannels;
@@ -1556,7 +1630,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         <div className="sfx-editor-topbar-right">
           <SpectrumMeter
             analyserNode={transportRef.current?.analyser ?? null}
-            isPlaying={isPlaying}
+            isPlaying={isPlaying || playingVarIdx !== null}
           />
 
           <button
@@ -3206,6 +3280,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <div className="sfx-var-takes-grid">
                   {variations.map((v, idx) => {
                     const isAct = idx === activeVarIdx;
+                    const isTakePlaying = idx === playingVarIdx;
                     return (
                       <div
                         key={v.id}
@@ -3215,7 +3290,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         className={`sfx-var-take-card ${
                           isAct ? "active" : ""
                         } ${v.liked ? "liked" : ""}`}
-                        title="Click to audition · Drag into DAW · Heart to keep"
+                        title="Click to play from start · Drag into DAW · Heart to keep"
                       >
                         <div className="sfx-var-take-top">
                           <span className="sfx-var-take-title ds-tnum">
@@ -3231,6 +3306,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             className="sfx-var-take-actions"
                             onClick={(e) => e.stopPropagation()}
                           >
+                            {isTakePlaying && (
+                              <button
+                                type="button"
+                                onClick={stopVariationPlayback}
+                                className="sfx-var-mini-btn stop"
+                                title="Stop playing take"
+                                aria-label="Stop playing take"
+                              >
+                                <Square size={10} fill="currentColor" />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleRerollSingleVariation(idx)}
@@ -3277,6 +3363,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           pitchCurve={v.pitchCurve}
                           volumeCurve={v.volumeCurve}
                           isActive={isAct}
+                          playheadRatio={isTakePlaying ? varPlayRatio : null}
                         />
                       </div>
                     );

@@ -282,11 +282,12 @@ interface VariationWaveCardCanvasProps {
   pitchCurve: Float32Array;
   volumeCurve: Float32Array;
   isActive: boolean;
+  playheadRatio?: number | null;
 }
 
 export const VariationWaveCardCanvas: React.FC<
   VariationWaveCardCanvasProps
-> = ({ peaks, pitchCurve, volumeCurve, isActive }) => {
+> = ({ peaks, pitchCurve, volumeCurve, isActive, playheadRatio = null }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -312,6 +313,10 @@ export const VariationWaveCardCanvas: React.FC<
     );
     const pitchColor = readTokenColor("--accent-1-400", "#e6b85c");
     const volColor = readTokenColor("--accent-2-400", "#58b5c9");
+    const playheadColor = readTokenColor(
+      "--text-primary",
+      "rgba(255, 255, 255, 0.95)"
+    );
 
     const midY = h / 2;
     const bins = peaks.length;
@@ -365,7 +370,19 @@ export const VariationWaveCardCanvas: React.FC<
       g.stroke();
     }
     g.globalAlpha = 1;
-  }, [peaks, pitchCurve, volumeCurve, isActive]);
+
+    // Non-interactive mini playhead
+    if (playheadRatio !== null && playheadRatio >= 0 && playheadRatio <= 1) {
+      const px = Math.max(0.75, Math.min(w - 0.75, playheadRatio * w));
+      g.strokeStyle = playheadColor;
+      g.lineWidth = 1.5;
+      g.beginPath();
+      g.moveTo(px, 0);
+      g.lineTo(px, h);
+      g.stroke();
+      g.lineWidth = 1;
+    }
+  }, [peaks, pitchCurve, volumeCurve, isActive, playheadRatio]);
 
   return (
     <canvas

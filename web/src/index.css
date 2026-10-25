@@ -1877,6 +1877,12 @@ body.sfx-resizing-x {
   color: var(--danger-400);
 }
 
+.sfx-var-mini-btn.stop {
+  color: var(--accent-1-400);
+  background: var(--accent-1-muted-bg);
+  border-color: oklch(from var(--accent-1-400) l c h / 0.4);
+}
+
 .sfx-var-wave-canvas {
   width: 100%;
   height: 40px;
