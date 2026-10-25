@@ -130,8 +130,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [decoding, setDecoding] = useState<boolean>(false);
   const [decodeError, setDecodeError] = useState<string>("");
 
-  // Active module tab
-  const [activeModule, setActiveModule] = useState<EditorModuleId>("loop");
+  // Active module tab (Trim & Gain is Module 1 since cropping defines the region for downstream modules)
+  const [activeModule, setActiveModule] = useState<EditorModuleId>("shaper");
 
   // Module 1: Seamless Loop state (disabled by default until enabled or auto-found)
   const [loopEnabled, setLoopEnabled] = useState<boolean>(false);
@@ -1332,10 +1332,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
           break;
         }
         case "Digit1":
-          setActiveModule("loop");
+          setActiveModule("shaper");
           break;
         case "Digit2":
-          setActiveModule("shaper");
+          setActiveModule("loop");
           break;
         case "Digit3":
           setActiveModule("eq");
@@ -1498,20 +1498,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           <button
             type="button"
             role="tab"
-            aria-selected={activeModule === "loop"}
-            onClick={() => setActiveModule("loop")}
-            className={`sfx-module-tab ${
-              activeModule === "loop" ? "active" : ""
-            }`}
-          >
-            <Repeat size={14} />
-            <span>Seamless Loop</span>
-            {loopEnabled && <span className="sfx-module-dot on" />}
-          </button>
-
-          <button
-            type="button"
-            role="tab"
             aria-selected={activeModule === "shaper"}
             onClick={() => setActiveModule("shaper")}
             className={`sfx-module-tab ${
@@ -1521,6 +1507,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <Sliders size={14} />
             <span>Trim &amp; Gain</span>
             {shaperActive && <span className="sfx-module-dot on" />}
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeModule === "loop"}
+            onClick={() => setActiveModule("loop")}
+            className={`sfx-module-tab ${
+              activeModule === "loop" ? "active" : ""
+            }`}
+          >
+            <Repeat size={14} />
+            <span>Seamless Loop</span>
+            {loopEnabled && <span className="sfx-module-dot on" />}
           </button>
 
           <button
@@ -1764,10 +1764,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
       <div className="sfx-editor-transport-bar">
         <div className="sfx-editor-transport-left">
           <span className="sfx-rack-hint ds-tnum">
-            {activeModule === "loop"
-              ? "Module 1 · Seamless Loop"
-              : activeModule === "shaper"
-              ? "Module 2 · Trim & Gain"
+            {activeModule === "shaper"
+              ? "Module 1 · Trim & Gain"
+              : activeModule === "loop"
+              ? "Module 2 · Seamless Loop"
               : activeModule === "eq"
               ? "Module 3 · Tone & EQ"
               : "Module 4 · Variations"}
