@@ -24,10 +24,11 @@ Furthermore, we want `sfx-search` to grow into a unified sound-design workstatio
    - Includes a real-time **Seam Phase & Continuity Scope** that overlays the waveform across the loop boundary (`E -> S`) so phase alignment and crossfade smoothness are visually verifiable alongside live looped Web Audio playback.
 3. **Procedural Variations & Round-Robin Generator (Core Module #4):**
    - Synthesizes organic round-robin takes (`variations.ts`) from the active edited/looped buffer without leaving the browser:
-     - **Foley vs. Melodic Mode:** Foley mode allows continuous multi-point pitch and volume contours; Melodic mode softly quantizes pitch excursions toward semitone intervals.
-     - **Multi-Point Catmull-Rom Modulation Splines:** Configurable `Pitch Amount` (0–100%), `Volume Amount` (0–100%), `Control Points` (2–16), and `Link pitch & volume modulation`, resampled via 4-point cubic Hermite interpolation.
-     - **Tone, Motion & Realism:** Per-take 3-band EQ randomization (`Randomize EQ`), inverse spectral-tilt `Preserve formants` compensation, `Time Stretch` length/pitch drift, `Motion Fade In / Out`, and `Humanize` transient/gain micro-variance.
-     - **Batch Curation & Export:** Generates up to 12 takes at once with interactive audition cards (showing each take's waveform + pitch/volume modulation spline), individual re-roll, heart/like curation, direct DAW drag-out per take, and one-click **Save Liked to Library** (batch-saving and indexing all starred takes into LanceDB).
+     - **Stratified Anti-Clumping Sampling:** Generates $N$ takes across stratified Latin-hypercube slots so no two takes clump at the same pitch/force.
+     - **Pitch Shift vs. Zero-Integral Pitch Drift:** Separates static per-take `Pitch Shift` from internal time-varying `Pitch Drift` (normalized so $\int \text{drift}(t)\,dt = 0$, guaranteeing internal spline movement never causes unexpected duration drift), with `Melodic` mode supporting micro-detuning ($\le 45\%$) or scale-step quantization ($> 45\%$).
+     - **Protect Start / End (Modulation Masking):** Smoothly masks internal drift and volume modulation at the start and/or end of the sound so initial attack transients stay phase-coherent and tails/loops stay anchored.
+     - **Physically-Coupled Tone Variation & Attack Punch:** Continuous `Tone Variation` (`0–100%`) couples strike force to brightness and jitters resonant mid peaks, while `Attack Punch` varies the first ~32 ms transient snap to defeat the machine-gun effect.
+     - **Batch Curation & Sequential Round-Robin Test:** Includes a **Test Sequence** rapid-fire player that cycles through generated (or liked) takes back-to-back, alongside individual re-roll, heart/like curation, direct DAW drag-out, and one-click **Save Liked to Library**.
 4. **Save to Library & Immediate Single-File Indexing:**
    - Export supports three workflows without leaving the editor:
      - **Download WAV** (`16-bit`, `24-bit`, or `32-bit float` RIFF/WAVE encoded in-browser).

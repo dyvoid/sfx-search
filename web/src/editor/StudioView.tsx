@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  CircleHelp,
   Dices,
   Download,
   FolderOpen,
@@ -79,6 +80,19 @@ import type { SearchMessage } from "./workers/search.worker";
 
 export type EditorModuleId = "loop" | "shaper" | "eq" | "variations";
 
+const LabelWithTip: React.FC<{ label: string; tip: string }> = ({
+  label,
+  tip,
+}) => (
+  <span className="sfx-rack-label sfx-label-with-tip">
+    <span>{label}</span>
+    <span className="sfx-tip-wrap" tabIndex={0} aria-label={tip}>
+      <CircleHelp size={11} className="sfx-tip-icon" />
+      <span className="sfx-tip-bubble">{tip}</span>
+    </span>
+  </span>
+);
+
 interface StudioViewProps {
   hit: SearchHit | null;
   hasPrev: boolean;
@@ -118,8 +132,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   // Active module tab
   const [activeModule, setActiveModule] = useState<EditorModuleId>("loop");
 
-  // Module 1: Seamless Loop state
-  const [loopEnabled, setLoopEnabled] = useState<boolean>(true);
+  // Module 1: Seamless Loop state (disabled by default until enabled or auto-found)
+  const [loopEnabled, setLoopEnabled] = useState<boolean>(false);
   const [loopStart, setLoopStart] = useState<number>(0);
   const [loopEnd, setLoopEnd] = useState<number>(0);
   const [fadeMs, setFadeMs] = useState<number>(350);
@@ -150,6 +164,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [variations, setVariations] = useState<GeneratedVariation[]>([]);
   const [activeVarIdx, setActiveVarIdx] = useState<number>(-1);
   const [savingBatch, setSavingBatch] = useState<boolean>(false);
+  const [isTestingRR, setIsTestingRR] = useState<boolean>(false);
+  const rrTestingRef = useRef<boolean>(false);
+  const rrTimerRef = useRef<number>(0);
 
   // Processed & Baked buffers
   const [processedChannels, setProcessedChannels] = useState<
@@ -181,7 +198,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Export & Library save state
   const [exportFormat, setExportFormat] = useState<WavFormat>("int24");
-  const [saveSuffix, setSaveSuffix] = useState<string>(".loop");
+  const [saveSuffix, setSaveSuffix] = useState<string>(".edit");
   const [savingToLibrary, setSavingToLibrary] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
 
@@ -206,6 +223,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return () => {
       searchWorkerRef.current?.terminate();
       window.clearTimeout(bakeTimerRef.current);
+      window.clearTimeout(rrTimerRef.current);
+      rrTestingRef.current = false;
       transportRef.current?.dispose();
       transportRef.current = null;
     };
@@ -428,6 +447,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
       const clampedE = Math.max(clampedS + 2, Math.min(e, len));
       setLoopStart(clampedS);
       setLoopEnd(clampedE);
+      setLoopEnabled(true);
+      setSaveSuffix((prev) => (prev === ".edit" ? ".loop" : prev));
     },
     [processedChannels, sourceChannels, snapZero, snapSample]
   );
@@ -516,11 +537,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
     if (!tp) {
       return;
     }
+    rrTestingRef.current = false;
+    setIsTestingRR(false);
+    window.clearTimeout(rrTimerRef.current);
     tp.stop();
-    cursorRef.current = loopStart;
+    cursorRef.current = loopEnabled ? loopStart : 0;
     cursorVisibleRef.current = false;
     setIsPlaying(false);
-  }, [loopStart]);
+  }, [loopEnabled, loopStart]);
 
   const restartLoop = useCallback(() => {
     const tp = transportRef.current;
@@ -711,10 +735,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
       return null;
     }
     const wav = encodeWav(outBuffers, sampleRate, exportFormat);
-    const cleanSuffix = (saveSuffix.trim() || ".loop").replace(/^\.?/, ".");
+    const defaultSuf = loopEnabled ? ".loop" : ".edit";
+    const cleanSuffix = (saveSuffix.trim() || defaultSuf).replace(/^\.?/, ".");
     const filename = `${baseName}${cleanSuffix}.wav`;
     return { wav, filename };
-  }, [bakedChannels, processedChannels, sampleRate, exportFormat, saveSuffix, baseName]);
+  }, [
+    bakedChannels,
+    processedChannels,
+    sampleRate,
+    exportFormat,
+    saveSuffix,
+     loopEnabled,
+    baseName,
+  ]);
 
   const handleExportDownload = useCallback(() => {
     const res = buildCurrentWav();
@@ -804,8 +837,19 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, [buildCurrentWav, onFindSimilarFromAudio]);
 
   // Procedural Variations & Round-Robin Generator actions
+  const stopRRTest = useCallback(() => {
+    rrTestingRef.current = false;
+    setIsTestingRR(false);
+    window.clearTimeout(rrTimerRef.current);
+    const tp = transportRef.current;
+    if (tp) {
+      tp.onEnded = () => setIsPlaying(false);
+    }
+  }, []);
+
   const auditionVariation = useCallback(
     (v: GeneratedVariation, idx: number) => {
+      stopRRTest();
       setActiveVarIdx(idx);
       const tp = ensureTransport();
       const buf = tp.makeBuffer(v.channels, v.sampleRate);
@@ -817,12 +861,70 @@ export const StudioView: React.FC<StudioViewProps> = ({
       setIsPlaying(true);
       setStatusMsg(
         `Auditioning ${v.name} (${
-          v.meanSemitones >= 0 ? `+${v.meanSemitones.toFixed(1)}` : v.meanSemitones.toFixed(1)
+          v.meanSemitones >= 0
+            ? `+${v.meanSemitones.toFixed(1)}`
+            : v.meanSemitones.toFixed(1)
         } st · ${v.durationS.toFixed(2)}s)`
       );
     },
-    [ensureTransport]
+    [ensureTransport, stopRRTest]
   );
+
+  const toggleTestRoundRobin = useCallback(() => {
+    if (rrTestingRef.current) {
+      stopRRTest();
+      transportRef.current?.stop();
+      setIsPlaying(false);
+      setStatusMsg("Stopped round-robin sequence test");
+      return;
+    }
+    const liked = variations.filter((v) => v.liked);
+    const pool = liked.length > 0 ? liked : variations;
+    if (pool.length === 0) {
+      return;
+    }
+    rrTestingRef.current = true;
+    setIsTestingRR(true);
+    let step = 0;
+
+    const playNext = () => {
+      if (!rrTestingRef.current) {
+        return;
+      }
+      const take = pool[step % pool.length];
+      const fullIdx = variations.findIndex((x) => x.id === take.id);
+      setActiveVarIdx(fullIdx >= 0 ? fullIdx : 0);
+
+      const tp = ensureTransport();
+      const buf = tp.makeBuffer(take.channels, take.sampleRate);
+      tp.setFileAudio(buf);
+      setAuditionMode("file");
+      cursorRef.current = 0;
+      cursorVisibleRef.current = true;
+      tp.onEnded = () => {
+        setIsPlaying(false);
+        if (!rrTestingRef.current) {
+          return;
+        }
+        step++;
+        if (step >= pool.length * 2) {
+          stopRRTest();
+          setStatusMsg("Completed 2x round-robin sequence test");
+          return;
+        }
+        rrTimerRef.current = window.setTimeout(playNext, 110);
+      };
+      tp.playFile(0);
+      setIsPlaying(true);
+      setStatusMsg(
+        `Round-Robin Test (${(step % pool.length) + 1}/${pool.length}): ${
+          take.name
+        }`
+      );
+    };
+
+    playNext();
+  }, [variations, ensureTransport, stopRRTest]);
 
   const handleGenerateVariations = useCallback(() => {
     const baseAudio = bakedChannels ?? processedChannels ?? sourceChannels;
@@ -1135,7 +1237,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const loopMarkers = useMemo(
     () =>
-      processedChannels
+      processedChannels && (loopEnabled || activeModule === "loop")
         ? {
             start: loopStart,
             end: loopEnd,
@@ -1143,7 +1245,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
             fadeAtHead,
           }
         : null,
-    [processedChannels, loopStart, loopEnd, loopEnabled, fadeSamples, fadeAtHead]
+    [
+      processedChannels,
+      loopEnabled,
+      activeModule,
+      loopStart,
+      loopEnd,
+      fadeSamples,
+      fadeAtHead,
+    ]
   );
 
   const resolvedModeLabel =
@@ -1377,23 +1487,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
         />
 
         {/* Stage Overlay HUD: Legend + Zoom Controls */}
-        <div className="sfx-editor-stage-hud-left">
-          <span className="sfx-hud-pill start">
-            <span className="dot" />S{" "}
-            {(loopStart / sampleRate).toFixed(3)}s
-          </span>
-          <span className="sfx-hud-pill end">
-            <span className="dot" />E {(loopEnd / sampleRate).toFixed(3)}s
-          </span>
-          <span className="sfx-hud-pill">
-            Len {loopDurationS.toFixed(3)}s
-          </span>
-          {loopEnabled && fadeMs > 0 && (
-            <span className="sfx-hud-pill fade">
-              X-Fade {Math.round(fadeMs)}ms · {resolvedModeLabel}
+        {(loopEnabled || activeModule === "loop") && (
+          <div className="sfx-editor-stage-hud-left">
+            <span className="sfx-hud-pill start">
+              <span className="dot" />S {(loopStart / sampleRate).toFixed(3)}s
             </span>
-          )}
-        </div>
+            <span className="sfx-hud-pill end">
+              <span className="dot" />E {(loopEnd / sampleRate).toFixed(3)}s
+            </span>
+            <span className="sfx-hud-pill">
+              Len {loopDurationS.toFixed(3)}s
+            </span>
+            {loopEnabled && fadeMs > 0 && (
+              <span className="sfx-hud-pill fade">
+                X-Fade {Math.round(fadeMs)}ms · {resolvedModeLabel}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="sfx-editor-stage-hud-right">
           <button
@@ -2344,12 +2455,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
         {activeModule === "variations" && (
           <div className="sfx-rack-grid sfx-rack-grid-variations">
-            {/* Column 1: Mode, Pitch, Volume & Envelope Splines */}
+            {/* Column 1: Pitch, Drift & Volume */}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">
-                  Pitch, Volume &amp; Envelope
-                </span>
+                <span className="ds-panel-title">Pitch &amp; Movement</span>
                 <div className="sfx-pill-group">
                   {(
                     [
@@ -2364,6 +2473,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       className={`sfx-choice-pill ${
                         varSpec.mode === m ? "active" : ""
                       }`}
+                      title={
+                        m === "foley"
+                          ? "Foley mode: continuous pitch shifts and organic internal movement"
+                          : "Melodic mode: keeps takes in key at low settings, or snaps to musical scale steps at high settings"
+                      }
                     >
                       {label}
                     </button>
@@ -2373,30 +2487,62 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
               <div className="sfx-rack-fields">
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Pitch Amount</label>
+                  <LabelWithTip
+                    label="Pitch Shift"
+                    tip="Shifts the overall pitch of each take up or down (evenly spread across your takes so no two sound identical). Great for footsteps, impacts, and weapons."
+                  />
                   <div className="sfx-rack-control-inline">
                     <input
                       type="range"
                       min={0}
                       max={100}
                       step={1}
-                      value={varSpec.pitchAmount}
+                      value={varSpec.pitchShift}
                       onChange={(e) =>
                         setVarSpec((s) => ({
                           ...s,
-                          pitchAmount: Number(e.target.value),
+                          pitchShift: Number(e.target.value),
                         }))
                       }
                       className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
-                      {varSpec.pitchAmount}%
+                      {varSpec.pitchShift}%
                     </span>
                   </div>
                 </div>
 
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Volume Amount</label>
+                  <LabelWithTip
+                    label="Pitch Drift"
+                    tip="Bends pitch and speed dynamically over time along a smooth curve (amber line) without changing the total length of the sound. Ideal for whooshes, creaks, vocals, and textures."
+                  />
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={varSpec.driftAmount}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          driftAmount: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      {varSpec.driftAmount}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Volume Swell"
+                    tip="Varies the loudness contour over time (teal line) as well as the overall hit strength of each take."
+                  />
                   <div className="sfx-rack-control-inline">
                     <input
                       type="range"
@@ -2419,7 +2565,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
 
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Control Points</label>
+                  <LabelWithTip
+                    label="Curve Complexity"
+                    tip="Number of random inflection points along the Pitch Drift and Volume Swell curves (2 = slow gentle bend, 16 = fast wobbly movement)."
+                  />
                   <div className="sfx-rack-control-inline">
                     <input
                       type="range"
@@ -2436,7 +2585,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
-                      {varSpec.controlPoints}
+                      {varSpec.controlPoints} pts
                     </span>
                   </div>
                 </div>
@@ -2464,18 +2613,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       className="ds-check-label"
                       style={{ fontSize: "var(--font-size-xs)" }}
                     >
-                      Link pitch &amp; volume modulation
+                      Link pitch &amp; volume movement
                     </span>
                   </label>
                 </div>
               </div>
             </section>
 
-            {/* Column 2: Tone, Motion & Realism */}
+            {/* Column 2: Tone, Protection & Character */}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
                 <span className="ds-panel-title">
-                  Tone, Motion &amp; Realism
+                  Tone, Timing &amp; Protection
                 </span>
                 <div className="sfx-rack-control-inline" style={{ flex: "none" }}>
                   <span className="sfx-rack-hint">Takes</span>
@@ -2502,102 +2651,126 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
               <div className="sfx-rack-fields">
                 <div className="sfx-rack-row">
-                  <label
-                    className="ds-check"
-                    onClick={() =>
-                      setVarSpec((s) => ({
-                        ...s,
-                        randomizeEq: !s.randomizeEq,
-                      }))
-                    }
-                  >
-                    <div
-                      className={`ds-checkbox ${
-                        varSpec.randomizeEq ? "on" : ""
-                      }`}
-                    >
-                      {varSpec.randomizeEq && (
-                        <div className="ds-checkbox-inner" />
-                      )}
-                    </div>
-                    <span
-                      className="ds-check-label"
-                      style={{ fontSize: "var(--font-size-xs)" }}
-                    >
-                      Randomize EQ (low / mid / high)
+                  <LabelWithTip
+                    label="Tone Variation"
+                    tip="Controls how much EQ color (brightness, warmth, and resonant body) varies per take. Harder hits are naturally brighter; set to 0% for zero EQ change."
+                  />
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={varSpec.toneSpread}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          toneSpread: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      {varSpec.toneSpread}%
                     </span>
-                  </label>
+                  </div>
                 </div>
 
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Motion Fade In / Out</label>
+                  <LabelWithTip
+                    label="Attack Punch"
+                    tip="Subtly varies the crispness and snap of the first 30ms of each take so rapid-fire footsteps or weapon hits never sound robotic ('machine-gun effect')."
+                  />
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={varSpec.attackSnap}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          attackSnap: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      {varSpec.attackSnap}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Length Variation"
+                    tip="How much faster or slower (shorter or longer) each take is allowed to be. Set to 0% when variations must stay locked to an exact animation length."
+                  />
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={25}
+                      step={1}
+                      value={varSpec.lengthSpreadPct}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          lengthSpreadPct: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      ±{varSpec.lengthSpreadPct}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Protect Start / End"
+                    tip="Fades the internal Pitch Drift and Volume Swell in at the start and out at the end so your initial impact stays untouched and your tail/loop end stays anchored."
+                  />
                   <div className="sfx-rack-control-inline">
                     <input
                       type="range"
                       min={0}
                       max={45}
                       step={1}
-                      value={varSpec.fadeInPct}
+                      value={varSpec.protectStartPct}
                       onChange={(e) =>
                         setVarSpec((s) => ({
                           ...s,
-                          fadeInPct: Number(e.target.value),
+                          protectStartPct: Number(e.target.value),
                         }))
                       }
                       className="sfx-range-input"
-                      title={`Fade In: ${varSpec.fadeInPct}%`}
+                      title={`Protect Start: ${varSpec.protectStartPct}%`}
                     />
                     <input
                       type="range"
                       min={0}
                       max={45}
                       step={1}
-                      value={varSpec.fadeOutPct}
+                      value={varSpec.protectEndPct}
                       onChange={(e) =>
                         setVarSpec((s) => ({
                           ...s,
-                          fadeOutPct: Number(e.target.value),
+                          protectEndPct: Number(e.target.value),
                         }))
                       }
                       className="sfx-range-input"
-                      title={`Fade Out: ${varSpec.fadeOutPct}%`}
+                      title={`Protect End: ${varSpec.protectEndPct}%`}
                     />
                     <span className="sfx-val-readout ds-tnum">
-                      {varSpec.fadeInPct}% / {varSpec.fadeOutPct}%
+                      {varSpec.protectStartPct}% / {varSpec.protectEndPct}%
                     </span>
                   </div>
                 </div>
 
-                <div
-                  className="sfx-rack-row"
-                  style={{ justifyContent: "flex-start", gap: "var(--space-4)" }}
-                >
-                  <label
-                    className="ds-check"
-                    onClick={() =>
-                      setVarSpec((s) => ({
-                        ...s,
-                        timeStretch: !s.timeStretch,
-                      }))
-                    }
-                  >
-                    <div
-                      className={`ds-checkbox ${
-                        varSpec.timeStretch ? "on" : ""
-                      }`}
-                    >
-                      {varSpec.timeStretch && (
-                        <div className="ds-checkbox-inner" />
-                      )}
-                    </div>
-                    <span
-                      className="ds-check-label"
-                      style={{ fontSize: "var(--font-size-xs)" }}
-                    >
-                      Time Stretch (length &amp; pitch)
-                    </span>
-                  </label>
-
+                <div className="sfx-rack-row">
                   <label
                     className="ds-check"
                     onClick={() =>
@@ -2620,32 +2793,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       className="ds-check-label"
                       style={{ fontSize: "var(--font-size-xs)" }}
                     >
-                      Preserve formants
+                      Preserve natural body when pitching (Formants)
                     </span>
                   </label>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Humanize</label>
-                  <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={varSpec.humanize}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          humanize: Number(e.target.value),
-                        }))
-                      }
-                      className="sfx-range-input"
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {varSpec.humanize}%
-                    </span>
-                  </div>
                 </div>
               </div>
             </section>
@@ -2675,6 +2825,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     Generate {varSpec.count} Takes
                   </button>
 
+                  {variations.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={toggleTestRoundRobin}
+                      className={`ds-btn ds-btn-sm ${
+                        isTestingRR ? "ds-btn-danger" : "ds-btn-secondary"
+                      }`}
+                      title="Rapid-fire through your generated (or liked) takes in sequence to test for the machine-gun effect"
+                    >
+                      {isTestingRR ? <Square size={12} /> : <Play size={12} />}
+                      {isTestingRR ? "Stop Test" : "Test Sequence"}
+                    </button>
+                  )}
+
                   {variations.length > 0 && hit && (
                     <button
                       type="button"
@@ -2690,7 +2854,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                         ? `Save Liked (${
                             variations.filter((v) => v.liked).length
                           })`
-                        : "Save All to Library"}
+                        : "Save All"}
                     </button>
                   )}
 
@@ -2710,11 +2874,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
               {variations.length === 0 ? (
                 <div className="sfx-candidate-empty">
-                  Configure your Foley or Melodic variation parameters on the
-                  left and click <strong>Generate {varSpec.count} Takes</strong>{" "}
-                  to synthesize organic round-robin variations. Click any take
-                  to audition, heart the ones you like, drag directly to your
-                  DAW, or batch-save them to your library.
+                  Dial in your variation amounts on the left (hover any{" "}
+                  <strong>?</strong> icon for details) and click{" "}
+                  <strong>Generate {varSpec.count} Takes</strong>. Then use{" "}
+                  <strong>Test Sequence</strong> to hear them fire back-to-back,
+                  heart your favorites, drag takes into your DAW, or save them
+                  to your library.
                 </div>
               ) : (
                 <div className="sfx-var-takes-grid">

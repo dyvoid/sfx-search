@@ -1884,3 +1884,54 @@ body.sfx-resizing-x {
   border-radius: var(--radius-xs);
 }
 
+/* Hover Tooltip Bubbles for Variations & DSP Controls */
+.sfx-label-with-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sfx-tip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-tertiary);
+  cursor: help;
+  outline: none;
+}
+
+.sfx-tip-wrap:hover,
+.sfx-tip-wrap:focus-visible {
+  color: var(--primary-400);
+}
+
+.sfx-tip-bubble {
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 0;
+  z-index: 60;
+  width: 240px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--gray-950);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: var(--font-size-2xs);
+  font-weight: 400;
+  line-height: 1.45;
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(3px);
+  transition: opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+.sfx-tip-wrap:hover .sfx-tip-bubble,
+.sfx-tip-wrap:focus-visible .sfx-tip-bubble {
+  opacity: 1;
+  transform: translateY(0);
+}
+

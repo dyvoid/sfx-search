@@ -292,10 +292,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               type="button"
               onClick={onOpenEditor}
               className="ds-btn ds-btn-primary ds-btn-sm"
-              title="Open in Audio Studio Editor (E)"
+              title="Open in Audio Editor (E)"
             >
               <Sliders size={14} />
-              <span className="sfx-btn-label">Edit / Loop Studio (E)</span>
+              <span className="sfx-btn-label">Edit Audio (E)</span>
             </button>
             <button
               type="button"

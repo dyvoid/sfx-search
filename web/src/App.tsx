@@ -1336,10 +1336,10 @@ export const App: React.FC = () => {
                   type="button"
                   onClick={() => openEditorForHit(selectedIndex)}
                   className="ds-btn ds-btn-primary ds-btn-sm"
-                  title="Open Audio Studio Editor & Loop Workstation (E)"
+                  title="Open Audio Editor (E)"
                 >
                   <Sliders size={14} />
-                  Edit Studio
+                  Edit Audio
                 </button>
 
                 <button
@@ -2242,8 +2242,8 @@ export const App: React.FC = () => {
                             openEditorForHit(idx);
                           }}
                           className="sfx-icon-btn"
-                          aria-label="Open in Edit Studio"
-                          title="Open in Edit Studio / Loop Workstation (E)"
+                          aria-label="Edit audio"
+                          title="Edit audio (E)"
                         >
                           <Sliders size={14} />
                         </button>
@@ -2345,7 +2345,7 @@ export const App: React.FC = () => {
                   : "Indexing initial audio files...")}
             </span>
             <span className="sfx-statusbar-shortcuts">
-              ↑↓ navigate · Space play · E edit studio · R reveal · F favorite · Enter inspector · / search · drag row to export
+              ↑↓ navigate · Space play · E edit · R reveal · F favorite · Enter inspector · / search · drag row to export
             </span>
           </footer>
         </main>
