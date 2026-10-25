@@ -1335,10 +1335,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
           setActiveModule("shaper");
           break;
         case "Digit2":
-          setActiveModule("loop");
+          setActiveModule("eq");
           break;
         case "Digit3":
-          setActiveModule("eq");
+          setActiveModule("loop");
           break;
         case "Digit4":
           setActiveModule("variations");
@@ -1512,20 +1512,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           <button
             type="button"
             role="tab"
-            aria-selected={activeModule === "loop"}
-            onClick={() => setActiveModule("loop")}
-            className={`sfx-module-tab ${
-              activeModule === "loop" ? "active" : ""
-            }`}
-          >
-            <Repeat size={14} />
-            <span>Seamless Loop</span>
-            {loopEnabled && <span className="sfx-module-dot on" />}
-          </button>
-
-          <button
-            type="button"
-            role="tab"
             aria-selected={activeModule === "eq"}
             onClick={() => setActiveModule("eq")}
             className={`sfx-module-tab ${
@@ -1535,6 +1521,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <Activity size={14} />
             <span>Tone &amp; EQ</span>
             {eqActive && <span className="sfx-module-dot on" />}
+          </button>
+
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeModule === "loop"}
+            onClick={() => setActiveModule("loop")}
+            className={`sfx-module-tab ${
+              activeModule === "loop" ? "active" : ""
+            }`}
+          >
+            <Repeat size={14} />
+            <span>Seamless Loop</span>
+            {loopEnabled && <span className="sfx-module-dot on" />}
           </button>
 
           <button
@@ -1766,10 +1766,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
           <span className="sfx-rack-hint ds-tnum">
             {activeModule === "shaper"
               ? "Module 1 · Trim & Gain"
-              : activeModule === "loop"
-              ? "Module 2 · Seamless Loop"
               : activeModule === "eq"
-              ? "Module 3 · Tone & EQ"
+              ? "Module 2 · Tone & EQ"
+              : activeModule === "loop"
+              ? "Module 3 · Seamless Loop"
               : "Module 4 · Variations"}
           </span>
         </div>
