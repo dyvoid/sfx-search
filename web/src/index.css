@@ -1877,10 +1877,9 @@ body.sfx-resizing-x {
   color: var(--danger-400);
 }
 
-.sfx-var-mini-btn.stop {
-  color: var(--accent-1-400);
-  background: var(--accent-1-muted-bg);
-  border-color: oklch(from var(--accent-1-400) l c h / 0.4);
+.sfx-var-wave-wrap {
+  position: relative;
+  width: 100%;
 }
 
 .sfx-var-wave-canvas {
@@ -1888,6 +1887,29 @@ body.sfx-resizing-x {
   height: 40px;
   display: block;
   border-radius: var(--radius-xs);
+}
+
+.sfx-var-stop-corner-btn {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-xs);
+  border: 1px solid oklch(from var(--accent-1-400) l c h / 0.45);
+  background: oklch(from var(--gray-950) l c h / 0.88);
+  color: var(--accent-1-400);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: var(--shadow-sm);
+}
+
+.sfx-var-stop-corner-btn:hover {
+  background: var(--surface-raised);
+  color: var(--text-primary);
 }
 
 /* Hover Tooltip Bubbles for Variations & DSP Controls */

@@ -3306,17 +3306,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                             className="sfx-var-take-actions"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            {isTakePlaying && (
-                              <button
-                                type="button"
-                                onClick={stopVariationPlayback}
-                                className="sfx-var-mini-btn stop"
-                                title="Stop playing take"
-                                aria-label="Stop playing take"
-                              >
-                                <Square size={10} fill="currentColor" />
-                              </button>
-                            )}
                             <button
                               type="button"
                               onClick={() => handleRerollSingleVariation(idx)}
@@ -3358,13 +3347,29 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           </div>
                         </div>
 
-                        <VariationWaveCardCanvas
-                          peaks={v.peaks}
-                          pitchCurve={v.pitchCurve}
-                          volumeCurve={v.volumeCurve}
-                          isActive={isAct}
-                          playheadRatio={isTakePlaying ? varPlayRatio : null}
-                        />
+                        <div className="sfx-var-wave-wrap">
+                          <VariationWaveCardCanvas
+                            peaks={v.peaks}
+                            pitchCurve={v.pitchCurve}
+                            volumeCurve={v.volumeCurve}
+                            isActive={isAct}
+                            playheadRatio={isTakePlaying ? varPlayRatio : null}
+                          />
+                          {isTakePlaying && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                stopVariationPlayback();
+                              }}
+                              className="sfx-var-stop-corner-btn"
+                              title="Stop playing take"
+                              aria-label="Stop playing take"
+                            >
+                              <Square size={10} fill="currentColor" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
