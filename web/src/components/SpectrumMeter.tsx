@@ -45,8 +45,8 @@ export const SpectrumMeter: React.FC<SpectrumMeterProps> = ({
     canvas.height = height * dpr;
     ctx2d.scale(dpr, dpr);
 
-    const primaryColor = readToken("--primary-400", "oklch(62% 0.14 275)");
-    const accent1Color = readToken("--accent-1-400", "oklch(78% 0.12 55)");
+    const signalColor = readToken("--accent-2-400", "oklch(78% 0.08 190)");
+    const hotColor = readToken("--warning-500", "oklch(70% 0.115 55)");
     const trackColor = readToken("--gray-700", "oklch(32% 0.022 260)");
 
     const bands = 16;
@@ -126,11 +126,11 @@ export const SpectrumMeter: React.FC<SpectrumMeterProps> = ({
           hold[i] = Math.max(2, hold[i] - 0.35);
         }
 
-        ctx2d.fillStyle = norm > 0.78 ? accent1Color : primaryColor;
+        ctx2d.fillStyle = norm > 0.78 ? hotColor : signalColor;
         ctx2d.fillRect(x, height - barH, barW, barH);
 
         if (hold[i] > 3) {
-          ctx2d.fillStyle = accent1Color;
+          ctx2d.fillStyle = hotColor;
           ctx2d.fillRect(x, Math.max(0, height - hold[i] - 1.5), barW, 1.2);
         }
       }

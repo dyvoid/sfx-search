@@ -84,7 +84,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
     progressColor: string;
     cursorColor: string;
     regionColor: string;
-    accent1Color: string;
+    matchColor: string;
     hoverColor: string;
   } | null>(null);
 
@@ -95,10 +95,10 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       progressColor: readTokenColor("--primary-400", "oklch(62% 0.14 275)"),
       cursorColor: readTokenColor("--accent-2-400", "oklch(78% 0.08 190)"),
       regionColor: readTokenColor(
-        "--primary-muted-bg",
-        "oklch(58% 0.14 275 / 0.16)"
+        "--accent-3-muted-bg",
+        "oklch(64% 0.17 345 / 0.16)"
       ),
-      accent1Color: readTokenColor("--accent-1-400", "oklch(78% 0.12 55)"),
+      matchColor: readTokenColor("--accent-3-400", "oklch(74% 0.14 345)"),
       hoverColor: readTokenColor("--gray-200", "oklch(85% 0.009 260)"),
     };
   }, []);
@@ -194,8 +194,8 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       waveColor: "oklch(52% 0.015 260)",
       progressColor: "oklch(62% 0.14 275)",
       cursorColor: "oklch(78% 0.08 190)",
-      regionColor: "oklch(58% 0.14 275 / 0.16)",
-      accent1Color: "oklch(78% 0.12 55)",
+      regionColor: "oklch(64% 0.17 345 / 0.16)",
+      matchColor: "oklch(74% 0.14 345)",
       hoverColor: "oklch(85% 0.009 260)",
     };
     const {
@@ -203,7 +203,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       progressColor,
       cursorColor,
       regionColor,
-      accent1Color,
+      matchColor,
       hoverColor,
     } = colors;
 
@@ -234,7 +234,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
       ctx.fillStyle = regionColor;
       ctx.fillRect(rx, 2, rw, h - 4);
       ctx.globalAlpha = 0.5;
-      ctx.fillStyle = accent1Color;
+      ctx.fillStyle = matchColor;
       ctx.fillRect(rx, h - 1.5, rw, 1.5);
       ctx.restore();
     }
@@ -265,7 +265,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
         barRatio >= markerStartRatio &&
         barRatio <= markerEndRatio
       ) {
-        ctx.fillStyle = accent1Color;
+        ctx.fillStyle = matchColor;
       } else {
         ctx.fillStyle = waveColor;
       }
@@ -406,7 +406,7 @@ export const MiniWaveform: React.FC<MiniWaveformProps> = ({
             pointerEvents: "none",
             fontFamily: "var(--font-mono)",
             fontSize: "var(--font-size-2xs)",
-            color: "var(--text-tertiary)",
+            color: "var(--accent-3-400)",
             background: "oklch(from var(--surface-app) l c h / 0.8)",
             padding: "0 4px",
             borderRadius: "var(--radius-xs)",

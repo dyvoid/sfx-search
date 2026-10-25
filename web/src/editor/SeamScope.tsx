@@ -191,10 +191,10 @@ export const EqResponseGraph: React.FC<EqResponseGraphProps> = ({
       "--border-subtle",
       "rgba(255, 255, 255, 0.1)"
     );
-    const curveColor = readTokenColor("--primary-400", "#7a86f5");
+    const curveColor = readTokenColor("--accent-1-400", "#e6b85c");
     const fillColor = readTokenColor(
-      "--primary-muted-bg",
-      "rgba(122, 134, 245, 0.18)"
+      "--accent-1-muted-bg",
+      "rgba(230, 184, 92, 0.18)"
     );
     const textColor = readTokenColor(
       "--text-tertiary",

@@ -594,7 +594,7 @@ body.sfx-resizing-x {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: var(--accent-1-400);
+  background: var(--accent-2-400);
 }
 
 .sfx-play-btn {
@@ -638,12 +638,12 @@ body.sfx-resizing-x {
 .sfx-play-btn.playing {
   background: linear-gradient(
     180deg,
-    oklch(from var(--primary-400) calc(l + 0.04 * var(--presence)) c h),
-    oklch(from var(--primary-600) calc(l - 0.04 * var(--presence)) c h)
+    oklch(from var(--accent-2-400) calc(l + 0.04 * var(--presence)) c h),
+    oklch(from var(--accent-2-600) calc(l - 0.04 * var(--presence)) c h)
   );
-  border-color: var(--primary);
+  border-color: var(--accent-2-500);
   color: var(--text-on-accent);
-  box-shadow: var(--inset-highlight), 0 0 0 3px var(--primary-muted-bg);
+  box-shadow: var(--inset-highlight), 0 0 0 3px var(--accent-2-muted-bg);
 }
 
 .sfx-row-info {
@@ -702,6 +702,7 @@ body.sfx-resizing-x {
   justify-content: flex-end;
   font-family: var(--font-mono);
   font-feature-settings: var(--tnum);
+  color: var(--accent-3-400);
 }
 
 .sfx-row-actions {
@@ -1430,7 +1431,7 @@ body.sfx-resizing-x {
 .sfx-editor-search-progress-fill {
   height: 100%;
   width: 100%;
-  background: var(--primary-400);
+  background: var(--accent-3-400);
   transform-origin: left;
   transition: transform 120ms linear;
 }
@@ -1462,7 +1463,7 @@ body.sfx-resizing-x {
 }
 
 .sfx-find-loops-btn:not(:disabled) {
-  border-color: oklch(from var(--primary-400) l c h / 0.5);
+  border-color: oklch(from var(--accent-3-400) l c h / 0.5);
 }
 
 .sfx-cand-stepper {
@@ -1752,7 +1753,7 @@ body.sfx-resizing-x {
 }
 
 .sfx-candidate-chip .rank {
-  color: var(--text-tertiary);
+  color: var(--accent-3-400);
 }
 
 .sfx-candidate-chip .score {
@@ -1896,9 +1897,9 @@ body.sfx-resizing-x {
   width: 20px;
   height: 20px;
   border-radius: var(--radius-xs);
-  border: 1px solid oklch(from var(--accent-1-400) l c h / 0.45);
+  border: 1px solid oklch(from var(--accent-2-400) l c h / 0.45);
   background: oklch(from var(--gray-950) l c h / 0.88);
-  color: var(--accent-1-400);
+  color: var(--accent-2-400);
   display: inline-flex;
   align-items: center;
   justify-content: center;

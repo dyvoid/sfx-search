@@ -52,15 +52,14 @@ const TICK_MIN_PX = 68;
 
 const COLOR_VARS = {
   wave: "--accent-2-400",
-  waveHi: "--primary-400",
   grid: "--border-subtle",
   start: "--success-500",
   end: "--danger-400",
   fade: "--accent-1-muted-bg",
   fadeLabel: "--accent-1-400",
   outsideLoop: "--scrim",
-  candidate: "--primary-muted-bg",
-  candidateActive: "--accent-2-muted-bg",
+  candidate: "--accent-3-muted-bg",
+  candidateActive: "oklch(from var(--accent-3-seed) l c h / 0.40)",
   playhead: "--text-primary",
   legend: "--text-secondary",
   rulerBg: "--surface-panel",
@@ -71,15 +70,14 @@ type Palette = Record<ColorName, string>;
 
 const FALLBACKS: Palette = {
   wave: "#58b5c9",
-  waveHi: "#7a86f5",
   grid: "rgba(255, 255, 255, 0.10)",
   start: "#45c486",
   end: "#eb6565",
   fade: "rgba(224, 178, 82, 0.20)",
   fadeLabel: "#e6b85c",
   outsideLoop: "rgba(8, 9, 14, 0.62)",
-  candidate: "rgba(110, 120, 240, 0.12)",
-  candidateActive: "rgba(88, 195, 215, 0.24)",
+  candidate: "rgba(226, 122, 184, 0.14)",
+  candidateActive: "rgba(226, 122, 184, 0.40)",
   playhead: "rgba(255, 255, 255, 0.92)",
   legend: "rgba(215, 222, 234, 0.78)",
   rulerBg: "rgba(20, 22, 30, 0.85)",
@@ -471,7 +469,7 @@ export const EditorWaveform = React.forwardRef<
             g.stroke();
           }
 
-          g.strokeStyle = ci === 0 ? COLORS.wave : COLORS.waveHi;
+          g.strokeStyle = COLORS.wave;
           g.beginPath();
           for (let x = 0; x < peaks.buckets; x++) {
             const y0 = midY - maxs[x] * amp;
