@@ -3544,6 +3544,8 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                   id="save-filename"
                   type="text"
                   autoFocus
+                  className="ds-input"
+                  style={{ fontFamily: "var(--font-mono)" }}
                   value={saveName}
                   onChange={(e) => setSaveName(e.target.value)}
                   onFocus={(e) => e.currentTarget.select()}
