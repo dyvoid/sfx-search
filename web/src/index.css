@@ -462,6 +462,10 @@ body.sfx-resizing-x {
   background: var(--surface-hover);
 }
 
+.sfx-ft-node.selected {
+  background: var(--primary-muted-bg);
+}
+
 .sfx-ft-node.selected,
 .sfx-ft-node.selected .sfx-ft-label {
   color: var(--text-primary);
@@ -1257,6 +1261,11 @@ body.sfx-resizing-x {
   box-shadow: var(--shadow-sm);
 }
 
+.sfx-module-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .sfx-module-dot {
   width: 6px;
   height: 6px;
@@ -1411,6 +1420,11 @@ body.sfx-resizing-x {
     border-color var(--duration-fast);
 }
 
+.sfx-hud-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .sfx-hud-btn:hover {
   background: var(--surface-raised);
   color: var(--text-primary);
@@ -1506,6 +1520,11 @@ body.sfx-resizing-x {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.sfx-tp-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .sfx-tp-icon-btn:hover:not(:disabled) {
@@ -1644,11 +1663,20 @@ body.sfx-resizing-x {
   justify-content: flex-end;
 }
 
+/* dyvoided slider host (DsRange): real ds-slider-track/fill/knob markup;
+   this class only carries rack layout + disabled state. */
 .sfx-range-input {
   flex: 1;
   max-width: 140px;
-  accent-color: var(--primary);
-  cursor: pointer;
+  align-self: center;
+}
+
+.sfx-range-input:has(input:disabled) {
+  opacity: 0.5;
+}
+
+.sfx-range-input input:disabled {
+  cursor: not-allowed;
 }
 
 .sfx-num-input {
@@ -1666,6 +1694,7 @@ body.sfx-resizing-x {
 .sfx-num-input:focus-visible {
   outline: none;
   border-color: var(--primary);
+  box-shadow: var(--focus-ring);
 }
 
 .sfx-val-readout {
@@ -1710,6 +1739,11 @@ body.sfx-resizing-x {
   border-color: var(--primary-400);
 }
 
+.sfx-choice-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .sfx-candidate-grid {
   display: flex;
   flex-wrap: wrap;
@@ -1750,6 +1784,11 @@ body.sfx-resizing-x {
   background: var(--primary-muted-bg);
   border-color: var(--primary);
   color: var(--text-primary);
+}
+
+.sfx-candidate-chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .sfx-candidate-chip .rank {
@@ -1823,6 +1862,11 @@ body.sfx-resizing-x {
   box-shadow: 0 0 0 1px var(--primary-muted-bg);
 }
 
+.sfx-var-take-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .sfx-var-take-card.liked {
   border-color: oklch(from var(--danger-400) l c h / 0.55);
 }
@@ -1868,6 +1912,11 @@ body.sfx-resizing-x {
   padding: 0;
 }
 
+.sfx-var-mini-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
 .sfx-var-mini-btn:hover {
   color: var(--text-primary);
   background: var(--surface-raised);
@@ -1906,6 +1955,11 @@ body.sfx-resizing-x {
   cursor: pointer;
   padding: 0;
   box-shadow: var(--shadow-sm);
+}
+
+.sfx-var-stop-corner-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .sfx-var-stop-corner-btn:hover {

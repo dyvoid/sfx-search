@@ -31,6 +31,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { revealInExplorer, saveEditedFileToLibrary } from "../api";
+import { DsRange } from "../components/DsRange";
 import { SpectrumMeter } from "../components/SpectrumMeter";
 import { SearchHit } from "../types";
 import {
@@ -1969,8 +1970,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <div className="sfx-rack-row">
                   <label className="sfx-rack-label">Crossfade (ms)</label>
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={Math.min(
                         5000,
@@ -1979,7 +1979,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       step={5}
                       value={fadeMs}
                       onChange={(e) => setFadeMs(Number(e.target.value))}
-                      className="sfx-range-input"
                     />
                     <input
                       type="number"
@@ -2262,8 +2261,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Crops audio from the beginning of the file. You can also drag the green IN handle directly on the waveform."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={Math.max(
                         100,
@@ -2282,7 +2280,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           trimStartMs: Math.max(0, Number(e.target.value)),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <input
                       type="number"
@@ -2308,8 +2305,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Crops audio from the end of the file. You can also drag the red OUT handle directly on the waveform."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={Math.max(
                         100,
@@ -2328,7 +2324,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           trimEndMs: Math.max(0, Number(e.target.value)),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <input
                       type="number"
@@ -2378,8 +2373,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Smoothly ramps volume up from silence at the start of the cropped region (shown in amber on the waveform)."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={Math.min(
                         5000,
@@ -2394,7 +2388,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           fadeInMs: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <input
                       type="number"
@@ -2420,8 +2413,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Smoothly ramps volume down to silence at the end of the cropped region (shown in amber on the waveform)."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={Math.min(
                         5000,
@@ -2436,7 +2428,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           fadeOutMs: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <input
                       type="number"
@@ -2509,8 +2500,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Boost or attenuate overall volume in decibels."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={-24}
                       max={24}
                       step={0.5}
@@ -2522,7 +2512,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           gainDb: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {shaper.gainDb >= 0
@@ -2633,8 +2622,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <div className="sfx-rack-row">
                   <label className="sfx-rack-label">High-Pass (Hz)</label>
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={20}
                       max={1200}
                       step={5}
@@ -2646,7 +2634,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           highpassHz: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {eq.highpassHz <= 22 ? "Off" : `${eq.highpassHz} Hz`}
@@ -2657,8 +2644,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <div className="sfx-rack-row">
                   <label className="sfx-rack-label">Low-Pass (Hz)</label>
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={400}
                       max={20000}
                       step={100}
@@ -2670,7 +2656,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           lowpassHz: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {eq.lowpassHz >= 19500
@@ -2756,8 +2741,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <div className="sfx-rack-row">
                   <label className="sfx-rack-label">Low Shelf (120Hz)</label>
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={-15}
                       max={15}
                       step={0.5}
@@ -2769,7 +2753,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           lowGainDb: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {eq.lowGainDb >= 0
@@ -2785,8 +2768,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     Mid Peak ({eq.midFreqHz}Hz)
                   </label>
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={-15}
                       max={15}
                       step={0.5}
@@ -2798,7 +2780,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           midGainDb: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {eq.midGainDb >= 0
@@ -2812,8 +2793,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <div className="sfx-rack-row">
                   <label className="sfx-rack-label">High Shelf (4.5k)</label>
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={-15}
                       max={15}
                       step={0.5}
@@ -2825,7 +2805,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           highGainDb: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {eq.highGainDb >= 0
@@ -2887,8 +2866,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Shifts the overall pitch of each take up or down (evenly spread across your takes so no two sound identical). Great for footsteps, impacts, and weapons."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={100}
                       step={1}
@@ -2899,7 +2877,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           pitchShift: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {varSpec.pitchShift}%
@@ -2913,8 +2890,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Bends pitch and speed dynamically over time along a smooth curve (amber line) without changing the total length of the sound. Ideal for whooshes, creaks, vocals, and textures."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={100}
                       step={1}
@@ -2925,7 +2901,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           driftAmount: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {varSpec.driftAmount}%
@@ -2939,8 +2914,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Varies the loudness contour over time (teal line) as well as the overall hit strength of each take."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={100}
                       step={1}
@@ -2951,7 +2925,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           volumeAmount: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {varSpec.volumeAmount}%
@@ -2965,8 +2938,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Number of random inflection points along the Pitch Drift and Volume Swell curves (2 = slow gentle bend, 16 = fast wobbly movement)."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={2}
                       max={16}
                       step={1}
@@ -2977,7 +2949,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           controlPoints: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {varSpec.controlPoints} pts
@@ -3051,8 +3022,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Controls how much EQ color (brightness, warmth, and resonant body) varies per take. Harder hits are naturally brighter; set to 0% for zero EQ change."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={100}
                       step={1}
@@ -3063,7 +3033,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           toneSpread: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {varSpec.toneSpread}%
@@ -3077,8 +3046,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Subtly varies the crispness and snap of the first 30ms of each take so rapid-fire footsteps or weapon hits never sound robotic ('machine-gun effect')."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={100}
                       step={1}
@@ -3089,7 +3057,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           attackSnap: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       {varSpec.attackSnap}%
@@ -3103,8 +3070,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="How much faster or slower (shorter or longer) each take is allowed to be. Set to 0% when variations must stay locked to an exact animation length."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={25}
                       step={1}
@@ -3115,7 +3081,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           lengthSpreadPct: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                     />
                     <span className="sfx-val-readout ds-tnum">
                       ±{varSpec.lengthSpreadPct}%
@@ -3129,8 +3094,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                     tip="Fades the internal Pitch Drift and Volume Swell in at the start and out at the end so your initial impact stays untouched and your tail/loop end stays anchored."
                   />
                   <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={45}
                       step={1}
@@ -3141,11 +3105,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           protectStartPct: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                       title={`Protect Start: ${varSpec.protectStartPct}%`}
                     />
-                    <input
-                      type="range"
+                    <DsRange
                       min={0}
                       max={45}
                       step={1}
@@ -3156,7 +3118,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                           protectEndPct: Number(e.target.value),
                         }))
                       }
-                      className="sfx-range-input"
                       title={`Protect End: ${varSpec.protectEndPct}%`}
                     />
                     <span className="sfx-val-readout ds-tnum">
@@ -3285,8 +3246,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       <div
                         key={v.id}
                         draggable
+                        role="button"
+                        tabIndex={0}
                         onDragStart={(e) => handleVariationDragStart(e, v)}
                         onClick={() => auditionVariation(v, idx)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            auditionVariation(v, idx);
+                          }
+                        }}
                         className={`sfx-var-take-card ${
                           isAct ? "active" : ""
                         } ${v.liked ? "liked" : ""}`}
