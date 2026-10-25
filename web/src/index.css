@@ -781,10 +781,6 @@ body.sfx-resizing-x {
   box-shadow: var(--focus-ring);
 }
 
-.sfx-save-suffix {
-  width: 64px;
-}
-
 .sfx-status-err {
   color: var(--danger-400);
 }

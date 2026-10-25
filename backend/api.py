@@ -851,6 +851,7 @@ def create_app(
         file_id: str,
         file: UploadFile = File(...),
         suffix: str = Query(".loop"),
+        name: str | None = Query(None),
         overwrite: bool = Query(False),
         copy_user_data: bool = Query(True),
     ) -> dict[str, Any]:
@@ -871,7 +872,26 @@ def create_app(
                 status_code=404, detail=f"Destination directory missing: {parent_dir}"
             )
 
-        if overwrite:
+        custom_name = (name or "").strip()
+        if custom_name.lower().endswith(".wav"):
+            custom_name = custom_name[:-4]
+
+        if custom_name:
+            safe_stem = "".join(
+                ch
+                for ch in custom_name
+                if ch.isalnum() or ch in (".", "_", "-", " ")
+            ).strip(" .")
+            if not safe_stem:
+                raise HTTPException(status_code=400, detail="Invalid filename")
+            candidate = parent_dir / f"{safe_stem}.wav"
+            if not overwrite:
+                counter = 2
+                while os.path.exists(to_os_path(candidate)):
+                    candidate = parent_dir / f"{safe_stem}_{counter}.wav"
+                    counter += 1
+            target_norm = normalize_path(candidate)
+        elif overwrite:
             target_norm = normalize_path(src_p)
         else:
             raw_suffix = suffix.strip() or ".loop"

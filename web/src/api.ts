@@ -225,6 +225,7 @@ export async function saveEditedFileToLibrary(
   filename: string,
   options: {
     suffix?: string;
+    name?: string;
     overwrite?: boolean;
     copyUserData?: boolean;
   } = {}
@@ -232,6 +233,9 @@ export async function saveEditedFileToLibrary(
   const params = new URLSearchParams();
   if (options.suffix !== undefined) {
     params.set("suffix", options.suffix);
+  }
+  if (options.name !== undefined) {
+    params.set("name", options.name);
   }
   if (options.overwrite !== undefined) {
     params.set("overwrite", String(options.overwrite));

@@ -216,6 +216,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setErrMsg(msg);
     setStatusMsg(msg);
   }, []);
+  const [saveDlg, setSaveDlg] = useState<boolean>(false);
+  const [saveName, setSaveName] = useState<string>("");
+  const [saveOverwrite, setSaveOverwrite] = useState<boolean>(false);
 
   const fadeSamples = useMemo(
     () => Math.max(0, Math.round((fadeMs / 1000) * sampleRate)),
@@ -941,19 +944,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, [buildCurrentWav]);
 
   const handleSaveToLibrary = useCallback(
-    async (overwrite = false) => {
+    async (opts?: {
+      name?: string;
+      overwrite?: boolean;
+    }): Promise<boolean> => {
       if (!hit) {
-        return;
+        return false;
       }
       const res = buildCurrentWav();
       if (!res) {
-        return;
+        return false;
       }
+      const overwrite = opts?.overwrite ?? false;
+      const targetLabel = opts?.name ? `${opts.name}.wav` : res.filename;
       setSavingToLibrary(true);
       setStatusMsg(
         overwrite
-          ? `Overwriting ${hit.filename} and re-indexing…`
-          : `Saving ${res.filename} to library folder and indexing…`
+          ? `Saving ${targetLabel} (replace existing) and re-indexing…`
+          : `Saving ${targetLabel} to library folder and indexing…`
       );
       try {
         const savedHit = await saveEditedFileToLibrary(
@@ -962,6 +970,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           res.filename,
           {
             suffix: saveSuffix.trim() || ".loop",
+            name: opts?.name,
             overwrite,
             copyUserData: true,
           }
@@ -972,16 +981,42 @@ export const StudioView: React.FC<StudioViewProps> = ({
             2
           )}s)`
         );
+        return true;
       } catch (err) {
         reportError(
           `Save failed: ${err instanceof Error ? err.message : String(err)}`
         );
+        return false;
       } finally {
         setSavingToLibrary(false);
       }
     },
-    [hit, buildCurrentWav, saveSuffix, onSavedToLibrary]
+    [hit, buildCurrentWav, saveSuffix, onSavedToLibrary, reportError]
   );
+
+  const openSaveDialog = useCallback(() => {
+    if (!processedChannels || !hit) {
+      return;
+    }
+    const def = loopEnabled ? ".loop" : ".edit";
+    setSaveName(`${baseName}${saveSuffix.trim() || def}.wav`);
+    setSaveOverwrite(false);
+    setSaveDlg(true);
+  }, [processedChannels, hit, loopEnabled, saveSuffix, baseName]);
+
+  const confirmSave = useCallback(async () => {
+    const stem = saveName.trim().replace(/\.wav$/i, "");
+    if (!stem) {
+      return;
+    }
+    const ok = await handleSaveToLibrary({
+      name: stem,
+      overwrite: saveOverwrite,
+    });
+    if (ok) {
+      setSaveDlg(false);
+    }
+  }, [saveName, saveOverwrite, handleSaveToLibrary]);
 
   const handleDragEditedStart = (e: React.DragEvent) => {
     const res = buildCurrentWav();
@@ -1333,6 +1368,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
         return;
       }
 
+      if (saveDlg) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setSaveDlg(false);
+        }
+        return;
+      }
+
       if (e.key === "Escape") {
         e.preventDefault();
         transportRef.current?.stop();
@@ -1377,7 +1420,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           if (e.ctrlKey || e.metaKey) {
             e.preventDefault();
             if (hit) {
-              void handleSaveToLibrary(false);
+              openSaveDialog();
             } else {
               handleExportDownload();
             }
@@ -1451,6 +1494,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     onBackToLibrary,
     hit,
     handleSaveToLibrary,
+    openSaveDialog,
+    saveDlg,
     handleExportDownload,
   ]);
 
@@ -1693,26 +1738,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
           </div>
 
           {hit && (
-            <input
-              type="text"
-              className="sfx-num-input ds-tnum sfx-save-suffix"
-              value={saveSuffix}
-              onChange={(e) => setSaveSuffix(e.target.value)}
-              title={`Saved as ${baseName}${
-                saveSuffix.trim() || (loopEnabled ? ".loop" : ".edit")
-              }.wav`}
-              aria-label="Filename suffix for library save"
-              spellCheck={false}
-            />
-          )}
-
-          {hit && (
             <button
               type="button"
               disabled={!processedChannels || savingToLibrary}
-              onClick={() => handleSaveToLibrary(false)}
+              onClick={openSaveDialog}
               className="ds-btn ds-btn-secondary ds-btn-sm"
-              title="Save loop as a new WAV in the library folder and index it immediately (Ctrl+S)"
+              title="Save as a new WAV in the library folder and index it immediately (Ctrl+S)"
             >
               <Save size={13} />
               {savingToLibrary ? "Saving…" : "Save to Library"}
@@ -3461,6 +3492,120 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
           </div>
         )}
       </div>
+
+      {/* Save-to-library dialog */}
+      {saveDlg && (
+        <div
+          className="ds-scrim"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setSaveDlg(false);
+            }
+          }}
+        >
+          <div
+            className="ds-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="save-dialog-title"
+            style={{ maxWidth: 360 }}
+          >
+            <div
+              className="ds-dialog-head"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <span id="save-dialog-title">Save to library</span>
+              <button
+                type="button"
+                onClick={() => setSaveDlg(false)}
+                className="sfx-icon-btn"
+                aria-label="Close dialog"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div
+              className="ds-dialog-body"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-3)",
+              }}
+            >
+              <label className="ds-input-label" htmlFor="save-filename">
+                Filename
+              </label>
+              <div className="ds-input-box">
+                <input
+                  id="save-filename"
+                  type="text"
+                  autoFocus
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  onFocus={(e) => e.currentTarget.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void confirmSave();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setSaveDlg(false);
+                    }
+                  }}
+                  spellCheck={false}
+                />
+              </div>
+              <label
+                role="checkbox"
+                aria-checked={saveOverwrite}
+                tabIndex={0}
+                className="ds-check"
+                onKeyDown={(e) => {
+                  if (e.key === " " || e.key === "Enter") {
+                    e.preventDefault();
+                    e.currentTarget.click();
+                  }
+                }}
+                onClick={() => setSaveOverwrite((v) => !v)}
+              >
+                <div className={`ds-checkbox ${saveOverwrite ? "on" : ""}`}>
+                  {saveOverwrite && <div className="ds-checkbox-inner" />}
+                </div>
+                <span
+                  className="ds-check-label"
+                  style={{ fontSize: "var(--font-size-xs)" }}
+                >
+                  Replace file if it already exists
+                </span>
+              </label>
+              <span className="sfx-rack-hint">
+                Saved to the source folder and indexed immediately.
+              </span>
+            </div>
+            <div className="ds-dialog-foot">
+              <button
+                type="button"
+                className="ds-btn ds-btn-ghost ds-btn-sm"
+                onClick={() => setSaveDlg(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="ds-btn ds-btn-primary ds-btn-sm"
+                disabled={!saveName.trim() || savingToLibrary}
+                onClick={() => void confirmSave()}
+              >
+                {savingToLibrary ? "Saving…" : "Save & index"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Studio Footer Status Bar */}
       <footer className="sfx-statusbar">
