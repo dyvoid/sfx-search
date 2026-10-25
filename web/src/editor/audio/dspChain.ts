@@ -11,13 +11,17 @@ import { FadeCurve, fadeInGain, fadeOutGain } from "./loopdsp";
 
 export interface ShaperSpec {
   enabled: boolean;
+  /** Crop / trim start offset from the beginning of the source file (ms). */
+  trimStartMs: number;
+  /** Crop / trim amount removed from the end of the source file (ms). */
+  trimEndMs: number;
   /** Output gain in dB (-24 to +24). */
   gainDb: number;
   /** Target peak normalization in dBFS (null = off, e.g. -1.0 dBFS). */
   normalizePeakDbfs: number | null;
-  /** Fade-in at start of region in milliseconds. */
+  /** Fade-in at start of cropped region in milliseconds. */
   fadeInMs: number;
-  /** Fade-out at end of region in milliseconds. */
+  /** Fade-out at end of cropped region in milliseconds. */
   fadeOutMs: number;
   fadeCurve: FadeCurve;
   reverse: boolean;
@@ -26,6 +30,8 @@ export interface ShaperSpec {
 
 export const DEFAULT_SHAPER_SPEC: ShaperSpec = {
   enabled: false,
+  trimStartMs: 0,
+  trimEndMs: 0,
   gainDb: 0,
   normalizePeakDbfs: null,
   fadeInMs: 0,
@@ -224,6 +230,8 @@ export function isShaperActive(shaper: ShaperSpec): boolean {
     return false;
   }
   return (
+    shaper.trimStartMs > 0 ||
+    shaper.trimEndMs > 0 ||
     Math.abs(shaper.gainDb) > 0.01 ||
     shaper.normalizePeakDbfs !== null ||
     shaper.fadeInMs > 0 ||
@@ -231,6 +239,52 @@ export function isShaperActive(shaper: ShaperSpec): boolean {
     shaper.reverse ||
     shaper.dcOffsetRemove
   );
+}
+
+/**
+ * Scan the source audio from both ends to detect leading and trailing silence
+ * below `thresholdDbfs` (default -50 dBFS), leaving a small natural safety pad.
+ */
+export function detectSilenceTrimMs(
+  channels: readonly Float32Array[],
+  sampleRate: number,
+  thresholdDbfs = -50
+): { trimStartMs: number; trimEndMs: number } {
+  const len = channels[0]?.length ?? 0;
+  if (len < 16 || channels.length === 0) {
+    return { trimStartMs: 0, trimEndMs: 0 };
+  }
+  const thresh = Math.pow(10, thresholdDbfs / 20);
+  const padSamples = Math.round(sampleRate * 0.006); // 6ms pre/post pad so onset isn't clipped
+
+  let firstActive = 0;
+  outerStart: for (let i = 0; i < len; i++) {
+    for (let c = 0; c < channels.length; c++) {
+      if (Math.abs(channels[c][i]) >= thresh) {
+        firstActive = Math.max(0, i - padSamples);
+        break outerStart;
+      }
+    }
+  }
+
+  let lastActive = len;
+  outerEnd: for (let i = len - 1; i >= firstActive; i--) {
+    for (let c = 0; c < channels.length; c++) {
+      if (Math.abs(channels[c][i]) >= thresh) {
+        lastActive = Math.min(len, i + 1 + padSamples);
+        break outerEnd;
+      }
+    }
+  }
+
+  if (lastActive - firstActive < Math.round(sampleRate * 0.02)) {
+    return { trimStartMs: 0, trimEndMs: 0 };
+  }
+
+  return {
+    trimStartMs: Math.round((firstActive / sampleRate) * 1000),
+    trimEndMs: Math.round(((len - lastActive) / sampleRate) * 1000),
+  };
 }
 
 export function isEqActive(eq: EqSpec): boolean {
@@ -253,10 +307,26 @@ export function applyDspChain(
     return sourceChannels.slice();
   }
 
-  const len = sourceChannels[0]?.length ?? 0;
+  const srcLen = sourceChannels[0]?.length ?? 0;
+  let cropStart = 0;
+  let cropEnd = srcLen;
+  if (shaperOn && srcLen > 4) {
+    const startSamples = Math.max(
+      0,
+      Math.round((shaper.trimStartMs / 1000) * sampleRate)
+    );
+    const endTrimSamples = Math.max(
+      0,
+      Math.round((shaper.trimEndMs / 1000) * sampleRate)
+    );
+    cropStart = Math.min(startSamples, srcLen - 4);
+    cropEnd = Math.max(cropStart + 4, srcLen - endTrimSamples);
+  }
+  const len = cropEnd - cropStart;
+
   const out = sourceChannels.map((ch) => {
-    const copy = new Float32Array(ch.length);
-    copy.set(ch);
+    const copy = new Float32Array(len);
+    copy.set(ch.subarray(cropStart, cropEnd));
     return copy;
   });
 

@@ -44,6 +44,7 @@ import {
   applyDspChain,
   DEFAULT_EQ_SPEC,
   DEFAULT_SHAPER_SPEC,
+  detectSilenceTrimMs,
   EqSpec,
   isEqActive,
   isShaperActive,
@@ -196,8 +197,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const cursorRef = useRef<number>(0);
   const cursorVisibleRef = useRef<boolean>(false);
 
-  // Export & Library save state
-  const [exportFormat, setExportFormat] = useState<WavFormat>("int24");
+  // Export & Library save state (24-bit studio WAV standard)
+  const exportFormat: WavFormat = "int24";
   const [saveSuffix, setSaveSuffix] = useState<string>(".edit");
   const [savingToLibrary, setSavingToLibrary] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
@@ -334,14 +335,114 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, []);
 
   // Recompute Processed Channels whenever source, shaper, or eq changes
+  const prevProcLenRef = useRef<number>(0);
   useEffect(() => {
     if (!sourceChannels || sourceChannels.length === 0) {
       setProcessedChannels(null);
+      prevProcLenRef.current = 0;
       return;
     }
     const processed = applyDspChain(sourceChannels, sampleRate, shaper, eq);
+    const newLen = processed[0]?.length ?? 0;
+    const oldLen = prevProcLenRef.current;
+    prevProcLenRef.current = newLen;
     setProcessedChannels(processed);
+    if (oldLen > 0 && newLen !== oldLen) {
+      setLoopStart((prevS) => Math.max(0, Math.min(prevS, newLen - 2)));
+      setLoopEnd((prevE) =>
+        prevE >= oldLen - 4 ? newLen : Math.max(2, Math.min(prevE, newLen))
+      );
+    }
   }, [sourceChannels, sampleRate, shaper, eq]);
+
+  // Display channels for the waveform canvas:
+  // In the Trim & Gain tab, show the full uncropped duration so the user can drag IN/OUT crop handles
+  // and see the dimmed trimmed-away regions.
+  const uncroppedChannels = useMemo(() => {
+    if (!sourceChannels || sourceChannels.length === 0) {
+      return null;
+    }
+    const noCropShaper: ShaperSpec = {
+      ...shaper,
+      trimStartMs: 0,
+      trimEndMs: 0,
+      fadeInMs: 0,
+      fadeOutMs: 0,
+    };
+    return applyDspChain(sourceChannels, sampleRate, noCropShaper, eq);
+  }, [sourceChannels, sampleRate, shaper, eq]);
+
+  const rawTotalSamples = sourceChannels?.[0]?.length ?? 0;
+  const cropStartSamples = useMemo(
+    () =>
+      shaper.enabled
+        ? Math.min(
+            Math.max(0, Math.round((shaper.trimStartMs / 1000) * sampleRate)),
+            Math.max(0, rawTotalSamples - 4)
+          )
+        : 0,
+    [shaper.enabled, shaper.trimStartMs, sampleRate, rawTotalSamples]
+  );
+  const cropEndSamples = useMemo(
+    () =>
+      shaper.enabled
+        ? Math.max(
+            cropStartSamples + 4,
+            rawTotalSamples -
+              Math.max(0, Math.round((shaper.trimEndMs / 1000) * sampleRate))
+          )
+        : rawTotalSamples,
+    [
+      shaper.enabled,
+      shaper.trimEndMs,
+      sampleRate,
+      rawTotalSamples,
+      cropStartSamples,
+    ]
+  );
+
+  const updateCropPoints = useCallback(
+    (nextInSample: number, nextOutSample: number) => {
+      if (rawTotalSamples < 4) {
+        return;
+      }
+      const clampedIn = Math.max(
+        0,
+        Math.min(Math.round(nextInSample), rawTotalSamples - 4)
+      );
+      const clampedOut = Math.max(
+        clampedIn + 4,
+        Math.min(Math.round(nextOutSample), rawTotalSamples)
+      );
+      const nextTrimStartMs = Math.round((clampedIn / sampleRate) * 1000);
+      const nextTrimEndMs = Math.round(
+        ((rawTotalSamples - clampedOut) / sampleRate) * 1000
+      );
+      setShaper((s) => ({
+        ...s,
+        enabled: true,
+        trimStartMs: nextTrimStartMs,
+        trimEndMs: nextTrimEndMs,
+      }));
+    },
+    [rawTotalSamples, sampleRate]
+  );
+
+  const handleAutoTrimSilence = useCallback(() => {
+    if (!sourceChannels || sourceChannels.length === 0) {
+      return;
+    }
+    const detected = detectSilenceTrimMs(sourceChannels, sampleRate, -50);
+    setShaper((s) => ({
+      ...s,
+      enabled: true,
+      trimStartMs: detected.trimStartMs,
+      trimEndMs: detected.trimEndMs,
+    }));
+    setStatusMsg(
+      `Auto-trimmed silence: ${detected.trimStartMs}ms from start, ${detected.trimEndMs}ms from end`
+    );
+  }, [sourceChannels, sampleRate]);
 
   // Bake Loop & update transport whenever processedChannels or loop params change
   const performBake = useCallback(
@@ -459,29 +560,37 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const tick = () => {
       const tp = transportRef.current;
       let shown: number | null = null;
+      const offsetInRaw = activeModule === "shaper" ? cropStartSamples : 0;
       if (tp && processedChannels) {
         if (tp.playing) {
           const p = tp.positionSamples();
           shown =
-            p === null ? null : tp.mode === "loop" ? loopStart + p : p;
+            p === null
+              ? null
+              : tp.mode === "loop"
+              ? offsetInRaw + loopStart + p
+              : offsetInRaw + p;
           if (shown !== null) {
-            cursorRef.current = shown;
+            cursorRef.current = shown - offsetInRaw;
           }
         } else if (cursorVisibleRef.current) {
-          shown = cursorRef.current;
+          shown = offsetInRaw + cursorRef.current;
         }
       }
       waveRef.current?.setPlayhead(shown);
       if (processedChannels) {
         setTimePosText(
-          formatDuration(shown ?? cursorRef.current, sampleRate)
+          formatDuration(
+            Math.max(0, (shown ?? 0) - offsetInRaw),
+            sampleRate
+          )
         );
       }
       rafId = window.requestAnimationFrame(tick);
     };
     rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
-  }, [processedChannels, loopStart, sampleRate]);
+  }, [processedChannels, loopStart, sampleRate, activeModule, cropStartSamples]);
 
   // Transport actions
   const togglePlay = useCallback(() => {
@@ -605,8 +714,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
       if (!processedChannels) {
         return;
       }
+      const localSample =
+        activeModule === "shaper" ? sample - cropStartSamples : sample;
       const len = processedChannels[0].length;
-      const s = Math.max(0, Math.min(Math.round(sample), len - 1));
+      const s = Math.max(0, Math.min(Math.round(localSample), len - 1));
       cursorRef.current = s;
       cursorVisibleRef.current = true;
       const tp = transportRef.current;
@@ -624,7 +735,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
         tp.playFile(s);
       }
     },
-    [processedChannels, auditionMode, loopEnabled, loopStart, loopEnd]
+    [
+      processedChannels,
+      activeModule,
+      cropStartSamples,
+      auditionMode,
+      loopEnabled,
+      loopStart,
+      loopEnd,
+    ]
   );
 
   // Auto-Loop Search via Web Worker
@@ -1180,18 +1299,32 @@ export const StudioView: React.FC<StudioViewProps> = ({
         case "BracketLeft":
           e.preventDefault();
           setActiveMarker("start");
-          setStatusMsg("Active marker: Loop Start (S) — use ←/→ to nudge");
+          setStatusMsg(
+            activeModule === "shaper"
+              ? "Active handle: Crop IN — use ←/→ to nudge"
+              : "Active marker: Loop Start (S) — use ←/→ to nudge"
+          );
           break;
         case "BracketRight":
           e.preventDefault();
           setActiveMarker("end");
-          setStatusMsg("Active marker: Loop End (E) — use ←/→ to nudge");
+          setStatusMsg(
+            activeModule === "shaper"
+              ? "Active handle: Crop OUT — use ←/→ to nudge"
+              : "Active marker: Loop End (E) — use ←/→ to nudge"
+          );
           break;
         case "ArrowLeft":
         case "ArrowRight": {
           e.preventDefault();
           const delta = (e.code === "ArrowRight" ? 1 : -1) * stepSamples;
-          if (activeMarker === "start") {
+          if (activeModule === "shaper") {
+            if (activeMarker === "start") {
+              updateCropPoints(cropStartSamples + delta, cropEndSamples);
+            } else {
+              updateCropPoints(cropStartSamples, cropEndSamples + delta);
+            }
+          } else if (activeMarker === "start") {
             updateLoopPoints(loopStart + delta, loopEnd, false);
           } else {
             updateLoopPoints(loopStart, loopEnd + delta, false);
@@ -1235,26 +1368,52 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const loopDurationS = Math.max(0, (loopEnd - loopStart) / sampleRate);
   const totalDurationS = Math.max(0, totalSamples / sampleRate);
 
-  const loopMarkers = useMemo(
-    () =>
-      processedChannels && (loopEnabled || activeModule === "loop")
-        ? {
-            start: loopStart,
-            end: loopEnd,
-            fade: loopEnabled ? fadeSamples : 0,
-            fadeAtHead,
-          }
-        : null,
-    [
-      processedChannels,
-      loopEnabled,
-      activeModule,
-      loopStart,
-      loopEnd,
-      fadeSamples,
-      fadeAtHead,
-    ]
-  );
+  const loopMarkers = useMemo(() => {
+    if (activeModule === "shaper" && uncroppedChannels) {
+      const fiSamples = shaper.enabled
+        ? Math.round((shaper.fadeInMs / 1000) * sampleRate)
+        : 0;
+      const foSamples = shaper.enabled
+        ? Math.round((shaper.fadeOutMs / 1000) * sampleRate)
+        : 0;
+      return {
+        start: cropStartSamples,
+        end: cropEndSamples,
+        fade: 0,
+        fadeAtHead: false,
+        startLabel: "IN",
+        endLabel: "OUT",
+        fadeInSamples: fiSamples,
+        fadeOutSamples: foSamples,
+      };
+    }
+    if (processedChannels && (loopEnabled || activeModule === "loop")) {
+      return {
+        start: loopStart,
+        end: loopEnd,
+        fade: loopEnabled ? fadeSamples : 0,
+        fadeAtHead,
+        startLabel: "S",
+        endLabel: "E",
+      };
+    }
+    return null;
+  }, [
+    activeModule,
+    uncroppedChannels,
+    shaper.enabled,
+    shaper.fadeInMs,
+    shaper.fadeOutMs,
+    sampleRate,
+    cropStartSamples,
+    cropEndSamples,
+    processedChannels,
+    loopEnabled,
+    loopStart,
+    loopEnd,
+    fadeSamples,
+    fadeAtHead,
+  ]);
 
   const resolvedModeLabel =
     resolvedMode === "pre"
@@ -1410,6 +1569,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
             Open file
           </button>
 
+          <button
+            type="button"
+            disabled={!processedChannels}
+            onClick={handleFindSimilarEdited}
+            className="ds-btn ds-btn-ghost ds-btn-sm"
+            title="Search library for sounds acoustically similar to your edited audio"
+          >
+            <Sparkles size={13} />
+            Find Similar
+          </button>
+
           {hit && (
             <button
               type="button"
@@ -1474,36 +1644,61 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
         <EditorWaveform
           ref={waveRef}
-          channels={processedChannels}
+          channels={
+            activeModule === "shaper" ? uncroppedChannels : processedChannels
+          }
           sampleRate={sampleRate}
           loop={loopMarkers}
-          candidates={candidates}
-          activeCandidate={candIndex}
+          candidates={activeModule === "shaper" ? [] : candidates}
+          activeCandidate={activeModule === "shaper" ? -1 : candIndex}
           activeMarker={activeMarker}
-          onLoopChange={(s, e) => updateLoopPoints(s, e, snapZero)}
+          onLoopChange={(s, e) => {
+            if (activeModule === "shaper") {
+              updateCropPoints(s, e);
+            } else {
+              updateLoopPoints(s, e, snapZero);
+            }
+          }}
           onPickCandidate={(idx) => applyCandidate(idx)}
           onSeek={seekToSample}
           onSelectMarker={setActiveMarker}
         />
 
         {/* Stage Overlay HUD: Legend + Zoom Controls */}
-        {(loopEnabled || activeModule === "loop") && (
+        {activeModule === "shaper" ? (
           <div className="sfx-editor-stage-hud-left">
             <span className="sfx-hud-pill start">
-              <span className="dot" />S {(loopStart / sampleRate).toFixed(3)}s
+              <span className="dot" />
+              IN {(cropStartSamples / sampleRate).toFixed(3)}s
             </span>
             <span className="sfx-hud-pill end">
-              <span className="dot" />E {(loopEnd / sampleRate).toFixed(3)}s
+              <span className="dot" />
+              OUT {(cropEndSamples / sampleRate).toFixed(3)}s
             </span>
             <span className="sfx-hud-pill">
-              Len {loopDurationS.toFixed(3)}s
+              Cropped {totalDurationS.toFixed(3)}s /{" "}
+              {(rawTotalSamples / sampleRate).toFixed(3)}s
             </span>
-            {loopEnabled && fadeMs > 0 && (
-              <span className="sfx-hud-pill fade">
-                X-Fade {Math.round(fadeMs)}ms · {resolvedModeLabel}
-              </span>
-            )}
           </div>
+        ) : (
+          (loopEnabled || activeModule === "loop") && (
+            <div className="sfx-editor-stage-hud-left">
+              <span className="sfx-hud-pill start">
+                <span className="dot" />S {(loopStart / sampleRate).toFixed(3)}s
+              </span>
+              <span className="sfx-hud-pill end">
+                <span className="dot" />E {(loopEnd / sampleRate).toFixed(3)}s
+              </span>
+              <span className="sfx-hud-pill">
+                Len {loopDurationS.toFixed(3)}s
+              </span>
+              {loopEnabled && fadeMs > 0 && (
+                <span className="sfx-hud-pill fade">
+                  X-Fade {Math.round(fadeMs)}ms · {resolvedModeLabel}
+                </span>
+              )}
+            </div>
+          )
         )}
 
         <div className="sfx-editor-stage-hud-right">
@@ -1957,27 +2152,292 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
         {activeModule === "shaper" && (
           <div className="sfx-rack-grid">
+            {/* Column 1: Crop / Trim Region */}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Gain &amp; Normalization</span>
-                <label
-                  className="ds-switch-item"
-                  style={{ fontSize: "var(--font-size-xs)" }}
-                >
-                  <div
-                    className={`ds-switch-track ${shaper.enabled ? "on" : ""}`}
-                    onClick={() =>
-                      setShaper((s) => ({ ...s, enabled: !s.enabled }))
-                    }
+                <span className="ds-panel-title">Crop / Trim Region</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button
+                    type="button"
+                    disabled={!sourceChannels}
+                    onClick={handleAutoTrimSilence}
+                    className="ds-btn ds-btn-secondary ds-btn-sm"
+                    title="Automatically detect and crop leading and trailing silence below -50 dBFS"
                   >
-                    <div className="ds-switch-thumb" />
+                    <Wand2 size={12} />
+                    Auto-Trim Silence
+                  </button>
+                  <label
+                    className="ds-switch-item"
+                    style={{ fontSize: "var(--font-size-xs)" }}
+                  >
+                    <div
+                      className={`ds-switch-track ${
+                        shaper.enabled ? "on" : ""
+                      }`}
+                      onClick={() =>
+                        setShaper((s) => ({ ...s, enabled: !s.enabled }))
+                      }
+                    >
+                      <div className="ds-switch-thumb" />
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <div className="sfx-rack-fields">
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Trim Start (ms)"
+                    tip="Crops audio from the beginning of the file. You can also drag the green IN handle directly on the waveform."
+                  />
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(
+                        100,
+                        Math.floor(
+                          (rawTotalSamples / sampleRate) * 1000 -
+                            shaper.trimEndMs -
+                            20
+                        )
+                      )}
+                      step={5}
+                      value={shaper.trimStartMs}
+                      onChange={(e) =>
+                        setShaper((s) => ({
+                          ...s,
+                          enabled: true,
+                          trimStartMs: Math.max(0, Number(e.target.value)),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={Math.floor((rawTotalSamples / sampleRate) * 1000)}
+                      step={10}
+                      value={shaper.trimStartMs}
+                      onChange={(e) =>
+                        setShaper((s) => ({
+                          ...s,
+                          enabled: true,
+                          trimStartMs: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                      className="sfx-num-input ds-tnum"
+                    />
                   </div>
-                  <span style={{ color: "var(--text-secondary)" }}>Enable</span>
-                </label>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Trim End (ms)"
+                    tip="Crops audio from the end of the file. You can also drag the red OUT handle directly on the waveform."
+                  />
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(
+                        100,
+                        Math.floor(
+                          (rawTotalSamples / sampleRate) * 1000 -
+                            shaper.trimStartMs -
+                            20
+                        )
+                      )}
+                      step={5}
+                      value={shaper.trimEndMs}
+                      onChange={(e) =>
+                        setShaper((s) => ({
+                          ...s,
+                          enabled: true,
+                          trimEndMs: Math.max(0, Number(e.target.value)),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={Math.floor((rawTotalSamples / sampleRate) * 1000)}
+                      step={10}
+                      value={shaper.trimEndMs}
+                      onChange={(e) =>
+                        setShaper((s) => ({
+                          ...s,
+                          enabled: true,
+                          trimEndMs: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                      className="sfx-num-input ds-tnum"
+                    />
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <span className="sfx-rack-label">Cropped Length</span>
+                  <span className="sfx-val-readout ds-tnum" style={{ minWidth: 160 }}>
+                    {totalDurationS.toFixed(3)}s (of{" "}
+                    {(rawTotalSamples / sampleRate).toFixed(3)}s)
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            {/* Column 2: Boundary Fades */}
+            <section className="sfx-rack-card">
+              <div className="sfx-rack-card-head">
+                <span className="ds-panel-title">Fade In &amp; Fade Out</span>
+                <button
+                  type="button"
+                  onClick={() => setShaper(DEFAULT_SHAPER_SPEC)}
+                  className="ds-btn ds-btn-ghost ds-btn-sm"
+                  title="Reset all crop, fade, and gain settings"
+                >
+                  Reset All
+                </button>
               </div>
               <div className="sfx-rack-fields">
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Output Gain (dB)</label>
+                  <LabelWithTip
+                    label="Fade-In (ms)"
+                    tip="Smoothly ramps volume up from silence at the start of the cropped region (shown in amber on the waveform)."
+                  />
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.min(
+                        5000,
+                        Math.max(100, Math.floor(totalDurationS * 500))
+                      )}
+                      step={5}
+                      value={shaper.fadeInMs}
+                      onChange={(e) =>
+                        setShaper((s) => ({
+                          ...s,
+                          enabled: true,
+                          fadeInMs: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={10000}
+                      step={10}
+                      value={shaper.fadeInMs}
+                      onChange={(e) =>
+                        setShaper((s) => ({
+                          ...s,
+                          enabled: true,
+                          fadeInMs: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                      className="sfx-num-input ds-tnum"
+                    />
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Fade-Out (ms)"
+                    tip="Smoothly ramps volume down to silence at the end of the cropped region (shown in amber on the waveform)."
+                  />
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.min(
+                        5000,
+                        Math.max(100, Math.floor(totalDurationS * 500))
+                      )}
+                      step={5}
+                      value={shaper.fadeOutMs}
+                      onChange={(e) =>
+                        setShaper((s) => ({
+                          ...s,
+                          enabled: true,
+                          fadeOutMs: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={10000}
+                      step={10}
+                      value={shaper.fadeOutMs}
+                      onChange={(e) =>
+                        setShaper((s) => ({
+                          ...s,
+                          enabled: true,
+                          fadeOutMs: Math.max(0, Number(e.target.value) || 0),
+                        }))
+                      }
+                      className="sfx-num-input ds-tnum"
+                    />
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Fade Curve"
+                    tip="Shape of the fade-in and fade-out slopes."
+                  />
+                  <div className="sfx-pill-group">
+                    {(
+                      [
+                        ["cosine", "S-Curve"],
+                        ["equal-power", "Fast Attack"],
+                        ["linear", "Linear"],
+                      ] as const
+                    ).map(([val, label]) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() =>
+                          setShaper((s) => ({
+                            ...s,
+                            enabled: true,
+                            fadeCurve: val,
+                          }))
+                        }
+                        className={`sfx-choice-pill ${
+                          shaper.fadeCurve === val ? "active" : ""
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Column 3: Gain, Normalization & Polarity */}
+            <section className="sfx-rack-card">
+              <div className="sfx-rack-card-head">
+                <span className="ds-panel-title">Gain &amp; Normalization</span>
+                <span className="sfx-rack-hint ds-tnum">
+                  Peak{" "}
+                  {signalStats.peakDbfs > -119
+                    ? `${signalStats.peakDbfs.toFixed(1)} dB`
+                    : "—"}
+                </span>
+              </div>
+              <div className="sfx-rack-fields">
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Output Gain (dB)"
+                    tip="Boost or attenuate overall volume in decibels."
+                  />
                   <div className="sfx-rack-control-inline">
                     <input
                       type="range"
@@ -2004,15 +2464,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
 
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Peak Normalize</label>
+                  <LabelWithTip
+                    label="Peak Normalize"
+                    tip="Automatically scales the sound so its loudest peak hits the exact target ceiling."
+                  />
                   <div className="sfx-pill-group">
                     {(
                       [
                         [null, "Off"],
-                        [-0.1, "-0.1 dBFS"],
-                        [-1.0, "-1.0 dBFS"],
-                        [-3.0, "-3.0 dBFS"],
-                        [-6.0, "-6.0 dBFS"],
+                        [-0.1, "-0.1 dB"],
+                        [-1.0, "-1.0 dB"],
+                        [-3.0, "-3.0 dB"],
+                        [-6.0, "-6.0 dB"],
                       ] as const
                     ).map(([val, label]) => (
                       <button
@@ -2036,7 +2499,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
 
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Signal Polarity</label>
+                  <LabelWithTip
+                    label="Phase &amp; Direction"
+                    tip="Reverse plays the cropped region backwards; Remove DC Offset centers the waveform on zero."
+                  />
                   <div className="sfx-pill-group">
                     <button
                       type="button"
@@ -2067,147 +2533,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       }`}
                     >
                       Remove DC Offset
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Boundary Fades</span>
-                <button
-                  type="button"
-                  onClick={() => setShaper(DEFAULT_SHAPER_SPEC)}
-                  className="ds-btn ds-btn-ghost ds-btn-sm"
-                >
-                  Reset
-                </button>
-              </div>
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Fade-In (ms)</label>
-                  <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
-                      min={0}
-                      max={2000}
-                      step={10}
-                      value={shaper.fadeInMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          fadeInMs: Number(e.target.value),
-                        }))
-                      }
-                      className="sfx-range-input"
-                    />
-                    <input
-                      type="number"
-                      min={0}
-                      max={10000}
-                      step={10}
-                      value={shaper.fadeInMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          fadeInMs: Math.max(0, Number(e.target.value) || 0),
-                        }))
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Fade-Out (ms)</label>
-                  <div className="sfx-rack-control-inline">
-                    <input
-                      type="range"
-                      min={0}
-                      max={2000}
-                      step={10}
-                      value={shaper.fadeOutMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          fadeOutMs: Number(e.target.value),
-                        }))
-                      }
-                      className="sfx-range-input"
-                    />
-                    <input
-                      type="number"
-                      min={0}
-                      max={10000}
-                      step={10}
-                      value={shaper.fadeOutMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          fadeOutMs: Math.max(0, Number(e.target.value) || 0),
-                        }))
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Export &amp; Similarity</span>
-              </div>
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">WAV Bit Depth</label>
-                  <div className="sfx-pill-group">
-                    {(
-                      [
-                        ["int16", "16-bit"],
-                        ["int24", "24-bit"],
-                        ["float32", "32-bit Float"],
-                      ] as const
-                    ).map(([val, label]) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setExportFormat(val)}
-                        className={`sfx-choice-pill ${
-                          exportFormat === val ? "active" : ""
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Library Suffix</label>
-                  <div className="sfx-rack-control-inline">
-                    <input
-                      type="text"
-                      value={saveSuffix}
-                      onChange={(e) => setSaveSuffix(e.target.value)}
-                      placeholder=".loop"
-                      className="sfx-num-input"
-                      style={{ width: 88 }}
-                    />
-                    <button
-                      type="button"
-                      disabled={!processedChannels}
-                      onClick={handleFindSimilarEdited}
-                      className="ds-btn ds-btn-secondary ds-btn-sm"
-                      title="Use the edited audio buffer as a CLAP reference query"
-                    >
-                      <Sparkles size={13} />
-                      Find Similar
                     </button>
                   </div>
                 </div>

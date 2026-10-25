@@ -7,6 +7,12 @@ export interface LoopMarkers {
   fade: number;
   /** True when the fade region sits after loop start (post-roll mode). */
   fadeAtHead: boolean;
+  /** Optional custom handle labels (default 'S' and 'E'; 'IN' and 'OUT' in crop mode). */
+  startLabel?: string;
+  endLabel?: string;
+  /** Optional boundary fade-in / fade-out lengths in samples (for Trim & Gain visualization). */
+  fadeInSamples?: number;
+  fadeOutSamples?: number;
 }
 
 export interface CandidateBand {
@@ -550,13 +556,62 @@ export const EditorWaveform = React.forwardRef<
             }
           }
 
+          // Optional boundary Fade-In and Fade-Out visualization (Trim & Gain mode)
+          if (st.loop.fadeInSamples && st.loop.fadeInSamples > 0) {
+            const fiEndPx = Math.min(
+              ePx,
+              sampleToPx(st.loop.start + st.loop.fadeInSamples)
+            );
+            if (fiEndPx > sPx + 2) {
+              g.save();
+              g.fillStyle = COLORS.fade;
+              g.fillRect(
+                Math.max(0, sPx),
+                0,
+                Math.min(w, fiEndPx) - Math.max(0, sPx),
+                wh
+              );
+              g.strokeStyle = COLORS.fadeLabel;
+              g.globalAlpha = 0.65;
+              g.beginPath();
+              g.moveTo(sPx, wh);
+              g.lineTo(fiEndPx, 0);
+              g.stroke();
+              g.restore();
+            }
+          }
+
+          if (st.loop.fadeOutSamples && st.loop.fadeOutSamples > 0) {
+            const foStartPx = Math.max(
+              sPx,
+              sampleToPx(st.loop.end - st.loop.fadeOutSamples)
+            );
+            if (ePx > foStartPx + 2) {
+              g.save();
+              g.fillStyle = COLORS.fade;
+              g.fillRect(
+                Math.max(0, foStartPx),
+                0,
+                Math.min(w, ePx) - Math.max(0, foStartPx),
+                wh
+              );
+              g.strokeStyle = COLORS.fadeLabel;
+              g.globalAlpha = 0.65;
+              g.beginPath();
+              g.moveTo(foStartPx, 0);
+              g.lineTo(ePx, wh);
+              g.stroke();
+              g.restore();
+            }
+          }
+
           drawMarker(
             g,
             sPx,
             COLORS.start,
             wh,
             w,
-            "S",
+            st.loop.startLabel || "S",
             st.activeMarker === "start"
           );
           drawMarker(
@@ -565,7 +620,7 @@ export const EditorWaveform = React.forwardRef<
             COLORS.end,
             wh,
             w,
-            "E",
+            st.loop.endLabel || "E",
             st.activeMarker === "end"
           );
         }
