@@ -33,11 +33,8 @@ interface EditorWaveformProps {
   channels: Float32Array[] | null;
   sampleRate: number;
   loop: LoopMarkers | null;
-  candidates: CandidateBand[];
-  activeCandidate: number;
   activeMarker: "start" | "end";
   onLoopChange: (start: number, end: number) => void;
-  onPickCandidate: (index: number) => void;
   onSeek: (sample: number) => void;
   onSelectMarker?: (marker: "start" | "end") => void;
 }
@@ -177,11 +174,8 @@ export const EditorWaveform = React.forwardRef<
       channels,
       sampleRate,
       loop,
-      candidates,
-      activeCandidate,
       activeMarker,
       onLoopChange,
-      onPickCandidate,
       onSeek,
       onSelectMarker,
     },
@@ -197,8 +191,6 @@ export const EditorWaveform = React.forwardRef<
       viewStart: number;
       viewEnd: number;
       loop: LoopMarkers | null;
-      candidates: CandidateBand[];
-      activeCandidate: number;
       activeMarker: "start" | "end";
       playhead: number | null;
       overview: { mins: Float32Array[]; maxs: Float32Array[] } | null;
@@ -216,8 +208,6 @@ export const EditorWaveform = React.forwardRef<
       viewStart: 0,
       viewEnd: 1,
       loop: null,
-      candidates: [],
-      activeCandidate: -1,
       activeMarker: "start",
       playhead: null,
       overview: null,
@@ -231,13 +221,11 @@ export const EditorWaveform = React.forwardRef<
 
     const callbacksRef = useRef({
       onLoopChange,
-      onPickCandidate,
       onSeek,
       onSelectMarker,
     });
     callbacksRef.current = {
       onLoopChange,
-      onPickCandidate,
       onSeek,
       onSelectMarker,
     };
@@ -457,20 +445,6 @@ export const EditorWaveform = React.forwardRef<
         const COLORS = resolvePalette();
         const wh = Math.max(10, h - RULER_H);
 
-        // Candidate bands
-        for (const [i, c] of st.candidates.entries()) {
-          const x0 = sampleToPx(c.start);
-          const x1 = sampleToPx(c.end);
-          if (x1 < 0 || x0 > w) {
-            continue;
-          }
-          g.fillStyle =
-            i === st.activeCandidate
-              ? COLORS.candidateActive
-              : COLORS.candidate;
-          g.fillRect(Math.max(0, x0), 0, Math.min(w, x1) - Math.max(0, x0), wh);
-        }
-
         // Waveform — mono full height, stereo+ stacked in two halves
         const peaks = visiblePeaks();
         const nCh = peaks.mins.length;
@@ -673,12 +647,6 @@ export const EditorWaveform = React.forwardRef<
         return null;
       };
 
-      const candidateAt = (sample: number): number => {
-        return st.candidates.findIndex(
-          (c) => sample >= c.start && sample <= c.end
-        );
-      };
-
       const onPointerDown = (e: PointerEvent) => {
         if (st.length === 0) {
           return;
@@ -688,7 +656,6 @@ export const EditorWaveform = React.forwardRef<
         } catch {
           // ignore
         }
-        const s = pxToSample(e.offsetX);
         const hit = markerAt(e.offsetX);
         if (hit) {
           st.dragging = hit;
@@ -696,11 +663,6 @@ export const EditorWaveform = React.forwardRef<
           callbacksRef.current.onSelectMarker?.(hit);
           render();
         } else {
-          const ci = candidateAt(s);
-          if (ci >= 0 && ci !== st.activeCandidate) {
-            callbacksRef.current.onPickCandidate(ci);
-            return;
-          }
           st.panning = true;
           st.lastX = e.offsetX;
           st.downX = e.offsetX;
@@ -734,8 +696,6 @@ export const EditorWaveform = React.forwardRef<
         } else {
           if (markerAt(e.offsetX)) {
             cv.style.cursor = "ew-resize";
-          } else if (candidateAt(s) >= 0 && candidateAt(s) !== st.activeCandidate) {
-            cv.style.cursor = "pointer";
           } else {
             cv.style.cursor = "crosshair";
           }
@@ -854,11 +814,9 @@ export const EditorWaveform = React.forwardRef<
     useEffect(() => {
       const st = stateRef.current;
       st.loop = loop;
-      st.candidates = candidates;
-      st.activeCandidate = activeCandidate;
       st.activeMarker = activeMarker;
       renderRef.current();
-    }, [loop, candidates, activeCandidate, activeMarker]);
+    }, [loop, activeMarker]);
 
     useImperativeHandle(
       ref,

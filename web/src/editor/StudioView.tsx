@@ -1649,8 +1649,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           }
           sampleRate={sampleRate}
           loop={loopMarkers}
-          candidates={activeModule === "shaper" ? [] : candidates}
-          activeCandidate={activeModule === "shaper" ? -1 : candIndex}
           activeMarker={activeMarker}
           onLoopChange={(s, e) => {
             if (activeModule === "shaper") {
@@ -1659,7 +1657,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
               updateLoopPoints(s, e, snapZero);
             }
           }}
-          onPickCandidate={(idx) => applyCandidate(idx)}
           onSeek={seekToSample}
           onSelectMarker={setActiveMarker}
         />
@@ -1718,22 +1715,26 @@ export const StudioView: React.FC<StudioViewProps> = ({
           >
             <ZoomOut size={13} />
           </button>
-          <button
-            type="button"
-            onClick={() => waveRef.current?.zoomToLoop()}
-            className="sfx-hud-btn"
-            title="Zoom to active loop region"
-          >
-            Loop
-          </button>
-          <button
-            type="button"
-            onClick={() => waveRef.current?.zoomToSeam()}
-            className="sfx-hud-btn"
-            title="Zoom into the crossfade seam"
-          >
-            Seam
-          </button>
+          {(loopEnabled || activeModule === "loop") && (
+            <>
+              <button
+                type="button"
+                onClick={() => waveRef.current?.zoomToLoop()}
+                className="sfx-hud-btn"
+                title="Zoom to active loop region"
+              >
+                Loop
+              </button>
+              <button
+                type="button"
+                onClick={() => waveRef.current?.zoomToSeam()}
+                className="sfx-hud-btn"
+                title="Zoom into the crossfade seam"
+              >
+                Seam
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={() => waveRef.current?.resetView()}
@@ -1762,47 +1763,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
       {/* Studio Transport Deck */}
       <div className="sfx-editor-transport-bar">
         <div className="sfx-editor-transport-left">
-          <button
-            type="button"
-            disabled={!processedChannels}
-            onClick={runLoopSearch}
-            className="ds-btn ds-btn-secondary ds-btn-sm sfx-find-loops-btn"
-            title="Scan audio for seamless loop points (F)"
-          >
-            <Wand2 size={14} />
-            {searching ? "Scanning…" : "Find Seamless Loops"}
-          </button>
-
-          {candidates.length > 0 && (
-            <div className="sfx-cand-stepper">
-              <button
-                type="button"
-                onClick={() =>
-                  applyCandidate(
-                    (candIndex - 1 + candidates.length) % candidates.length
-                  )
-                }
-                className="sfx-icon-btn"
-                title="Previous loop candidate"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              <span className="sfx-cand-readout ds-tnum">
-                #{candIndex + 1}/{candidates.length} ·{" "}
-                {Math.round((candidates[candIndex]?.score ?? 0) * 100)}%
-              </span>
-              <button
-                type="button"
-                onClick={() =>
-                  applyCandidate((candIndex + 1) % candidates.length)
-                }
-                className="sfx-icon-btn"
-                title="Next loop candidate"
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          )}
+          <span className="sfx-rack-hint ds-tnum">
+            {activeModule === "loop"
+              ? "Module 1 · Seamless Loop"
+              : activeModule === "shaper"
+              ? "Module 2 · Trim & Gain"
+              : activeModule === "eq"
+              ? "Module 3 · Tone & EQ"
+              : "Module 4 · Variations"}
+          </span>
         </div>
 
         {/* Center Hero Transport Pill */}
@@ -1812,8 +1781,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
             disabled={!processedChannels}
             onClick={restartLoop}
             className="sfx-tp-icon-btn"
-            title="Restart from loop start (Home)"
-            aria-label="Restart from loop start"
+            title="Restart from beginning / loop start (Home)"
+            aria-label="Restart playback"
           >
             <RotateCcw size={15} />
           </button>
@@ -1848,20 +1817,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </span>
           </div>
 
-          <button
-            type="button"
-            disabled={!processedChannels}
-            onClick={auditionSeam}
-            className="ds-btn ds-btn-ghost ds-btn-sm"
-            title="Jump 1.2s before the loop end to immediately audition the E → S seam transition (S)"
-          >
-            Test Seam
-          </button>
+          {(loopEnabled || activeModule === "loop") && (
+            <button
+              type="button"
+              disabled={!processedChannels}
+              onClick={auditionSeam}
+              className="ds-btn ds-btn-ghost ds-btn-sm"
+              title="Jump 1.2s before the loop end to immediately audition the E → S seam transition (S)"
+            >
+              Test Seam
+            </button>
+          )}
         </div>
 
         <div className="sfx-editor-transport-right">
           <div className="sfx-signal-meters ds-tnum">
-            <span title="Peak amplitude of the baked output">
+            <span title="Peak amplitude of the output">
               Peak{" "}
               <strong
                 style={{
@@ -1876,7 +1847,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   : "—"}
               </strong>
             </span>
-            <span title="RMS level of the baked output">
+            <span title="RMS level of the output">
               RMS{" "}
               <strong>
                 {signalStats.rmsDbfs > -119
@@ -1884,12 +1855,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   : "—"}
               </strong>
             </span>
-            <span title="Computed loop seam continuity score">
-              Seam{" "}
-              <strong style={{ color: "var(--success-500)" }}>
-                {Math.round(seamMetrics.seamScore * 100)}%
-              </strong>
-            </span>
+            {(loopEnabled || activeModule === "loop") && (
+              <span title="Computed loop seam continuity score">
+                Seam{" "}
+                <strong style={{ color: "var(--success-500)" }}>
+                  {Math.round(seamMetrics.seamScore * 100)}%
+                </strong>
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -2027,9 +2000,32 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
                 <span className="ds-panel-title">Auto-Loop Finder</span>
-                <span className="sfx-rack-hint">
-                  3-Band Envelope + Fine NCC
-                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  {candidates.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCandidates([]);
+                        setCandIndex(-1);
+                        setStatusMsg("Cleared loop suggestions");
+                      }}
+                      className="ds-btn ds-btn-ghost ds-btn-sm"
+                      title="Clear loop suggestions"
+                    >
+                      Clear
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!processedChannels || searching}
+                    onClick={runLoopSearch}
+                    className="ds-btn ds-btn-primary ds-btn-sm"
+                    title="Scan audio for seamless loop points (F)"
+                  >
+                    <Wand2 size={13} />
+                    {searching ? "Scanning…" : "Find Seamless Loops"}
+                  </button>
+                </div>
               </div>
 
               <div className="sfx-rack-fields">
