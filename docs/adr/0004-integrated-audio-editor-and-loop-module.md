@@ -22,7 +22,13 @@ Furthermore, we want `sfx-search` to grow into a unified sound-design workstatio
      - **Pair mode** (`findLoopPairs`) when the loop end sits near the file end, scanning a subsampled 3-band RMS envelope (`full`, `<1 kHz`, `>1 kHz`) in $O(n \cdot \text{lag})$ followed by decimated low-pass normalized cross-correlation (NCC) fine alignment on both endpoints.
      - **Fixed-end mode** (`findLoopPoints`) when the user has placed a deliberate loop end marker, finding matching run-up windows before candidate start points.
    - Includes a real-time **Seam Phase & Continuity Scope** that overlays the waveform across the loop boundary (`E -> S`) so phase alignment and crossfade smoothness are visually verifiable alongside live looped Web Audio playback.
-3. **Save to Library & Immediate Single-File Indexing:**
+3. **Procedural Variations & Round-Robin Generator (Core Module #4):**
+   - Synthesizes organic round-robin takes (`variations.ts`) from the active edited/looped buffer without leaving the browser:
+     - **Foley vs. Melodic Mode:** Foley mode allows continuous multi-point pitch and volume contours; Melodic mode softly quantizes pitch excursions toward semitone intervals.
+     - **Multi-Point Catmull-Rom Modulation Splines:** Configurable `Pitch Amount` (0–100%), `Volume Amount` (0–100%), `Control Points` (2–16), and `Link pitch & volume modulation`, resampled via 4-point cubic Hermite interpolation.
+     - **Tone, Motion & Realism:** Per-take 3-band EQ randomization (`Randomize EQ`), inverse spectral-tilt `Preserve formants` compensation, `Time Stretch` length/pitch drift, `Motion Fade In / Out`, and `Humanize` transient/gain micro-variance.
+     - **Batch Curation & Export:** Generates up to 12 takes at once with interactive audition cards (showing each take's waveform + pitch/volume modulation spline), individual re-roll, heart/like curation, direct DAW drag-out per take, and one-click **Save Liked to Library** (batch-saving and indexing all starred takes into LanceDB).
+4. **Save to Library & Immediate Single-File Indexing:**
    - Export supports three workflows without leaving the editor:
      - **Download WAV** (`16-bit`, `24-bit`, or `32-bit float` RIFF/WAVE encoded in-browser).
      - **Drag to DAW / Desktop** (attaching the rendered WAV `File` directly to `DataTransfer` on drag-start).

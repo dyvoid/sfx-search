@@ -10,9 +10,11 @@ import {
   ArrowLeft,
   ChevronLeft,
   ChevronRight,
+  Dices,
   Download,
   FolderOpen,
   GripHorizontal,
+  Heart,
   Maximize2,
   Pause,
   Play,
@@ -59,9 +61,20 @@ import {
 } from "./audio/loopdsp";
 import { LoopCandidate, monoMix } from "./audio/search";
 import { StudioTransport } from "./audio/transport";
+import {
+  DEFAULT_VARIATION_SPEC,
+  GeneratedVariation,
+  generateVariationBatch,
+  synthesizeVariation,
+  VariationSpec,
+} from "./audio/variations";
 import { encodeWav, WavFormat } from "./audio/wav";
 import { EditorWaveform, EditorWaveformHandle } from "./EditorWaveform";
-import { EqResponseGraph, SeamScope } from "./SeamScope";
+import {
+  EqResponseGraph,
+  SeamScope,
+  VariationWaveCardCanvas,
+} from "./SeamScope";
 import type { SearchMessage } from "./workers/search.worker";
 
 export type EditorModuleId = "loop" | "shaper" | "eq" | "variations";
@@ -131,6 +144,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Module 3: Tone & EQ state
   const [eq, setEq] = useState<EqSpec>(DEFAULT_EQ_SPEC);
+
+  // Module 4: Procedural Variations & Round-Robin Generator state
+  const [varSpec, setVarSpec] = useState<VariationSpec>(DEFAULT_VARIATION_SPEC);
+  const [variations, setVariations] = useState<GeneratedVariation[]>([]);
+  const [activeVarIdx, setActiveVarIdx] = useState<number>(-1);
+  const [savingBatch, setSavingBatch] = useState<boolean>(false);
 
   // Processed & Baked buffers
   const [processedChannels, setProcessedChannels] = useState<
@@ -226,6 +245,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         setCandIndex(-1);
         setShaper(DEFAULT_SHAPER_SPEC);
         setEq(DEFAULT_EQ_SPEC);
+        setVariations([]);
+        setActiveVarIdx(-1);
         cursorRef.current = 0;
         cursorVisibleRef.current = false;
         setTimePosText("0:00.00");
@@ -274,6 +295,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
       setCandIndex(-1);
       setShaper(DEFAULT_SHAPER_SPEC);
       setEq(DEFAULT_EQ_SPEC);
+      setVariations([]);
+      setActiveVarIdx(-1);
       cursorRef.current = 0;
       cursorVisibleRef.current = false;
       setTimePosText("0:00.00");
@@ -780,6 +803,217 @@ export const StudioView: React.FC<StudioViewProps> = ({
     onFindSimilarFromAudio(file);
   }, [buildCurrentWav, onFindSimilarFromAudio]);
 
+  // Procedural Variations & Round-Robin Generator actions
+  const auditionVariation = useCallback(
+    (v: GeneratedVariation, idx: number) => {
+      setActiveVarIdx(idx);
+      const tp = ensureTransport();
+      const buf = tp.makeBuffer(v.channels, v.sampleRate);
+      tp.setFileAudio(buf);
+      setAuditionMode("file");
+      cursorRef.current = 0;
+      cursorVisibleRef.current = true;
+      tp.playFile(0);
+      setIsPlaying(true);
+      setStatusMsg(
+        `Auditioning ${v.name} (${
+          v.meanSemitones >= 0 ? `+${v.meanSemitones.toFixed(1)}` : v.meanSemitones.toFixed(1)
+        } st · ${v.durationS.toFixed(2)}s)`
+      );
+    },
+    [ensureTransport]
+  );
+
+  const handleGenerateVariations = useCallback(() => {
+    const baseAudio = bakedChannels ?? processedChannels ?? sourceChannels;
+    if (!baseAudio || baseAudio.length === 0) {
+      return;
+    }
+    const batch = generateVariationBatch(
+      baseAudio,
+      sampleRate,
+      varSpec,
+      baseName
+    );
+    setVariations(batch);
+    if (batch.length > 0) {
+      auditionVariation(batch[0], 0);
+    }
+    setStatusMsg(
+      `Generated ${batch.length} ${varSpec.mode} round-robin variations`
+    );
+  }, [
+    bakedChannels,
+    processedChannels,
+    sourceChannels,
+    sampleRate,
+    varSpec,
+    baseName,
+    auditionVariation,
+  ]);
+
+  const handleRerollSingleVariation = useCallback(
+    (idx: number) => {
+      const baseAudio = bakedChannels ?? processedChannels ?? sourceChannels;
+      if (!baseAudio || baseAudio.length === 0) {
+        return;
+      }
+      const fresh = synthesizeVariation(
+        baseAudio,
+        sampleRate,
+        varSpec,
+        idx,
+        baseName
+      );
+      setVariations((prev) =>
+        prev.map((item, i) =>
+          i === idx ? { ...fresh, liked: item.liked } : item
+        )
+      );
+      auditionVariation(fresh, idx);
+    },
+    [
+      bakedChannels,
+      processedChannels,
+      sourceChannels,
+      sampleRate,
+      varSpec,
+      baseName,
+      auditionVariation,
+    ]
+  );
+
+  const toggleVariationLike = useCallback((idx: number) => {
+    setVariations((prev) =>
+      prev.map((item, i) =>
+        i === idx ? { ...item, liked: !item.liked } : item
+      )
+    );
+  }, []);
+
+  const handleDownloadVariation = useCallback(
+    (v: GeneratedVariation) => {
+      const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
+      const blob = new Blob([wav], { type: "audio/wav" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${v.name}.wav`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatusMsg(`Exported ${v.name}.wav`);
+    },
+    [exportFormat]
+  );
+
+  const handleSaveVariationToLibrary = useCallback(
+    async (v: GeneratedVariation) => {
+      if (!hit) {
+        return;
+      }
+      const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
+      const suffix = `_var_${String(v.index + 1).padStart(2, "0")}`;
+      setSavingBatch(true);
+      setStatusMsg(`Saving ${v.name}.wav to library…`);
+      try {
+        const savedHit = await saveEditedFileToLibrary(
+          hit.file_id,
+          wav,
+          `${v.name}.wav`,
+          {
+            suffix,
+            overwrite: false,
+            copyUserData: true,
+          }
+        );
+        onSavedToLibrary(savedHit);
+        setStatusMsg(`Saved & indexed variation: ${savedHit.filename}`);
+      } catch (err) {
+        setStatusMsg(
+          `Save variation failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      } finally {
+        setSavingBatch(false);
+      }
+    },
+    [hit, exportFormat, onSavedToLibrary]
+  );
+
+  const handleSaveLikedVariationsToLibrary = useCallback(async () => {
+    if (!hit) {
+      return;
+    }
+    const targets = variations.filter((v) => v.liked);
+    const list = targets.length > 0 ? targets : variations;
+    if (list.length === 0) {
+      return;
+    }
+    setSavingBatch(true);
+    let savedCount = 0;
+    try {
+      for (const v of list) {
+        setStatusMsg(
+          `Saving variation ${savedCount + 1}/${list.length} (${v.name}.wav)…`
+        );
+        const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
+        const suffix = `_var_${String(v.index + 1).padStart(2, "0")}`;
+        const savedHit = await saveEditedFileToLibrary(
+          hit.file_id,
+          wav,
+          `${v.name}.wav`,
+          {
+            suffix,
+            overwrite: false,
+            copyUserData: true,
+          }
+        );
+        onSavedToLibrary(savedHit);
+        savedCount++;
+      }
+      setStatusMsg(
+        `Saved & indexed ${savedCount} round-robin variation${
+          savedCount === 1 ? "" : "s"
+        } to library`
+      );
+    } catch (err) {
+      setStatusMsg(
+        `Batch save failed after ${savedCount} files: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    } finally {
+      setSavingBatch(false);
+    }
+  }, [hit, variations, exportFormat, onSavedToLibrary]);
+
+  const handleDownloadLikedVariations = useCallback(() => {
+    const targets = variations.filter((v) => v.liked);
+    const list = targets.length > 0 ? targets : variations;
+    for (const v of list) {
+      handleDownloadVariation(v);
+    }
+    setStatusMsg(`Exported ${list.length} WAV variation files`);
+  }, [variations, handleDownloadVariation]);
+
+  const handleVariationDragStart = (
+    e: React.DragEvent,
+    v: GeneratedVariation
+  ) => {
+    const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
+    const filename = `${v.name}.wav`;
+    const dt = e.dataTransfer;
+    dt.effectAllowed = "copy";
+    const file = new File([wav], filename, { type: "audio/wav" });
+    try {
+      dt.items.add(file);
+    } catch {
+      // ignore
+    }
+    setStatusMsg(`Dragging ${filename} to DAW / external app…`);
+  };
+
   // Keyboard shortcuts inside StudioView
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -1043,8 +1277,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
               activeModule === "variations" ? "active" : ""
             }`}
           >
-            <Sparkles size={14} />
-            <span>Variations &amp; Export</span>
+            <Dices size={14} />
+            <span>Variations</span>
+            {variations.length > 0 && <span className="sfx-module-dot on" />}
           </button>
         </div>
 
@@ -1815,13 +2050,56 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Non-Destructive Chain</span>
+                <span className="ds-panel-title">Export &amp; Similarity</span>
               </div>
-              <div className="sfx-seam-caption" style={{ marginTop: 4 }}>
-                All Trim, Gain, Normalization, and Fade settings process in
-                32-bit floating point before the Seamless Loop stage. Your
-                original file on disk is untouched unless you explicitly choose
-                overwrite.
+              <div className="sfx-rack-fields">
+                <div className="sfx-rack-row">
+                  <label className="sfx-rack-label">WAV Bit Depth</label>
+                  <div className="sfx-pill-group">
+                    {(
+                      [
+                        ["int16", "16-bit"],
+                        ["int24", "24-bit"],
+                        ["float32", "32-bit Float"],
+                      ] as const
+                    ).map(([val, label]) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setExportFormat(val)}
+                        className={`sfx-choice-pill ${
+                          exportFormat === val ? "active" : ""
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <label className="sfx-rack-label">Library Suffix</label>
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="text"
+                      value={saveSuffix}
+                      onChange={(e) => setSaveSuffix(e.target.value)}
+                      placeholder=".loop"
+                      className="sfx-num-input"
+                      style={{ width: 88 }}
+                    />
+                    <button
+                      type="button"
+                      disabled={!processedChannels}
+                      onClick={handleFindSimilarEdited}
+                      className="ds-btn ds-btn-secondary ds-btn-sm"
+                      title="Use the edited audio buffer as a CLAP reference query"
+                    >
+                      <Sparkles size={13} />
+                      Find Similar
+                    </button>
+                  </div>
+                </div>
               </div>
             </section>
           </div>
@@ -2065,97 +2343,460 @@ export const StudioView: React.FC<StudioViewProps> = ({
         )}
 
         {activeModule === "variations" && (
-          <div className="sfx-rack-grid">
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Export &amp; Library Save</span>
-              </div>
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">WAV Bit Depth</label>
-                  <div className="sfx-pill-group">
-                    {(
-                      [
-                        ["int16", "16-bit PCM"],
-                        ["int24", "24-bit PCM"],
-                        ["float32", "32-bit Float"],
-                      ] as const
-                    ).map(([val, label]) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setExportFormat(val)}
-                        className={`sfx-choice-pill ${
-                          exportFormat === val ? "active" : ""
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Library Suffix</label>
-                  <div className="sfx-rack-control-inline">
-                    <input
-                      type="text"
-                      value={saveSuffix}
-                      onChange={(e) => setSaveSuffix(e.target.value)}
-                      placeholder=".loop"
-                      className="sfx-num-input"
-                      style={{ width: 96 }}
-                    />
-                    {hit && (
-                      <button
-                        type="button"
-                        disabled={!processedChannels || savingToLibrary}
-                        onClick={() => handleSaveToLibrary(false)}
-                        className="ds-btn ds-btn-primary ds-btn-sm"
-                      >
-                        <Save size={13} />
-                        Save as New File
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </section>
-
+          <div className="sfx-rack-grid sfx-rack-grid-variations">
+            {/* Column 1: Mode, Pitch, Volume & Envelope Splines */}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
                 <span className="ds-panel-title">
-                  Similarity &amp; Variations
+                  Pitch, Volume &amp; Envelope
                 </span>
+                <div className="sfx-pill-group">
+                  {(
+                    [
+                      ["foley", "Foley"],
+                      ["melodic", "Melodic"],
+                    ] as const
+                  ).map(([m, label]) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setVarSpec((s) => ({ ...s, mode: m }))}
+                      className={`sfx-choice-pill ${
+                        varSpec.mode === m ? "active" : ""
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
+
               <div className="sfx-rack-fields">
-                <p className="sfx-seam-caption" style={{ margin: 0 }}>
-                  Use your edited loop or trimmed region as a CLAP audio query to
-                  discover matching textures and variations across your library.
-                </p>
-                <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 6 }}>
-                  <button
-                    type="button"
-                    disabled={!processedChannels}
-                    onClick={handleFindSimilarEdited}
-                    className="ds-btn ds-btn-secondary ds-btn-sm"
+                <div className="sfx-rack-row">
+                  <label className="sfx-rack-label">Pitch Amount</label>
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={varSpec.pitchAmount}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          pitchAmount: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      {varSpec.pitchAmount}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <label className="sfx-rack-label">Volume Amount</label>
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={varSpec.volumeAmount}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          volumeAmount: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      {varSpec.volumeAmount}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <label className="sfx-rack-label">Control Points</label>
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={2}
+                      max={16}
+                      step={1}
+                      value={varSpec.controlPoints}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          controlPoints: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      {varSpec.controlPoints}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <label
+                    className="ds-check"
+                    onClick={() =>
+                      setVarSpec((s) => ({
+                        ...s,
+                        linkPitchAndVolume: !s.linkPitchAndVolume,
+                      }))
+                    }
                   >
-                    <Sparkles size={13} />
-                    Find Similar to Edited Audio
-                  </button>
+                    <div
+                      className={`ds-checkbox ${
+                        varSpec.linkPitchAndVolume ? "on" : ""
+                      }`}
+                    >
+                      {varSpec.linkPitchAndVolume && (
+                        <div className="ds-checkbox-inner" />
+                      )}
+                    </div>
+                    <span
+                      className="ds-check-label"
+                      style={{ fontSize: "var(--font-size-xs)" }}
+                    >
+                      Link pitch &amp; volume modulation
+                    </span>
+                  </label>
                 </div>
               </div>
             </section>
 
+            {/* Column 2: Tone, Motion & Realism */}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">DAW Drag &amp; Drop</span>
+                <span className="ds-panel-title">
+                  Tone, Motion &amp; Realism
+                </span>
+                <div className="sfx-rack-control-inline" style={{ flex: "none" }}>
+                  <span className="sfx-rack-hint">Takes</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={12}
+                    step={1}
+                    value={varSpec.count}
+                    onChange={(e) =>
+                      setVarSpec((s) => ({
+                        ...s,
+                        count: Math.max(
+                          1,
+                          Math.min(12, Number(e.target.value) || 6)
+                        ),
+                      }))
+                    }
+                    className="sfx-num-input ds-tnum"
+                    style={{ width: 52, height: 22 }}
+                  />
+                </div>
               </div>
-              <div className="sfx-seam-caption">
-                Drag the <strong>Drag WAV</strong> chip in the top-right header
-                directly into Reaper, Ableton Live, Pro Tools, Unreal, or Unity.
-                The baked loop and active DSP chain are rendered on-the-fly.
+
+              <div className="sfx-rack-fields">
+                <div className="sfx-rack-row">
+                  <label
+                    className="ds-check"
+                    onClick={() =>
+                      setVarSpec((s) => ({
+                        ...s,
+                        randomizeEq: !s.randomizeEq,
+                      }))
+                    }
+                  >
+                    <div
+                      className={`ds-checkbox ${
+                        varSpec.randomizeEq ? "on" : ""
+                      }`}
+                    >
+                      {varSpec.randomizeEq && (
+                        <div className="ds-checkbox-inner" />
+                      )}
+                    </div>
+                    <span
+                      className="ds-check-label"
+                      style={{ fontSize: "var(--font-size-xs)" }}
+                    >
+                      Randomize EQ (low / mid / high)
+                    </span>
+                  </label>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <label className="sfx-rack-label">Motion Fade In / Out</label>
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={45}
+                      step={1}
+                      value={varSpec.fadeInPct}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          fadeInPct: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                      title={`Fade In: ${varSpec.fadeInPct}%`}
+                    />
+                    <input
+                      type="range"
+                      min={0}
+                      max={45}
+                      step={1}
+                      value={varSpec.fadeOutPct}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          fadeOutPct: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                      title={`Fade Out: ${varSpec.fadeOutPct}%`}
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      {varSpec.fadeInPct}% / {varSpec.fadeOutPct}%
+                    </span>
+                  </div>
+                </div>
+
+                <div
+                  className="sfx-rack-row"
+                  style={{ justifyContent: "flex-start", gap: "var(--space-4)" }}
+                >
+                  <label
+                    className="ds-check"
+                    onClick={() =>
+                      setVarSpec((s) => ({
+                        ...s,
+                        timeStretch: !s.timeStretch,
+                      }))
+                    }
+                  >
+                    <div
+                      className={`ds-checkbox ${
+                        varSpec.timeStretch ? "on" : ""
+                      }`}
+                    >
+                      {varSpec.timeStretch && (
+                        <div className="ds-checkbox-inner" />
+                      )}
+                    </div>
+                    <span
+                      className="ds-check-label"
+                      style={{ fontSize: "var(--font-size-xs)" }}
+                    >
+                      Time Stretch (length &amp; pitch)
+                    </span>
+                  </label>
+
+                  <label
+                    className="ds-check"
+                    onClick={() =>
+                      setVarSpec((s) => ({
+                        ...s,
+                        preserveFormants: !s.preserveFormants,
+                      }))
+                    }
+                  >
+                    <div
+                      className={`ds-checkbox ${
+                        varSpec.preserveFormants ? "on" : ""
+                      }`}
+                    >
+                      {varSpec.preserveFormants && (
+                        <div className="ds-checkbox-inner" />
+                      )}
+                    </div>
+                    <span
+                      className="ds-check-label"
+                      style={{ fontSize: "var(--font-size-xs)" }}
+                    >
+                      Preserve formants
+                    </span>
+                  </label>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <label className="sfx-rack-label">Humanize</label>
+                  <div className="sfx-rack-control-inline">
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={varSpec.humanize}
+                      onChange={(e) =>
+                        setVarSpec((s) => ({
+                          ...s,
+                          humanize: Number(e.target.value),
+                        }))
+                      }
+                      className="sfx-range-input"
+                    />
+                    <span className="sfx-val-readout ds-tnum">
+                      {varSpec.humanize}%
+                    </span>
+                  </div>
+                </div>
               </div>
+            </section>
+
+            {/* Column 3: Generated Round-Robin Takes & Curation */}
+            <section className="sfx-rack-card sfx-rack-card-wide">
+              <div className="sfx-rack-card-head">
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="ds-panel-title">
+                    Round-Robin Takes ({variations.length})
+                  </span>
+                  {variations.some((v) => v.liked) && (
+                    <span className="ds-badge ds-badge-accent ds-tnum">
+                      {variations.filter((v) => v.liked).length} liked
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <button
+                    type="button"
+                    disabled={!processedChannels}
+                    onClick={handleGenerateVariations}
+                    className="ds-btn ds-btn-primary ds-btn-sm"
+                  >
+                    <Dices size={13} />
+                    Generate {varSpec.count} Takes
+                  </button>
+
+                  {variations.length > 0 && hit && (
+                    <button
+                      type="button"
+                      disabled={savingBatch}
+                      onClick={handleSaveLikedVariationsToLibrary}
+                      className="ds-btn ds-btn-secondary ds-btn-sm"
+                      title="Save liked variations (or all if none starred) into the library folder and index immediately"
+                    >
+                      <Save size={13} />
+                      {savingBatch
+                        ? "Saving…"
+                        : variations.some((v) => v.liked)
+                        ? `Save Liked (${
+                            variations.filter((v) => v.liked).length
+                          })`
+                        : "Save All to Library"}
+                    </button>
+                  )}
+
+                  {variations.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleDownloadLikedVariations}
+                      className="ds-btn ds-btn-ghost ds-btn-sm"
+                      title="Download liked variations (or all if none starred) as WAV files"
+                    >
+                      <Download size={13} />
+                      Export
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {variations.length === 0 ? (
+                <div className="sfx-candidate-empty">
+                  Configure your Foley or Melodic variation parameters on the
+                  left and click <strong>Generate {varSpec.count} Takes</strong>{" "}
+                  to synthesize organic round-robin variations. Click any take
+                  to audition, heart the ones you like, drag directly to your
+                  DAW, or batch-save them to your library.
+                </div>
+              ) : (
+                <div className="sfx-var-takes-grid">
+                  {variations.map((v, idx) => {
+                    const isAct = idx === activeVarIdx;
+                    return (
+                      <div
+                        key={v.id}
+                        draggable
+                        onDragStart={(e) => handleVariationDragStart(e, v)}
+                        onClick={() => auditionVariation(v, idx)}
+                        className={`sfx-var-take-card ${
+                          isAct ? "active" : ""
+                        } ${v.liked ? "liked" : ""}`}
+                        title="Click to audition · Drag into DAW · Heart to keep"
+                      >
+                        <div className="sfx-var-take-top">
+                          <span className="sfx-var-take-title ds-tnum">
+                            #{idx + 1} · {v.durationS.toFixed(2)}s
+                          </span>
+                          <span className="sfx-var-take-pitch ds-tnum">
+                            {v.meanSemitones >= 0
+                              ? `+${v.meanSemitones.toFixed(1)}`
+                              : v.meanSemitones.toFixed(1)}{" "}
+                            st
+                          </span>
+                          <div
+                            className="sfx-var-take-actions"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleRerollSingleVariation(idx)}
+                              className="sfx-var-mini-btn"
+                              title="Re-roll this variation"
+                            >
+                              <Dices size={12} />
+                            </button>
+                            {hit && (
+                              <button
+                                type="button"
+                                disabled={savingBatch}
+                                onClick={() =>
+                                  void handleSaveVariationToLibrary(v)
+                                }
+                                className="sfx-var-mini-btn"
+                                title="Save this variation to library"
+                              >
+                                <Save size={12} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => toggleVariationLike(idx)}
+                              className={`sfx-var-mini-btn ${
+                                v.liked ? "liked" : ""
+                              }`}
+                              title={
+                                v.liked
+                                  ? "Liked (included in batch save)"
+                                  : "Like this variation"
+                              }
+                            >
+                              <Heart
+                                size={12}
+                                fill={v.liked ? "currentColor" : "none"}
+                              />
+                            </button>
+                          </div>
+                        </div>
+
+                        <VariationWaveCardCanvas
+                          peaks={v.peaks}
+                          pitchCurve={v.pitchCurve}
+                          volumeCurve={v.volumeCurve}
+                          isActive={isAct}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </section>
           </div>
         )}

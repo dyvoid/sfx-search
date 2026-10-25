@@ -276,3 +276,102 @@ export const EqResponseGraph: React.FC<EqResponseGraphProps> = ({
     />
   );
 };
+
+interface VariationWaveCardCanvasProps {
+  peaks: Float32Array;
+  pitchCurve: Float32Array;
+  volumeCurve: Float32Array;
+  isActive: boolean;
+}
+
+export const VariationWaveCardCanvas: React.FC<
+  VariationWaveCardCanvasProps
+> = ({ peaks, pitchCurve, volumeCurve, isActive }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv) {
+      return;
+    }
+    const g = cv.getContext("2d");
+    if (!g) {
+      return;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth || 180;
+    const h = cv.clientHeight || 42;
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+
+    const waveColor = readTokenColor(
+      isActive ? "--primary-400" : "--gray-500",
+      isActive ? "#7a86f5" : "#6c7385"
+    );
+    const pitchColor = readTokenColor("--accent-1-400", "#e6b85c");
+    const volColor = readTokenColor("--accent-2-400", "#58b5c9");
+
+    const midY = h / 2;
+    const bins = peaks.length;
+    if (bins === 0) {
+      return;
+    }
+
+    // Draw mirrored waveform bars
+    const step = w / bins;
+    const barW = Math.max(1.2, step - 1);
+    g.fillStyle = waveColor;
+    for (let i = 0; i < bins; i++) {
+      const amp = Math.max(0.05, peaks[i]);
+      const bh = amp * (h - 6);
+      g.fillRect(i * step, midY - bh / 2, barW, bh);
+    }
+
+    // Draw Volume modulation spline
+    if (volumeCurve.length > 1) {
+      g.strokeStyle = volColor;
+      g.lineWidth = 1.1;
+      g.globalAlpha = 0.65;
+      g.beginPath();
+      for (let i = 0; i < volumeCurve.length; i++) {
+        const x = (i / (volumeCurve.length - 1)) * w;
+        const y = midY - volumeCurve[i] * (h * 0.38);
+        if (i === 0) {
+          g.moveTo(x, y);
+        } else {
+          g.lineTo(x, y);
+        }
+      }
+      g.stroke();
+    }
+
+    // Draw Pitch modulation spline
+    if (pitchCurve.length > 1) {
+      g.strokeStyle = pitchColor;
+      g.lineWidth = 1.4;
+      g.globalAlpha = 0.9;
+      g.beginPath();
+      for (let i = 0; i < pitchCurve.length; i++) {
+        const x = (i / (pitchCurve.length - 1)) * w;
+        const y = midY - pitchCurve[i] * (h * 0.4);
+        if (i === 0) {
+          g.moveTo(x, y);
+        } else {
+          g.lineTo(x, y);
+        }
+      }
+      g.stroke();
+    }
+    g.globalAlpha = 1;
+  }, [peaks, pitchCurve, volumeCurve, isActive]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="sfx-var-wave-canvas"
+      aria-label="Variation waveform and modulation spline preview"
+    />
+  );
+};

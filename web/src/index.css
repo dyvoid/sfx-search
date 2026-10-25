@@ -1779,3 +1779,108 @@ body.sfx-resizing-x {
   line-height: 1.45;
 }
 
+/* Variations & Round-Robin Generator */
+.sfx-rack-grid-variations {
+  grid-template-columns: minmax(270px, 0.9fr) minmax(280px, 0.95fr) minmax(360px, 1.4fr);
+}
+
+@media (max-width: 1120px) {
+  .sfx-rack-grid-variations {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  }
+}
+
+.sfx-var-takes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  gap: var(--space-2);
+  max-height: 164px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.sfx-var-take-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: border-color var(--duration-fast), background var(--duration-fast),
+    box-shadow var(--duration-fast);
+}
+
+.sfx-var-take-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.sfx-var-take-card.active {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary-muted-bg);
+}
+
+.sfx-var-take-card.liked {
+  border-color: oklch(from var(--danger-400) l c h / 0.55);
+}
+
+.sfx-var-take-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.sfx-var-take-title {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sfx-var-take-pitch {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-2xs);
+  color: var(--accent-1-400);
+}
+
+.sfx-var-take-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.sfx-var-mini-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-xs);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+
+.sfx-var-mini-btn:hover {
+  color: var(--text-primary);
+  background: var(--surface-raised);
+  border-color: var(--border-subtle);
+}
+
+.sfx-var-mini-btn.liked {
+  color: var(--danger-400);
+}
+
+.sfx-var-wave-canvas {
+  width: 100%;
+  height: 40px;
+  display: block;
+  border-radius: var(--radius-xs);
+}
+
