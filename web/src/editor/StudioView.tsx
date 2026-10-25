@@ -1343,8 +1343,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
         Math.round((e.shiftKey ? 10 : 1) * 0.001 * sampleRate)
       );
 
+      const onControl = Boolean(
+        target?.closest(
+          "button, a, [role='button'], [role='option'], [role='menuitem'], [role='switch'], [role='checkbox'], [role='tab']"
+        )
+      );
+
       switch (e.code) {
         case "Space":
+          if (onControl) {
+            return;
+          }
           e.preventDefault();
           togglePlay();
           break;
@@ -1678,6 +1687,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
           </div>
 
           {hit && (
+            <input
+              type="text"
+              className="sfx-num-input ds-tnum sfx-save-suffix"
+              value={saveSuffix}
+              onChange={(e) => setSaveSuffix(e.target.value)}
+              title={`Saved as ${baseName}${
+                saveSuffix.trim() || (loopEnabled ? ".loop" : ".edit")
+              }.wav`}
+              aria-label="Filename suffix for library save"
+              spellCheck={false}
+            />
+          )}
+
+          {hit && (
             <button
               type="button"
               disabled={!processedChannels || savingToLibrary}
@@ -1847,6 +1870,33 @@ export const StudioView: React.FC<StudioViewProps> = ({
               ? "Module 3 · Seamless Loop"
               : "Module 4 · Variations"}
           </span>
+          {loopEnabled && (
+            <div
+              className="sfx-pill-group"
+              role="group"
+              aria-label="Audition source"
+            >
+              <button
+                type="button"
+                onClick={() => setAuditionMode("loop")}
+                className={`sfx-choice-pill ${
+                  auditionMode === "loop" ? "active" : ""
+                }`}
+              >
+                Loop
+              </button>
+              <button
+                type="button"
+                onClick={() => setAuditionMode("file")}
+                className={`sfx-choice-pill ${
+                  auditionMode === "file" ? "active" : ""
+                }`}
+                title="Preview the full processed file instead of just the loop region"
+              >
+                File
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Center Hero Transport Pill */}
@@ -1933,7 +1983,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
             {(loopEnabled || activeModule === "loop") && (
               <span title="Computed loop seam continuity score">
                 Seam{" "}
-                <strong style={{ color: "var(--success-500)" }}>
+                <strong
+                  style={{
+                    color:
+                      seamMetrics.seamScore >= 0.7
+                        ? "var(--success-500)"
+                        : seamMetrics.seamScore >= 0.4
+                        ? "var(--warning-500)"
+                        : "var(--danger-400)",
+                  }}
+                >
                   {Math.round(seamMetrics.seamScore * 100)}%
                 </strong>
               </span>
@@ -2100,7 +2159,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                     type="button"
                     disabled={!processedChannels || searching}
                     onClick={runLoopSearch}
-                    className="ds-btn ds-btn-primary ds-btn-sm"
+                    className="ds-btn ds-btn-primary ds-btn-sm sfx-find-loops-btn"
                     title="Scan audio for seamless loop points (F)"
                   >
                     <Wand2 size={13} />
@@ -2742,7 +2801,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
 
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">3-Band Parametric Tone</span>
+                <span className="ds-panel-title">3-Band Tone</span>
                 <button
                   type="button"
                   onClick={() => setEq(DEFAULT_EQ_SPEC)}
@@ -2782,7 +2841,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                     Mid Peak ({eq.midFreqHz}Hz)
                   </label>
                   <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Mid Peak ("
+                    <DsRange aria-label={`Mid Peak (${eq.midFreqHz}Hz)`}
                       min={-15}
                       max={15}
                       step={0.5}
@@ -2972,7 +3031,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
 
                 <div className="sfx-rack-row">
                   <label
-role="checkbox" aria-checked={false} tabIndex={0}
+role="checkbox" aria-checked={varSpec.linkPitchAndVolume} tabIndex={0}
                     className="ds-check"
                     onKeyDown={(e) => {
                       if (e.key === " " || e.key === "Enter") {
@@ -3150,7 +3209,7 @@ role="checkbox" aria-checked={false} tabIndex={0}
 
                 <div className="sfx-rack-row">
                   <label
-role="checkbox" aria-checked={false} tabIndex={0}
+role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                     className="ds-check"
                     onKeyDown={(e) => {
                       if (e.key === " " || e.key === "Enter") {
@@ -3307,7 +3366,17 @@ role="checkbox" aria-checked={false} tabIndex={0}
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleRerollSingleVariation(idx)}
+                              onClick={() => {
+                                if (
+                                  v.liked &&
+                                  !window.confirm(
+                                    "Re-roll this take? It is marked as liked and will be replaced."
+                                  )
+                                ) {
+                                  return;
+                                }
+                                handleRerollSingleVariation(idx);
+                              }}
                               className="sfx-var-mini-btn"
                               title="Re-roll this variation"
                             >
