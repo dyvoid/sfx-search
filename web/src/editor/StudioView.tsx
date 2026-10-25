@@ -27,6 +27,7 @@ import {
   Square,
   Upload,
   Wand2,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -210,6 +211,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [saveSuffix, setSaveSuffix] = useState<string>(".edit");
   const [savingToLibrary, setSavingToLibrary] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
+  const [errMsg, setErrMsg] = useState<string | null>(null);
+  const reportError = useCallback((msg: string) => {
+    setErrMsg(msg);
+    setStatusMsg(msg);
+  }, []);
 
   const fadeSamples = useMemo(
     () => Math.max(0, Math.round((fadeMs / 1000) * sampleRate)),
@@ -319,7 +325,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         setDecoding(false);
         const msg = err instanceof Error ? err.message : String(err);
         setDecodeError(msg);
-        setStatusMsg(`Failed to decode audio: ${msg}`);
+        reportError(`Failed to decode audio: ${msg}`);
       });
 
     return () => {
@@ -365,7 +371,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       setDecoding(false);
       const msg = err instanceof Error ? err.message : String(err);
       setDecodeError(msg);
-      setStatusMsg(`Could not decode file: ${msg}`);
+      reportError(`Could not decode file: ${msg}`);
     }
   }, []);
 
@@ -520,7 +526,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         tp.setFileAudio(tp.makeBuffer(proc, sr));
         tp.setLoopAudio(tp.makeBuffer(res.buffers, sr));
       } catch (err) {
-        setStatusMsg(err instanceof Error ? err.message : String(err));
+        reportError(err instanceof Error ? err.message : String(err));
       }
     },
     [ensureTransport]
@@ -967,7 +973,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           )}s)`
         );
       } catch (err) {
-        setStatusMsg(
+        reportError(
           `Save failed: ${err instanceof Error ? err.message : String(err)}`
         );
       } finally {
@@ -1225,7 +1231,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         onSavedToLibrary(savedHit);
         setStatusMsg(`Saved & indexed variation: ${savedHit.filename}`);
       } catch (err) {
-        setStatusMsg(
+        reportError(
           `Save variation failed: ${
             err instanceof Error ? err.message : String(err)
           }`
@@ -1274,7 +1280,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         } to library`
       );
     } catch (err) {
-      setStatusMsg(
+      reportError(
         `Batch save failed after ${savedCount} files: ${
           err instanceof Error ? err.message : String(err)
         }`
@@ -2079,7 +2085,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
 
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Blend placement</label>
+                  <LabelWithTip
+                    label="Blend placement"
+                    tip="Where the join material is taken from. Auto picks per candidate; Pre-roll borrows audio just before loop end, Post-roll just after loop start, Internal crossfades inside the region." />
                   <div className="sfx-pill-group" role="group" aria-label="Blend placement">
                     {(
                       [
@@ -2104,7 +2112,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 </div>
 
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Zero-crossing</label>
+                  <LabelWithTip
+                    label="Zero-crossing"
+                    tip="Snapping markers to a rising zero crossing is the safest place for a click-free loop join." />
                   <label
 role="checkbox" aria-checked={snapZero} tabIndex={0}
                     className="ds-check"
@@ -2170,7 +2180,9 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
 
               <div className="sfx-rack-fields">
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Search strategy</label>
+                  <LabelWithTip
+                      label="Search strategy"
+                      tip="How candidates are found. Auto tries both; Best Pairs matches loop start and end independently; Match End pins the loop end to the file end." />
                   <div className="sfx-pill-group" role="group" aria-label="Search strategy">
                     {(
                       [
@@ -2194,7 +2206,9 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                 </div>
 
                 <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Min loop length (s)</label>
+                  <LabelWithTip
+                    label="Min loop length (s)"
+                    tip="Rejects candidates shorter than this. Window sets how far the scanner searches around each promising point." />
                   <div className="sfx-rack-control-inline">
                     <input
                       aria-label="Min loop length (s)"
@@ -3450,10 +3464,26 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
 
       {/* Studio Footer Status Bar */}
       <footer className="sfx-statusbar">
-        <span className="ds-tnum">{statusMsg}</span>
+        {errMsg ? (
+          <span className="ds-tnum sfx-status-err">
+            {errMsg}
+            <button
+              type="button"
+              className="sfx-similar-exit"
+              aria-label="Dismiss error"
+              onClick={() => setErrMsg(null)}
+            >
+              <X size={11} />
+              dismiss
+            </button>
+          </span>
+        ) : (
+          <span className="ds-tnum">{statusMsg}</span>
+        )}
         <span className="sfx-statusbar-shortcuts">
-          Space preview · F find loops · S test seam · [ / ] pick marker · ←/→
-          nudge (Shift 10ms) · Scroll zoom · Drag pan · Esc back to library
+          Space preview · F find loops · S test seam · Ctrl+S save · 1–4 modules ·
+          [ / ] pick marker · ←/→ nudge (Shift 10ms) · Scroll zoom · Drag
+          pan · Esc back to library
         </span>
       </footer>
 

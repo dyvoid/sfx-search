@@ -785,6 +785,10 @@ body.sfx-resizing-x {
   width: 64px;
 }
 
+.sfx-status-err {
+  color: var(--danger-400);
+}
+
 .sfx-kbd {
   display: inline-block;
   padding: 1px 5px;
