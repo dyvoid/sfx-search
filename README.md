@@ -7,7 +7,7 @@
 ![LanceDB](https://img.shields.io/badge/LanceDB-Hybrid%20RRF-6E56CF)
 ![MCP](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP-000000)
 
-A local, offline search engine for large personal sound-effects libraries (30–100 GB+) using natural-language descriptions (`laion/larger_clap_general` audio-text embeddings), hybrid keyword ranking (BM25 + Reciprocal Rank Fusion), and audio similarity, with a studio web UI for fast auditioning and an MCP server.
+A local, offline search engine for large personal sound-effects libraries (30–100 GB+) using natural-language descriptions (`laion/larger_clap_general` audio-text embeddings), hybrid keyword ranking (BM25 + Reciprocal Rank Fusion), and audio similarity — plus an in-browser sound-design studio for trimming, EQ, seamless looping, and round-robin variation generation, with an MCP server.
 
 ## Features
 
@@ -18,6 +18,12 @@ A local, offline search engine for large personal sound-effects libraries (30–
   - Continuous anti-aliased mirror-envelope mini-waveforms with pointer-drag scrubbing, best-window highlights on long files, and a real-time 16-band Web Audio FFT spectrum & peak-hold meter.
   - Instant HTTP `Range` (`206 Partial Content`) playback starting at the best-matching 10s window offset, with on-the-fly `ffmpeg` WAV transcoding and disk caching for non-browser-native formats (AIFF, multichannel, 32-bit float).
   - Keyboard-first workflow (<kbd>↑</kbd>/<kbd>↓</kbd> navigate, <kbd>Space</kbd> play/pause, <kbd>R</kbd> reveal in Explorer, <kbd>F</kbd> toggle favorite, <kbd>Enter</kbd> toggle inspector, <kbd>/</kbd> focus search) and drag-and-drop reference audio matching.
+- **Studio Editor (non-destructive, in-browser DSP):** Open any result with **Edit Audio** (<kbd>E</kbd>) to work on a decoded 48 kHz copy through a real-time processing chain. Four modules:
+  - **Trim & Gain** — draggable IN/OUT crop handles on the waveform, boundary fade-in/fade-out, and gain.
+  - **Tone & EQ** — biquad EQ chain (low shelf / peaking / high shelf) with a live frequency-response graph.
+  - **Seamless Loop** — loop-point editor with zoom-to-seam, zero-crossing snapping, adjustable crossfade (pre- or post-roll), an automatic loop-candidate finder running in a Web Worker, and a seam oscilloscope with continuity metrics (step delta, energy match, seam score).
+  - **Variations** — round-robin take generator applying pitch/volume modulation curves in Foley or Melodic mode; audition takes, heart the keepers, test-fire the sequence, and drag takes or the baked file straight into a DAW.
+  - Output can be **baked and downloaded as WAV** or **saved back into the library** (`/api/files/{id}/save-edited`), where it is indexed like any other file. Peak/RMS signal meters and loop-aware transport included.
 - **First-Run Folder Setup & Live Background Indexing:** Add or remove library folders directly from the UI (with native Windows folder picker support); files are decoded and embedded in the background and search unlocks automatically as soon as the first batch commits.
 - **MCP Server:** Exposes `search_sounds`, `batch_search`, `find_similar`, `get_sound`, and `library_stats` over `stdio` and `streamable-http`.
 
@@ -123,7 +129,10 @@ backend/            Python package `sfxsearch`
   api.py            FastAPI HTTP server, background index manager, HTTP Range streaming, transcode cache
   mcp_server.py     MCP server (search_sounds, batch_search, find_similar, get_sound, library_stats)
   eval/harness.py   Evaluation harness (Recall@10/50, MRR, nDCG@20, variant comparison)
-web/                React + TypeScript + Vite + dyvoided.2 design system + wavesurfer.js SPA
+web/                React + TypeScript + Vite + dyvoided.2 design system SPA
+  src/components/   MiniWaveform, SpectrumMeter, DetailPanel, FolderTree, DsSelect/DsRange
+  src/editor/       Studio: StudioView, EditorWaveform, SeamScope, in-browser DSP
+                    (decode/dspChain/loopdsp/variations) + search Web Worker
 tests/              Unit and integration test suite
 docs/               Architecture, ADRs, roadmap, and git workflow
 start.bat           Windows one-step install, build, and launch script

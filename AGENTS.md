@@ -14,13 +14,13 @@ in full.** Do not commit, branch, or merge based on assumption or partial recoll
 
 ## Project Overview
 
-`sfx-search` is a local, offline tool for searching a large personal sound-effects library (30-100 GB, mixed formats, mixed metadata quality) by natural-language text description and by audio similarity. It provides a CLI, a FastAPI backend, a React/Vite web UI for fast auditioning, an MCP server for LLM clients, and an evaluation harness for measuring retrieval quality. It is currently an early prototype targeting a local Windows workstation with an 8 GB VRAM NVIDIA GPU (RTX 2080 Super class) and `ffmpeg` on PATH.
+`sfx-search` is a local, offline tool for searching a large personal sound-effects library (30-100 GB, mixed formats, mixed metadata quality) by natural-language text description and by audio similarity. It provides a CLI, a FastAPI backend, a React/Vite web UI for fast auditioning plus an in-browser sound-design studio (Trim & Gain, Tone & EQ, Seamless Loop, Variations round-robin takes — all client-side DSP on a decoded copy, with bake/download and save-back-into-library), an MCP server for LLM clients, and an evaluation harness for measuring retrieval quality. It is currently an early prototype targeting a local Windows workstation with an 8 GB VRAM NVIDIA GPU (RTX 2080 Super class) and `ffmpeg` on PATH.
 
 ---
 
 ## Architecture
 
-The system runs locally in two main parts: a Python backend (`sfxsearch`) and a React/TypeScript web frontend (`web/`). The indexer walks configured audio roots, decodes files to 48 kHz mono float32 PCM via `ffmpeg` worker pools, extracts container/BWF/iXML tags and acoustic features (LUFS, peak, loop score), embeds 10s/5s overlapping audio windows with a CLAP model (`laion/larger_clap_general`), and stores records in LanceDB (`files`, `chunks`, and `user_data` tables). Search runs a hybrid pipeline combining KNN over chunk vectors and BM25 full-text search over normalized metadata via Reciprocal Rank Fusion (RRF), exposed through the CLI, FastAPI HTTP endpoints, and an MCP server.
+The system runs locally in two main parts: a Python backend (`sfxsearch`) and a React/TypeScript web frontend (`web/`). The indexer walks configured audio roots, decodes files to 48 kHz mono float32 PCM via `ffmpeg` worker pools, extracts container/BWF/iXML tags and acoustic features (LUFS, peak, loop score), embeds 10s/5s overlapping audio windows with a CLAP model (`laion/larger_clap_general`), and stores records in LanceDB (`files`, `chunks`, and `user_data` tables). Search runs a hybrid pipeline combining KNN over chunk vectors and BM25 full-text search over normalized metadata via Reciprocal Rank Fusion (RRF), exposed through the CLI, FastAPI HTTP endpoints, and an MCP server. The web app's Studio (`web/src/editor/`) decodes a file client-side and runs a real-time DSP chain (crop/gain, biquad EQ, loop crossfade, pitch/volume take variations) with an auto loop-candidate finder in a Web Worker; only the final bounce touches the backend via `POST /api/files/{id}/save-edited` (plus drag-out `.wav` blobs for DAW import).
 
 See [Architecture Overview](docs/architecture/overview.md) for the full picture, [the Build Spec](build_spec.md) for detailed component requirements, and [the ADR log](docs/adr/) for the reasoning behind specific decisions.
 
@@ -75,7 +75,9 @@ ai-assisted: <model>
 
 ### Web (`web/`) specifics
 - **Package manager:** `npm` only. Commit `package-lock.json`; do not mix package managers.
-- **Core stack:** TypeScript (strict), React, Vite, `dyvoided.2` CSS token/component design system (`web/src/design-system/`), `lucide-react`, `wavesurfer.js`. Do not introduce another UI framework or styling system unprompted.
+- **Core stack:** TypeScript (strict), React, Vite, `dyvoided.2` CSS token/component design system (`web/src/design-system/`), `lucide-react`. Waveforms/scopes are custom canvas renderers (`EditorWaveform`, `MiniWaveform`, `SeamScope`, `SpectrumMeter`). Do not introduce another UI framework or styling system unprompted.
+- **Controls:** Prefer the kit's compound structures (`ds-*` classes) over re-skinning native inputs — e.g. sliders render `ds-slider-track/fill/knob` + transparent `<input type="range">` via `web/src/components/DsRange.tsx`, and selects go through `DsSelect.tsx`.
+- **Accent semantics (app-wide convention):** `--primary` = user intent (actions, selection, focus); `--accent-2` = live audio signal (waveforms, meters, playing state); `--accent-1` = processing (fades, pitch, EQ); `--accent-3` = machine-proposed (match regions, loop candidates, generated takes, analysis progress); `--success/--danger/--warning` = status & level only. Accents are assigned by category, never per-element or per-channel.
 - **Build & verification:** `npm run build` (`tsc -b && vite build`) inside `web/`.
 - **UX & accessibility constraints:** Keyboard-first auditioning (`Up`/`Down` arrows navigate results, `Space` plays/pauses, `R` reveals file in Explorer, `F` toggles favorite, `Enter` toggles inspector panel, `/` focuses search), single active audio stream at a time, dark theme by default, instant playback at best-chunk offset via HTTP Range requests, infinite scroll with viewport-lazy `MiniWaveform` rendering.
 
