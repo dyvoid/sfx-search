@@ -25,8 +25,8 @@ interface DetailPanelProps {
   onSeek: (timeS: number) => void;
   onClose: () => void;
   onOpenEditor: () => void;
-  onFindSimilarFile: (fileId: string) => void;
-  onFindSimilarChunk: (fileId: string, chunkIdx: number) => void;
+  onFindSimilarFile: (fileId: string, filename?: string) => void;
+  onFindSimilarChunk: (fileId: string, chunkIdx: number, filename?: string) => void;
   onToggleFavorite: () => void;
   onUserUpdated: (
     fileId: string,
@@ -268,7 +268,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               <button
                 type="button"
                 onClick={onTogglePlay}
-                className="ds-btn ds-btn-primary ds-btn-sm"
+                className="ds-btn ds-btn-secondary ds-btn-sm"
               >
                 {isPlaying ? <Pause size={14} /> : <Play size={14} />}
                 {isPlaying ? "Pause" : "Audition"}
@@ -299,7 +299,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => onFindSimilarFile(hit.file_id)}
+              onClick={() => onFindSimilarFile(hit.file_id, hit.filename)}
               className="ds-btn ds-btn-secondary ds-btn-sm"
             >
               <Sparkles size={14} />
@@ -309,7 +309,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               <button
                 type="button"
                 onClick={() =>
-                  onFindSimilarChunk(hit.file_id, selectedChunkIdx)
+                  onFindSimilarChunk(hit.file_id, selectedChunkIdx, hit.filename)
                 }
                 className="ds-btn ds-btn-secondary ds-btn-sm"
               >

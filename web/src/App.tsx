@@ -20,6 +20,7 @@ import {
   Sparkles,
   Upload,
   Volume2,
+  X,
 } from "lucide-react";
 import {
   addLibraryRoot,
@@ -891,7 +892,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleFindSimilarFile = async (fileId: string) => {
+  const handleFindSimilarFile = async (fileId: string, filename?: string) => {
     const reqId = ++searchReqRef.current;
     userSearchReqRef.current = reqId;
     setLoading(true);
@@ -906,7 +907,7 @@ export const App: React.FC = () => {
       setSearchSeq((s) => s + 1);
       setSelectedIndex(0);
       resultsListRef.current?.scrollTo({ top: 0 });
-      setStatusLabel(`Similar to ${fileId.slice(0, 8)}`);
+      setStatusLabel(`Similar to ${filename ?? fileId.slice(0, 8)}`);
     } catch (err) {
       if (reqId === searchReqRef.current) {
         setStatusLabel(err instanceof Error ? err.message : "Similarity search failed");
@@ -919,7 +920,11 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleFindSimilarChunk = async (fileId: string, chunkIdx: number) => {
+  const handleFindSimilarChunk = async (
+    fileId: string,
+    chunkIdx: number,
+    filename?: string
+  ) => {
     const reqId = ++searchReqRef.current;
     userSearchReqRef.current = reqId;
     setLoading(true);
@@ -934,7 +939,9 @@ export const App: React.FC = () => {
       setSearchSeq((s) => s + 1);
       setSelectedIndex(0);
       resultsListRef.current?.scrollTo({ top: 0 });
-      setStatusLabel(`Similar to ${fileId.slice(0, 8)} · chunk #${chunkIdx}`);
+      setStatusLabel(
+        `Similar to ${filename ?? fileId.slice(0, 8)} · chunk #${chunkIdx}`
+      );
     } catch (err) {
       if (reqId === searchReqRef.current) {
         setStatusLabel(err instanceof Error ? err.message : "Similarity search failed");
@@ -1157,7 +1164,10 @@ export const App: React.FC = () => {
           "application/x-sfxsearch-file-id"
         );
         if (selfFileId) {
-          void handleFindSimilarFile(selfFileId);
+          void handleFindSimilarFile(
+            selfFileId,
+            resultsRef.current.find((h) => h.file_id === selfFileId)?.filename
+          );
           return;
         }
         const f = e.dataTransfer.files?.[0];
@@ -1280,15 +1290,15 @@ export const App: React.FC = () => {
                     const activeHit =
                       (isPlaying && playingHit) || selectedHit || playingHit;
                     if (!activeHit) {
-                      return "00.00s / 00.0s";
+                      return "00.00s / 00.00s";
                     }
                     const pos =
                       playingFileId === activeHit.file_id
                         ? currentTimeS
                         : activeHit.best_offset_s;
                     return `${pos.toFixed(2).padStart(5, "0")}s / ${activeHit.duration_s
-                      .toFixed(1)
-                      .padStart(4, "0")}s`;
+                      .toFixed(2)
+                      .padStart(5, "0")}s`;
                   })()}
                 </span>
 
@@ -2229,7 +2239,7 @@ export const App: React.FC = () => {
                           {hit.clap_score !== null
                             ? `${(hit.clap_score * 100).toFixed(0)}%`
                             : hit.bm25_score !== null
-                            ? hit.bm25_score.toFixed(1)
+                            ? `${hit.bm25_score.toFixed(1)} kw`
                             : "—"}
                         </span>
                       </div>
@@ -2262,7 +2272,7 @@ export const App: React.FC = () => {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleFindSimilarFile(hit.file_id);
+                            handleFindSimilarFile(hit.file_id, hit.filename);
                           }}
                           className="sfx-icon-btn"
                           aria-label="Find similar sounds"
@@ -2343,6 +2353,22 @@ export const App: React.FC = () => {
                   : roots.length === 0
                   ? "No library folders configured"
                   : "Indexing initial audio files...")}
+              {isSimilarityView && (
+                <button
+                  type="button"
+                  className="sfx-similar-exit"
+                  title="Exit similarity view — back to search results"
+                  aria-label="Exit similarity view"
+                  onClick={() => {
+                    setIsSimilarityView(false);
+                    setStatusLabel("");
+                    void runSearch();
+                  }}
+                >
+                  <X size={11} />
+                  exit
+                </button>
+              )}
             </span>
             <span className="sfx-statusbar-shortcuts">
               ↑↓ navigate · Space play · E edit · R reveal · F favorite · Enter inspector · / search · drag row to export
