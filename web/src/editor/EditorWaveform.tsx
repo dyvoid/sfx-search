@@ -63,6 +63,8 @@ const COLOR_VARS = {
   playhead: "--text-primary",
   legend: "--text-secondary",
   rulerBg: "--surface-panel",
+  hover: "--border-strong",
+  pillBg: "oklch(from var(--gray-950) l c h / 0.85)",
 } as const;
 
 type ColorName = keyof typeof COLOR_VARS;
@@ -81,6 +83,8 @@ const FALLBACKS: Palette = {
   playhead: "rgba(255, 255, 255, 0.92)",
   legend: "rgba(215, 222, 234, 0.78)",
   rulerBg: "rgba(20, 22, 30, 0.85)",
+  hover: "rgba(255, 255, 255, 0.22)",
+  pillBg: "rgba(12, 14, 20, 0.85)",
 };
 
 let resolvedPalette: Palette | null = null;
@@ -349,7 +353,7 @@ export const EditorWaveform = React.forwardRef<
           g.font = '600 9px "DM Mono", ui-monospace, monospace';
           const tw = g.measureText(label).width;
           const pillX = Math.max(4, Math.min(hx + 8, w - tw - 12));
-          g.fillStyle = "rgba(12, 14, 20, 0.85)";
+          g.fillStyle = resolvePalette().pillBg;
           g.fillRect(pillX, 4, tw + 8, 14);
           g.strokeStyle = color;
           g.lineWidth = 1;
@@ -601,7 +605,7 @@ export const EditorWaveform = React.forwardRef<
         if (st.hoverSample !== null && !st.dragging && !st.panning) {
           const hx = sampleToPx(st.hoverSample);
           if (hx >= 0 && hx <= w) {
-            g.strokeStyle = "rgba(255, 255, 255, 0.22)";
+            g.strokeStyle = COLORS.hover;
             g.beginPath();
             g.moveTo(hx, 0);
             g.lineTo(hx, wh);
