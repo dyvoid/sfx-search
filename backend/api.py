@@ -878,9 +878,7 @@ def create_app(
 
         if custom_name:
             safe_stem = "".join(
-                ch
-                for ch in custom_name
-                if ch.isalnum() or ch in (".", "_", "-", " ")
+                ch for ch in custom_name if ch.isalnum() or ch in (".", "_", "-", " ")
             ).strip(" .")
             if not safe_stem:
                 raise HTTPException(status_code=400, detail="Invalid filename")
