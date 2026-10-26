@@ -365,6 +365,13 @@ def _serve_file_with_range(
     )
 
 
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"COM{i}" for i in range(10)}
+    | {f"LPT{i}" for i in range(10)}
+)
+
+
 def create_app(
     config: Config | None = None,
     store: SfxStore | None = None,
@@ -879,9 +886,11 @@ def create_app(
         if custom_name:
             safe_stem = "".join(
                 ch for ch in custom_name if ch.isalnum() or ch in (".", "_", "-", " ")
-            ).strip(" .")
+            )[:120].strip(" .")
             if not safe_stem:
                 raise HTTPException(status_code=400, detail="Invalid filename")
+            if safe_stem.split(".")[0].strip().upper() in _WINDOWS_RESERVED_NAMES:
+                safe_stem = f"_{safe_stem}"
             candidate = parent_dir / f"{safe_stem}.wav"
             if not overwrite:
                 counter = 2
@@ -890,6 +899,11 @@ def create_app(
                     counter += 1
             target_norm = normalize_path(candidate)
         elif overwrite:
+            if src_p.suffix.lower() != ".wav":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Overwrite without a name is only supported for .wav sources",
+                )
             target_norm = normalize_path(src_p)
         else:
             raw_suffix = suffix.strip() or ".loop"
