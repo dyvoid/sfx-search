@@ -138,14 +138,22 @@ export const SeamScope: React.FC<SeamScopeProps> = ({
     g.stroke();
 
     // Labels
+    // Labels sit on a backing so the trace never overprints them.
     g.font = '500 12px "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif';
-    g.fillStyle = tailColor;
-    g.fillText("Tail", 6, 15);
-    g.fillStyle = headColor;
-    g.fillText("Head", w - g.measureText("Head").width - 6, 15);
+    const labelBg = readTokenColor("--surface-sunken", "#0b0f17");
+    const label = (text: string, x: number, baseline: number, color: string) => {
+      const tw = g.measureText(text).width;
+      g.globalAlpha = 0.85;
+      g.fillStyle = labelBg;
+      g.fillRect(x - 3, baseline - 12, tw + 6, 16);
+      g.globalAlpha = 1;
+      g.fillStyle = color;
+      g.fillText(text, x, baseline);
+    };
+    label("Tail", 6, 15, tailColor);
+    label("Head", w - g.measureText("Head").width - 6, 15, headColor);
     if (fadeSamples > 0) {
-      g.fillStyle = seamColor;
-      g.fillText("Seam", midX + 4, h - 6);
+      label("Seam", midX + 4, h - 6, seamColor);
     }
   }, [bakedChannels, sampleRate, fadeSamples]);
 

@@ -1694,6 +1694,11 @@ body.sfx-resizing-x {
   align-items: center;
   gap: var(--space-3);
   min-width: 0;
+  white-space: nowrap;
+}
+
+.sfx-editor-transport-left .sfx-pill-group {
+  flex-wrap: nowrap;
 }
 
 /* Reserved so the level readouts don't move when the meter appears. */
@@ -1706,7 +1711,8 @@ body.sfx-resizing-x {
 
 @media (max-width: 1000px) {
   .sfx-meter-slot,
-  .sfx-signal-meters .rms {
+  .sfx-signal-meters .rms,
+  .sfx-editor-transport-left .sfx-rack-hint {
     display: none;
   }
 

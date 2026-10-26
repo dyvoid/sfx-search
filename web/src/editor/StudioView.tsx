@@ -125,6 +125,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const transportRef = useRef<StudioTransport | null>(null);
   const searchWorkerRef = useRef<Worker | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const takesGridRef = useRef<HTMLDivElement | null>(null);
   const bakeTimerRef = useRef<number>(0);
 
   // Source audio state
@@ -1168,6 +1169,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setVariations(batch);
     if (batch.length > 0) {
       auditionVariation(batch[0], 0);
+      // The takes are this module's output: on a short window the rack scrolls, so bring them into view.
+      window.requestAnimationFrame(() =>
+        takesGridRef.current?.scrollIntoView({ block: "nearest" })
+      );
     }
     setStatusMsg(
       `Generated ${batch.length} ${varSpec.mode} round-robin variations`
@@ -3440,7 +3445,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                   Set the variation amounts, then generate takes.
                 </div>
               ) : (
-                <div className="sfx-var-takes-grid">
+                <div ref={takesGridRef} className="sfx-var-takes-grid">
                   {variations.map((v, idx) => {
                     const isAct = idx === activeVarIdx;
                     const isTakePlaying = idx === playingVarIdx;
