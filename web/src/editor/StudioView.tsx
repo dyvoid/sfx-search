@@ -1401,12 +1401,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
       const inputType =
         tag === "input" ? (target as HTMLInputElement).type : "";
-      const nonTextInput = ["range", "checkbox", "radio", "button"].includes(
+      const nonTextInput = ["range", "checkbox", "radio"].includes(
         inputType
       );
       const isSaveChord = e.code === "KeyS" && (e.ctrlKey || e.metaKey);
       const runSave = () => {
-        if (saveDlg || !processedChannels) {
+        if (saveDlg || !processedChannels || e.repeat) {
           return;
         }
         if (hit) {
@@ -1454,6 +1454,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
 
       if (!processedChannels) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey || e.altKey) && !isSaveChord) {
+        return;
+      }
+      if (
+        e.repeat &&
+        e.code !== "ArrowLeft" &&
+        e.code !== "ArrowRight"
+      ) {
+        if (isSaveChord) {
+          e.preventDefault(); // still block the browser's "Save page" dialog
+        }
         return;
       }
 
@@ -3646,7 +3660,10 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
-                      void confirmSave();
+                      if (!e.repeat) {
+                        // a held Enter that opened the dialog must not also save
+                        void confirmSave();
+                      }
                     } else if (e.key === "Escape") {
                       e.preventDefault();
                       setSaveDlg(false);
