@@ -38,21 +38,21 @@ class PathsConfig(BaseModel):
 class EmbeddingConfig(BaseModel):
     model_id: str = "laion/larger_clap_general"
     precision: Literal["fp16", "fp32"] = "fp16"
-    window_s: float = 10.0
-    hop_s: float = 5.0
-    max_chunks_per_file: int = 120
+    window_s: float = Field(default=10.0, gt=0)
+    hop_s: float = Field(default=5.0, gt=0)
+    max_chunks_per_file: int = Field(default=120, ge=1)
     batch_size: int = 32
 
 
 class IndexingConfig(BaseModel):
     decode_workers: int = Field(default_factory=lambda: max(1, (os.cpu_count() or 4) - 2))
-    commit_every_files: int = 50
+    commit_every_files: int = Field(default=50, ge=1)
 
 
 class SearchConfig(BaseModel):
-    vector_candidates: int = 300
+    vector_candidates: int = Field(default=300, ge=1)
     keyword_candidates: int = 100
-    rrf_k: int = 60
+    rrf_k: int = Field(default=60, gt=0)
     default_k: int = 30
     vector_weight: float = 1.0
     keyword_weight: float = 1.0
@@ -60,7 +60,7 @@ class SearchConfig(BaseModel):
 
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
-    port: int = 8765
+    port: int = Field(default=8765, ge=1, le=65535)
 
 
 class Config(BaseModel):

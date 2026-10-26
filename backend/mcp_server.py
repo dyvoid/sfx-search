@@ -13,6 +13,8 @@ from .embed import EmbedderProtocol
 from .search import SearchEngine, SearchHit, SearchMode
 from .store import SearchFilters, SfxStore, UserDataRecord
 
+MAX_BATCH_QUERIES = 20
+
 
 def _compact_hit(hit: SearchHit) -> dict[str, Any]:
     tags_summary = ", ".join(f"{k}:{v}" for k, v in list(hit.tags.items())[:6])
@@ -115,7 +117,7 @@ def create_mcp_server(
             min_loop_score=min_loop_score,
         )
         batch_out: list[dict[str, Any]] = []
-        for q in queries:
+        for q in queries[:MAX_BATCH_QUERIES]:
             hits = engine.search(query=q, k=k, mode=mode, filters=filters)
             batch_out.append(
                 {

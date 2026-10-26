@@ -9,7 +9,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from sfxsearch.config import Config, IndexingConfig, LibraryConfig, PathsConfig
+from pydantic import ValidationError
+from sfxsearch.config import (
+    Config,
+    IndexingConfig,
+    LibraryConfig,
+    PathsConfig,
+    SearchConfig,
+)
 from sfxsearch.embed import slice_audio_windows
 from sfxsearch.eval.harness import (
     EvalQuery,
@@ -395,3 +402,124 @@ def test_find_similar_invalid_chunk_idx_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="chunk_idx"):
         engine.find_similar(fid, k=5, chunk_idx=999)
+
+
+def test_slice_audio_windows_deterministic_and_last_window_aligned() -> None:
+    sr = 48000
+    rng = np.random.default_rng(0)
+    audio = rng.standard_normal(sr * 23 + 17).astype(np.float32)
+    kwargs = {"sample_rate": sr, "window_s": 10.0, "hop_s": 5.0, "max_chunks_per_file": 120}
+    first = slice_audio_windows(audio, **kwargs)  # type: ignore[arg-type]
+    second = slice_audio_windows(audio, **kwargs)  # type: ignore[arg-type]
+    assert [(w.chunk_idx, w.start_s, w.end_s) for w in first] == [
+        (w.chunk_idx, w.start_s, w.end_s) for w in second
+    ]
+    assert all(np.array_equal(a.samples, b.samples) for a, b in zip(first, second, strict=True))
+    # The final window is aligned to the end of the file and is full length.
+    assert first[-1].end_s == pytest.approx(audio.shape[0] / sr)
+    assert first[-1].samples.shape[0] == sr * 10
+    assert [w.chunk_idx for w in first] == list(range(len(first)))
+
+    # One sample over the window length still yields a trailing aligned window.
+    over = slice_audio_windows(
+        audio[: sr * 10 + 1], sample_rate=sr, window_s=10.0, hop_s=5.0, max_chunks_per_file=120
+    )
+    assert len(over) == 2
+    assert over[-1].end_s == pytest.approx((sr * 10 + 1) / sr)
+
+    single = slice_audio_windows(
+        audio, sample_rate=sr, window_s=10.0, hop_s=5.0, max_chunks_per_file=1
+    )
+    assert [w.start_s for w in single] == [0.0]
+
+
+def test_tokenize_identifier_keeps_non_ascii_letters() -> None:
+    assert tokenize_identifier("Türknall_01") == ["türknall"]
+    assert tokenize_identifier("café_door") == ["café", "door"]
+    assert tokenize_identifier("雨音_heavy") == ["雨音", "heavy"]
+
+
+def test_parse_query_open_ended_duration() -> None:
+    from sfxsearch.search import parse_query
+
+    p = parse_query("rain dur:5-")
+    assert p.filters.min_duration == 5.0
+    assert p.filters.max_duration is None
+    assert p.semantic_query == "rain"
+
+    p2 = parse_query("rain dur:2.5- thunder")
+    assert p2.filters.min_duration == 2.5
+    assert p2.semantic_query == "rain thunder"
+
+    p3 = parse_query("dur:5-10 -3")
+    assert (p3.filters.min_duration, p3.filters.max_duration) == (5.0, 10.0)
+
+
+def test_config_rejects_invalid_search_and_embedding_values() -> None:
+    with pytest.raises(ValidationError):
+        SearchConfig(rrf_k=0)
+    with pytest.raises(ValidationError):
+        Config.model_validate({"embedding": {"hop_s": 0}})
+    with pytest.raises(ValidationError):
+        Config.model_validate({"server": {"port": 70000}})
+    from sfxsearch.config import load_config
+
+    assert load_config("config.example.toml").search.rrf_k == 60
+
+
+def test_indexer_offline_root_is_not_marked_missing(tmp_path: Path) -> None:
+    lib_root = tmp_path / "library"
+    write_sine_wav(lib_root / "a.wav", freq_hz=200.0, duration_s=1.0)
+    write_sine_wav(lib_root / "b.wav", freq_hz=400.0, duration_s=1.0)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+        indexing=IndexingConfig(decode_workers=1, commit_every_files=2),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+    chunks_before = store.db.open_table("chunks").count_rows()
+    assert chunks_before == 2
+
+    # Simulate an unplugged drive: configured root disappears from disk.
+    offline = tmp_path / "library_offline"
+    lib_root.rename(offline)
+    stats = run_indexer(config=cfg, store=store, embedder=embedder)
+    assert stats.marked_missing == 0
+    assert store.get_library_stats()["ok_files"] == 2
+    assert store.db.open_table("chunks").count_rows() == chunks_before
+
+    # Root returns: nothing needs re-indexing.
+    offline.rename(lib_root)
+    stats2 = run_indexer(config=cfg, store=store, embedder=embedder)
+    assert stats2.to_index_count == 0
+    assert stats2.skipped_unchanged == 2
+
+    # A root removed from config still gets its files marked missing as before.
+    other = tmp_path / "other"
+    write_sine_wav(other / "c.wav", freq_hz=300.0, duration_s=1.0)
+    cfg2 = cfg.model_copy(update={"library": LibraryConfig(roots=[str(lib_root), str(other)])})
+    run_indexer(config=cfg2, store=store, embedder=embedder)
+    (other / "c.wav").unlink()
+    stats3 = run_indexer(config=cfg2, store=store, embedder=embedder)
+    assert stats3.marked_missing == 1
+
+
+def test_search_clamps_k(tmp_path: Path) -> None:
+    lib_root = tmp_path / "sfx"
+    for i in range(4):
+        write_sine_wav(lib_root / f"rain_{i}.wav", freq_hz=200.0 + 50 * i, duration_s=1.0)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+    engine = SearchEngine(config=cfg, store=store, embedder=embedder)
+
+    assert len(engine.search("rain", k=-2)) == 1
+    assert len(engine.search("rain", k=0)) == 1
+    assert len(engine.search("", k=0)) == 1
+    assert len(engine.search("rain", k=10_000)) == 4

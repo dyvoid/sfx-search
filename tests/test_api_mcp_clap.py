@@ -245,6 +245,43 @@ def _post_edit(client: TestClient, fid: str, tmp_path: Path, **params: str) -> A
         )
 
 
+def test_audio_range_header_edge_cases(tmp_path: Path) -> None:
+    lib_root = tmp_path / "sfx"
+    wav = write_sine_wav(lib_root / "tone.wav", duration_s=1.0)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+    client = TestClient(create_app(config=cfg, store=store, embedder=embedder))
+    fid = compute_file_id(wav)
+    size = wav.stat().st_size
+    url = f"/api/audio/{fid}"
+
+    for bad in ("bytes=-0", "bytes=5-2", "bytes=abc", "bytes=-abc", f"bytes={size}-"):
+        assert client.get(url, headers={"Range": bad}).status_code == 416, bad
+
+    r_suffix = client.get(url, headers={"Range": "bytes=-100"})
+    assert r_suffix.status_code == 206
+    assert r_suffix.headers["Content-Range"] == f"bytes {size - 100}-{size - 1}/{size}"
+    assert len(r_suffix.content) == 100
+
+    r_open = client.get(url, headers={"Range": "bytes=10-"})
+    assert r_open.status_code == 206
+    assert len(r_open.content) == size - 10
+
+    r_past_end = client.get(url, headers={"Range": f"bytes=0-{size * 10}"})
+    assert r_past_end.status_code == 206
+    assert len(r_past_end.content) == size
+
+    # Multi-range requests are served as the first range only.
+    r_multi = client.get(url, headers={"Range": "bytes=0-9,20-29"})
+    assert r_multi.status_code == 206
+    assert len(r_multi.content) == 10
+
+
 def test_save_edited_custom_name(tmp_path: Path) -> None:
     client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
     d = wav.parent
