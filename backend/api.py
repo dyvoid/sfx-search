@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import soundfile as sf
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
@@ -931,6 +932,7 @@ def create_app(
         target_fid = compute_file_id(target_norm)
         u_map = st.get_user_data_map([source_fid, target_fid])
         max_bytes = 256 * 1024 * 1024
+        target_existed = False
         os_target = to_os_path(target_norm)
         os_tmp = f"{os_target}.{os.getpid()}_{threading.get_ident()}.tmp"
         try:
@@ -946,10 +948,18 @@ def create_app(
                     out_f.write(chunk)
             if written < 44:
                 raise HTTPException(status_code=400, detail="Edited audio payload is empty")
-            with open(os_tmp, "rb") as chk_f:
-                header = chk_f.read(12)
-            if header[0:4] != b"RIFF" or header[8:12] != b"WAVE":
-                raise HTTPException(status_code=400, detail="Edited audio is not a WAV file")
+            try:
+                wav_info = sf.info(os_tmp)
+                wav_ok = (
+                    wav_info.format in ("WAV", "WAVEX")
+                    and wav_info.frames > 0
+                    and wav_info.samplerate > 0
+                )
+            except Exception:
+                wav_ok = False
+            if not wav_ok:
+                raise HTTPException(status_code=400, detail="Edited audio is not a valid WAV file")
+            target_existed = os.path.exists(os_target)
             os.replace(os_tmp, os_target)
         except HTTPException:
             try:
@@ -989,7 +999,7 @@ def create_app(
 
         src_u = u_map.get(source_fid, UserDataRecord(file_id=source_fid))
         if copy_user_data:
-            if target_fid != source_fid and target_fid in u_map:
+            if overwrite and target_existed and target_fid != source_fid and target_fid in u_map:
                 src_u = u_map[target_fid]
             next_tags = list(src_u.user_tags)
             if "loop" not in [t.lower() for t in next_tags]:
