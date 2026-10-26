@@ -97,7 +97,14 @@ function resolvePalette(): Palette {
   document.body.appendChild(probe);
   const out = { ...FALLBACKS };
   for (const name of Object.keys(COLOR_VARS) as ColorName[]) {
-    probe.style.color = `var(${COLOR_VARS[name]}, ${FALLBACKS[name]})`;
+    const spec: string = COLOR_VARS[name];
+    probe.style.color = ""; // never inherit the previous entry on a rejected value
+    probe.style.color = spec.startsWith("--")
+      ? `var(${spec}, ${FALLBACKS[name]})`
+      : spec;
+    if (!probe.style.color) {
+      continue; // unsupported syntax: keep the fallback, not the inherited color
+    }
     const v = getComputedStyle(probe).color;
     out[name] = v || FALLBACKS[name];
   }

@@ -282,6 +282,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const controller = new AbortController();
     setDecoding(true);
     setDecodeError("");
+    setErrMsg(null);
+    setSaveDlg(false);
     setStatusMsg(`Loading ${hit.filename}…`);
     transportRef.current?.stop();
     setIsPlaying(false);
@@ -340,6 +342,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const loadLocalFile = useCallback(async (file: File) => {
     setDecoding(true);
     setDecodeError("");
+    setErrMsg(null);
+    setSaveDlg(false);
     setStatusMsg(`Decoding ${file.name}…`);
     transportRef.current?.stop();
     setIsPlaying(false);
@@ -958,6 +962,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       const overwrite = opts?.overwrite ?? false;
       const targetLabel = opts?.name ? `${opts.name}.wav` : res.filename;
       setSavingToLibrary(true);
+      setErrMsg(null);
       setStatusMsg(
         overwrite
           ? `Saving ${targetLabel} (replace existing) and re-indexing…`
@@ -1006,7 +1011,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const confirmSave = useCallback(async () => {
     const stem = saveName.trim().replace(/\.wav$/i, "");
-    if (!stem) {
+    if (!stem || savingToLibrary) {
       return;
     }
     const ok = await handleSaveToLibrary({
@@ -1016,7 +1021,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     if (ok) {
       setSaveDlg(false);
     }
-  }, [saveName, saveOverwrite, handleSaveToLibrary]);
+  }, [saveName, saveOverwrite, savingToLibrary, handleSaveToLibrary]);
 
   const handleDragEditedStart = (e: React.DragEvent) => {
     const res = buildCurrentWav();
@@ -3587,6 +3592,11 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
               <span className="sfx-rack-hint">
                 Saved to the source folder and indexed immediately.
               </span>
+              {errMsg && (
+                <span className="sfx-status-err" role="alert">
+                  {errMsg}
+                </span>
+              )}
             </div>
             <div className="ds-dialog-foot">
               <button
