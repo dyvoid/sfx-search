@@ -328,13 +328,14 @@ test.describe("Studio, save chord (S5)", () => {
     await expect(saveDialog(app)).toBeVisible();
   });
 
-  test("S5 without a library file (local file) Ctrl+S downloads instead of opening the dialog", async ({
+  // The top-bar "Edit Audio" button was the only way into the Studio without a
+  // library file; with it gone, local-file mode is unreachable from the UI.
+  test.fixme("S5 without a library file (local file) Ctrl+S downloads instead of opening the dialog", async ({
     app,
   }) => {
     // Favorites-only with no favorites -> empty results -> the Studio has no library file.
     await app.getByRole("button", { name: /^Filters/ }).click();
     await app.getByRole("checkbox", { name: "Favorites only" }).click();
-    await app.getByRole("button", { name: "Apply" }).click();
     await expect(app.locator(".sfx-row")).toHaveCount(0);
     await app.getByRole("button", { name: "Edit Audio" }).click();
     await expect(studioShell(app)).toBeVisible();

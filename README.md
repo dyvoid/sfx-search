@@ -12,7 +12,7 @@ A local, offline search engine for large personal sound-effects libraries (30–
 ## Features
 
 - **Hybrid Audio + Lexical Retrieval:** Combines 512-d CLAP embeddings over 10s/5s overlapping audio windows with native LanceDB BM25 full-text search over filenames, folder hierarchies, container tags, BWF `bext`, and iXML metadata via Reciprocal Rank Fusion (`k = 60`).
-- **Inline Query Syntax & Hard Filters:** Filter inline (`dur:0-2`, `loop:true`, `fmt:wav`, `tag:impact`, `fav:true`, `"exact phrase"`, `-exclusion`) or via the collapsible filter drawer (duration range, integrated LUFS range, format, folder root, loop score, user tag, favorites).
+- **Inline Query Syntax & Hard Filters:** Filter inline (`dur:0-2`, `loop:true`, `fmt:wav`, `tag:impact`, `fav:true`, `"exact phrase"`, `-exclusion`) or via the collapsible filter drawer (duration range, integrated LUFS range, format, loopable only, tag, favorites).
 - **Scale-Ready Browsing & Infinite Scroll:** Browse empty queries or filtered views across 10k–100k+ file libraries with `offset`/`limit` pagination, sort modes (`Relevance`, `Name A–Z`, `Name Z–A`, `Shortest first`, `Longest first`, `Loudest first`, `Quietest first`), automatic infinite scroll, and viewport-lazy waveform rendering.
 - **Studio Auditioning Workspace:**
   - Continuous anti-aliased mirror-envelope mini-waveforms with pointer-drag scrubbing, best-window highlights on long files, and a real-time 16-band Web Audio FFT spectrum & peak-hold meter.

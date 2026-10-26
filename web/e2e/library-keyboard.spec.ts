@@ -16,7 +16,8 @@ import {
 } from "./fixtures";
 
 const searchBox = (page: Page) => page.getByLabel("Search sounds");
-const foldersButton = (page: Page) => page.getByRole("button", { name: /^Folders/ });
+const foldersButton = (page: Page) =>
+  page.locator(".sfx-workspace-tools").getByRole("button", { name: /^Folders/ });
 const selectTrigger = (page: Page, label: string) =>
   page.getByRole("button", { name: label, exact: true });
 const popup = (page: Page) => page.locator(".ds-select-pop");
@@ -199,7 +200,7 @@ test.describe("focus handling around mouse and Tab", () => {
       const r = 2;
       await row(app, r).getByRole("button", { name, exact: true }).click();
       if (name === "Find similar sounds") {
-        await expect(statusbar(app)).toContainText("Similar to");
+        await expect(app.locator(".sfx-similar-chip")).toContainText("Similar to");
       }
       await expect(app.locator(".sfx-row button:focus"), "click released focus").toHaveCount(0);
       const sel = await selectedIndex(app);
@@ -585,10 +586,10 @@ test.describe("Library (folders) modal", () => {
 });
 
 test.describe("switches and checkboxes", () => {
-  test("L18 Best offset switch is reachable by Tab and toggles with Space and Enter", async ({
+  test("L18 Play from best match switch is reachable by Tab and toggles with Space and Enter", async ({
     app,
   }) => {
-    const sw = app.getByRole("switch", { name: "Best offset" });
+    const sw = app.getByRole("switch", { name: "Play from best match" });
     await expect(sw).toBeChecked();
     await tabTo(app, sw);
     await expect(sw).toBeFocused();
@@ -649,9 +650,11 @@ test.describe("transient footer messages", () => {
     void pageErrors;
     await loadWithClock(page);
     await row(page, 0).getByRole("button", { name: "Find similar sounds" }).click();
-    await expect(statusbar(page)).toContainText("Similar to snd0.wav");
+    const chip = page.locator(".sfx-similar-chip");
+    await expect(chip).toContainText("Similar to snd0.wav");
     await page.clock.runFor(12_000);
-    await expect(statusbar(page)).toContainText("Similar to snd0.wav");
+    await expect(chip).toContainText("Similar to snd0.wav");
     await expect(page.getByRole("button", { name: "Exit similarity view" })).toBeVisible();
+    await expect(statusbar(page)).not.toContainText("Similar to");
   });
 });

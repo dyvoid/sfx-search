@@ -89,6 +89,10 @@ export interface ApiOptions {
   total: number;
   /** Simulate a running scan (e.g. to check controls disabled while indexing). */
   indexing: boolean;
+  /** Files already scanned while `indexing` is true (progress = scanDone / 10). */
+  scanDone: number;
+  /** Report a failed scan with this message (state "error"); wins over `indexing`. */
+  indexingError: string | null;
   /** Make /api/files/{id}/reveal fail with 500. */
   failReveal: boolean;
   /** Never answer /api/audio/* (keeps the Studio in its decoding state). */
@@ -109,6 +113,8 @@ export interface ApiOptions {
 export const DEFAULT_API_OPTIONS: ApiOptions = {
   total: 120,
   indexing: false,
+  scanDone: 0,
+  indexingError: null,
   failReveal: false,
   hangAudio: false,
   saveStatus: 200,
@@ -155,7 +161,12 @@ export class MockApi {
   }
 
   private indexing(): IndexingProgress {
-    return this.opts.indexing ? { ...IDLE, state: "running", to_index_count: 10 } : IDLE;
+    if (this.opts.indexingError !== null) {
+      return { ...IDLE, state: "error", error: this.opts.indexingError };
+    }
+    return this.opts.indexing
+      ? { ...IDLE, state: "running", to_index_count: 10, indexed_ok: this.opts.scanDone }
+      : IDLE;
   }
 
   private hit(i: number): SearchHit {

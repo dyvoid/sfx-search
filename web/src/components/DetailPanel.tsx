@@ -222,7 +222,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             >
               <PanelRightClose size={16} />
             </button>
-            <span className="ds-panel-title">Inspector</span>
           </div>
           <div className="sfx-inspector-head-actions">
             <button
@@ -288,7 +287,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                       1
                     )}s – ${selectedChunkRange.endS.toFixed(
                       1
-                    )}s · chunk #${selectedChunkIdx}`
+                    )}s`
                   : `${hit.duration_s.toFixed(2)}s`}
               </span>
             </div>
@@ -316,13 +315,19 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               <button
                 type="button"
                 onClick={() =>
-                  onFindSimilarChunk(hit.file_id, selectedChunkIdx, hit.filename)
+                  onFindSimilarChunk(
+                    hit.file_id,
+                    selectedChunkIdx,
+                    `${hit.filename} (${selectedChunkRange.startS.toFixed(
+                      1
+                    )}s – ${selectedChunkRange.endS.toFixed(1)}s)`
+                  )
                 }
                 className="ds-btn ds-btn-secondary ds-btn-sm"
               >
                 <Sparkles size={14} />
                 <span className="sfx-btn-label">
-                  Similar chunk #{selectedChunkIdx}
+                  Similar to this section
                 </span>
               </button>
             )}

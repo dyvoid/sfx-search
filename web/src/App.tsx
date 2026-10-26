@@ -10,7 +10,6 @@ import {
   Clock,
   Filter,
   FolderOpen,
-  FolderPlus,
   Heart,
   History,
   PanelLeftClose,
@@ -19,7 +18,6 @@ import {
   Pause,
   Play,
   Repeat,
-  RotateCcw,
   Rows3,
   Search,
   Sliders,
@@ -46,7 +44,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import { DsSelect } from "./components/DsSelect";
 import { FolderTree } from "./components/FolderTree";
 import { LibraryModal } from "./components/LibraryModal";
-import { AddFolderControl } from "./components/AddFolderControl";
+import { SetupPanel } from "./components/SetupPanel";
 import { MiniWaveform } from "./components/MiniWaveform";
 import { SpectrumMeter } from "./components/SpectrumMeter";
 import { StudioView } from "./editor/StudioView";
@@ -78,6 +76,41 @@ function extractQueryTokens(q: string): string[] {
 }
 
 const PAGE_SIZE = 50;
+
+// "Loopable only" threshold; same value the backend uses for the `loop:true` query filter.
+const LOOPABLE_MIN_SCORE = "0.6";
+
+interface FilterCheckProps {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+function FilterCheck({ label, checked, onChange }: FilterCheckProps) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      className="ds-check"
+      style={{
+        height: "var(--control-height-md)",
+        background: "none",
+        border: 0,
+        padding: 0,
+        font: "inherit",
+      }}
+      onClick={() => onChange(!checked)}
+    >
+      <div className={`ds-checkbox ${checked ? "on" : ""}`}>
+        {checked && <div className="ds-checkbox-inner" />}
+      </div>
+      <span className="ds-check-label" style={{ fontSize: "var(--font-size-sm)" }}>
+        {label}
+      </span>
+    </button>
+  );
+}
 
 function formatQuietFolder(folder: string, root: string): string {
   const normFolder = folder.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -271,6 +304,8 @@ interface ResultRowProps {
   isSelected: boolean;
   isRowPlaying: boolean;
   rowTime: number | null;
+  /** Show the match percentage (only for text and similarity results). */
+  showMatch: boolean;
   rowRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   actions: RowActions;
 }
@@ -282,6 +317,7 @@ const ResultRow = React.memo(function ResultRow({
   isSelected,
   isRowPlaying,
   rowTime,
+  showMatch,
   rowRefs,
   actions,
 }: ResultRowProps) {
@@ -393,31 +429,33 @@ const ResultRow = React.memo(function ResultRow({
 
       <div
         className="sfx-row-score"
-        title={`RRF: ${hit.rrf_score.toFixed(5)} | CLAP: ${
-          hit.clap_score !== null
-            ? hit.clap_score.toFixed(3)
-            : "—"
-        } | BM25: ${
-          hit.bm25_score !== null
-            ? hit.bm25_score.toFixed(2)
-            : "—"
-        }`}
+        title={
+          showMatch
+            ? hit.clap_score !== null
+              ? "How closely this sound matches"
+              : hit.bm25_score !== null
+              ? "Matched on the file or folder name"
+              : undefined
+            : undefined
+        }
       >
-        <span
-          style={{
-            fontSize: "var(--font-size-xs)",
-            color:
-              hit.clap_score !== null && hit.clap_score > 0.25
-                ? "var(--text-secondary)"
-                : "var(--text-tertiary)",
-          }}
-        >
-          {hit.clap_score !== null
-            ? `${(hit.clap_score * 100).toFixed(0)}%`
-            : hit.bm25_score !== null
-            ? `${hit.bm25_score.toFixed(1)} kw`
-            : "—"}
-        </span>
+        {showMatch && (
+          <span
+            style={{
+              fontSize: "var(--font-size-xs)",
+              color:
+                hit.clap_score !== null && hit.clap_score > 0.25
+                  ? "var(--text-secondary)"
+                  : "var(--text-tertiary)",
+            }}
+          >
+            {hit.clap_score !== null
+              ? `${(hit.clap_score * 100).toFixed(0)}%`
+              : hit.bm25_score !== null
+              ? "name match"
+              : "—"}
+          </span>
+        )}
       </div>
 
       <div className="sfx-row-actions">
@@ -486,7 +524,10 @@ export const App: React.FC = () => {
   const [filters, setFilters] = useState<FilterState>(() => {
     try {
       const saved = localStorage.getItem(LS_FILTERS_KEY);
-      return saved ? { ...DEFAULT_FILTERS, ...JSON.parse(saved) } : DEFAULT_FILTERS;
+      // `root` has no control any more; never restore a hidden filter.
+      return saved
+        ? { ...DEFAULT_FILTERS, ...JSON.parse(saved), root: "" }
+        : DEFAULT_FILTERS;
     } catch {
       return DEFAULT_FILTERS;
     }
@@ -532,6 +573,10 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
   const [isSimilarityView, setIsSimilarityView] = useState<boolean>(false);
+  // What the similarity view is "similar to" (shown as a chip in the search bar).
+  const [similarLabel, setSimilarLabel] = useState<string>("");
+  // The query behind the current results ("" = browsing); drives the match column.
+  const [committedQuery, setCommittedQuery] = useState<string>("");
   const [statusLabel, setStatusLabel] = useState<string>("");
 
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
@@ -569,6 +614,13 @@ export const App: React.FC = () => {
   } | null>(null);
   const resultsRef = useRef<SearchHit[]>([]);
   const lastTimeRef = useRef<number>(-1);
+  const filterTimerRef = useRef<number | null>(null);
+  const historyTimerRef = useRef<number | null>(null);
+  // In the similarity view the search box is empty; searches triggered from
+  // sort/filters/folders keep the query of the results the user came from.
+  const baseQuery = isSimilarityView
+    ? committedSearchRef.current?.q ?? ""
+    : query;
 
   useEffect(() => {
     resultsRef.current = results;
@@ -631,6 +683,8 @@ export const App: React.FC = () => {
         userSearchReqRef.current = reqId;
         setLoading(true);
         setIsSimilarityView(false);
+        // Leaving the similarity view: put the box back to the query we return to.
+        setQuery((prev) => (prev === "" ? q : prev));
         setStatusLabel("");
       }
       try {
@@ -650,6 +704,7 @@ export const App: React.FC = () => {
           );
         } else {
           committedSearchRef.current = { q, f, s };
+          setCommittedQuery(q.trim());
           paginationFailedRef.current = false;
           setSearchSeq((seq) => seq + 1);
           setSelectedIndex(0);
@@ -1114,6 +1169,23 @@ export const App: React.FC = () => {
     }
   };
 
+  const showSimilarResults = (label: string) => {
+    setIsSimilarityView(true);
+    setSimilarLabel(label);
+    // The box shows only the chip; the previous query is restored on exit.
+    setQuery("");
+    setSearchSeq((s) => s + 1);
+    setSelectedIndex(0);
+    resultsListRef.current?.scrollTo({ top: 0 });
+    setStatusLabel("");
+  };
+
+  const exitSimilarity = () => {
+    const committed = committedSearchRef.current;
+    setStatusLabel("");
+    void runSearch(committed?.q ?? "", committed?.f, committed?.s);
+  };
+
   const handleFindSimilarFile = async (fileId: string, filename?: string) => {
     const reqId = ++searchReqRef.current;
     userSearchReqRef.current = reqId;
@@ -1125,11 +1197,7 @@ export const App: React.FC = () => {
       }
       setResults(hits);
       setTotalResults(hits.length);
-      setIsSimilarityView(true);
-      setSearchSeq((s) => s + 1);
-      setSelectedIndex(0);
-      resultsListRef.current?.scrollTo({ top: 0 });
-      setStatusLabel(`Similar to ${filename ?? fileId.slice(0, 8)}`);
+      showSimilarResults(`Similar to ${filename ?? fileId.slice(0, 8)}`);
     } catch (err) {
       if (reqId === searchReqRef.current) {
         setStatusLabel(err instanceof Error ? err.message : "Similarity search failed");
@@ -1157,13 +1225,7 @@ export const App: React.FC = () => {
       }
       setResults(hits);
       setTotalResults(hits.length);
-      setIsSimilarityView(true);
-      setSearchSeq((s) => s + 1);
-      setSelectedIndex(0);
-      resultsListRef.current?.scrollTo({ top: 0 });
-      setStatusLabel(
-        `Similar to ${filename ?? fileId.slice(0, 8)} · chunk #${chunkIdx}`
-      );
+      showSimilarResults(`Similar to ${filename ?? fileId.slice(0, 8)}`);
     } catch (err) {
       if (reqId === searchReqRef.current) {
         setStatusLabel(err instanceof Error ? err.message : "Similarity search failed");
@@ -1180,7 +1242,7 @@ export const App: React.FC = () => {
     const reqId = ++searchReqRef.current;
     userSearchReqRef.current = reqId;
     setLoading(true);
-    setStatusLabel(`Embedding reference '${file.name}'`);
+    setStatusLabel(`Finding sounds similar to '${file.name}'`);
     try {
       const hits = await findSimilarByUpload(file, 40);
       if (reqId !== searchReqRef.current) {
@@ -1188,11 +1250,7 @@ export const App: React.FC = () => {
       }
       setResults(hits);
       setTotalResults(hits.length);
-      setIsSimilarityView(true);
-      setSearchSeq((s) => s + 1);
-      setSelectedIndex(0);
-      resultsListRef.current?.scrollTo({ top: 0 });
-      setStatusLabel(`Similar to '${file.name}'`);
+      showSimilarResults(`Similar to ${file.name}`);
     } catch (err) {
       if (reqId === searchReqRef.current) {
         setStatusLabel(err instanceof Error ? err.message : "Upload failed");
@@ -1231,16 +1289,43 @@ export const App: React.FC = () => {
       }
       const next = { ...filters, folders: [...sel].sort() };
       setFilters(next);
-      runSearch(query, next, sort);
+      runSearch(baseQuery, next, sort);
     },
-    [filters, query, sort, runSearch]
+    [filters, baseQuery, sort, runSearch]
   );
 
   const clearFolderFilters = useCallback(() => {
     const next = { ...filters, folders: [] };
     setFilters(next);
-    runSearch(query, next, sort);
-  }, [filters, query, sort, runSearch]);
+    runSearch(baseQuery, next, sort);
+  }, [filters, baseQuery, sort, runSearch]);
+
+  // Filters apply as soon as they change; typed numbers wait for a pause.
+  const changeFilters = (patch: Partial<FilterState>, debounced = false) => {
+    const next = { ...filters, ...patch };
+    setFilters(next);
+    if (filterTimerRef.current !== null) {
+      window.clearTimeout(filterTimerRef.current);
+      filterTimerRef.current = null;
+    }
+    if (debounced) {
+      filterTimerRef.current = window.setTimeout(() => {
+        filterTimerRef.current = null;
+        void runSearch(baseQuery, next, sort);
+      }, 400);
+    } else {
+      void runSearch(baseQuery, next, sort);
+    }
+  };
+
+  useEffect(
+    () => () => {
+      if (filterTimerRef.current !== null) {
+        window.clearTimeout(filterTimerRef.current);
+      }
+    },
+    []
+  );
 
   const handlePaneDragDown =
     (side: "l" | "r") => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1381,7 +1466,6 @@ export const App: React.FC = () => {
     filters.minLufs,
     filters.maxLufs,
     filters.format,
-    filters.root,
     filters.minLoopScore,
     filters.userTag,
     filters.favoritesOnly ? "fav" : "",
@@ -1519,586 +1603,483 @@ export const App: React.FC = () => {
         />
       ) : (
         <>
-          {/* Top Two-Tier Studio Header: Row 1 = Transport & Utilities, Row 2 = Hero Search Command Bar */}
+          {/* Top bar: brand, playback options, folders. Search row only once there is something to search. */}
           <header className="sfx-toolbar">
-            {/* Tier 1: Brand + Digital Transport Readout + Workspace Controls */}
             <div className="sfx-topbar">
               <div className="sfx-brand">
                 <div className="sfx-brand-mark">
                   <Volume2 size={15} />
                 </div>
                 <span className="sfx-brand-title">sfx-search</span>
-                <span className="sfx-brand-count ds-tnum">
-                  {stats ? `${stats.ok_files.toLocaleString()} sounds` : ""}
-                </span>
-              </div>
-
-              <div className="sfx-transport-strip" aria-label="Playback transport">
-                <span className="sfx-readout-val warm">
-                  {(() => {
-                    const activeHit =
-                      (isPlaying && playingHit) || selectedHit || playingHit;
-                    if (!activeHit) {
-                      return "00.00s / 00.00s";
-                    }
-                    const pos =
-                      playingFileId === activeHit.file_id
-                        ? currentTimeS
-                        : activeHit.best_offset_s;
-                    return `${pos.toFixed(2).padStart(5, "0")}s / ${activeHit.duration_s
-                      .toFixed(2)
-                      .padStart(5, "0")}s`;
-                  })()}
-                </span>
-
-                <SpectrumMeter
-                  audioElement={audioRef.current}
-                  isPlaying={isPlaying}
-                />
-
-                <div className="sfx-divider-v" />
-
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={startAtBestOffset}
-                  className="ds-switch-item"
-                  style={{
-                    background: "none",
-                    border: 0,
-                    padding: 0,
-                    font: "inherit",
-                  }}
-                  onClick={() => setStartAtBestOffset((prev) => !prev)}
-                  title="Start playback at best-matching 10s window offset"
-                >
-                  <div className={`ds-switch-track ${startAtBestOffset ? "on" : ""}`}>
-                    <div className="ds-switch-thumb" />
-                  </div>
-                  <span
-                    className="ds-switch-label"
-                    style={{
-                      fontSize: "var(--font-size-xs)",
-                      color: "var(--text-secondary)",
-                    }}
-                  >
-                    Best offset
+                {hasIndexedFiles && stats && (
+                  <span className="sfx-brand-count ds-tnum">
+                    {`${stats.ok_files.toLocaleString()} sounds`}
                   </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setLoopEnabled((prev) => !prev)}
-                  className={`ds-btn ds-btn-sm ${
-                    loopEnabled ? "ds-btn-primary" : "ds-btn-ghost"
-                  }`}
-                  aria-pressed={loopEnabled}
-                  title="Loop playback"
-                >
-                  <Repeat size={13} />
-                  Loop
-                </button>
+                )}
               </div>
+
+              {hasIndexedFiles && (
+                <div className="sfx-transport-strip" aria-label="Playback options">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={startAtBestOffset}
+                    className="ds-switch-item"
+                    style={{
+                      background: "none",
+                      border: 0,
+                      padding: 0,
+                      font: "inherit",
+                    }}
+                    onClick={() => setStartAtBestOffset((prev) => !prev)}
+                    title="Start playback where the sound best matches your search"
+                  >
+                    <div className={`ds-switch-track ${startAtBestOffset ? "on" : ""}`}>
+                      <div className="ds-switch-thumb" />
+                    </div>
+                    <span
+                      className="ds-switch-label"
+                      style={{
+                        fontSize: "var(--font-size-xs)",
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      Play from best match
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLoopEnabled((prev) => !prev)}
+                    className={`ds-btn ds-btn-sm ${
+                      loopEnabled ? "ds-btn-primary" : "ds-btn-ghost"
+                    }`}
+                    aria-pressed={loopEnabled}
+                    title="Repeat playback"
+                  >
+                    <Repeat size={13} />
+                    Repeat
+                  </button>
+
+                  {isPlaying && (
+                    <>
+                      {playingHit && (
+                        <span className="sfx-readout-val warm">
+                          {`${currentTimeS.toFixed(2).padStart(5, "0")}s / ${playingHit.duration_s
+                            .toFixed(2)
+                            .padStart(5, "0")}s`}
+                        </span>
+                      )}
+                      <SpectrumMeter
+                        audioElement={audioRef.current}
+                        isPlaying={isPlaying}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
 
               <div className="sfx-workspace-tools">
                 <button
                   type="button"
-                  onClick={() => openEditorForHit(selectedIndex)}
-                  className="ds-btn ds-btn-primary ds-btn-sm"
-                  title="Open Audio Editor (E)"
-                >
-                  <Sliders size={14} />
-                  Edit Audio
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => setLibraryModalOpen(true)}
                   className="ds-btn ds-btn-secondary ds-btn-sm"
-                  title="Configure scanned library folders"
+                  title="Manage your library folders"
                 >
                   <FolderOpen size={14} />
-                  Folders ({roots.length})
+                  {roots.length > 0 ? `Folders (${roots.length})` : "Folders"}
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setCompactDensity((prev) => !prev)}
-                  className="sfx-icon-btn"
-                  style={{
-                    color: compactDensity ? "var(--primary-400)" : undefined,
-                  }}
-                  aria-pressed={compactDensity}
-                  aria-label={
-                    compactDensity
-                      ? "Switch to spacious density"
-                      : "Switch to compact density"
-                  }
-                  title={
-                    compactDensity
-                      ? "Switch to spacious density"
-                      : "Switch to compact density"
-                  }
-                >
-                  <Rows3 size={15} />
-                </button>
-
+                {hasIndexedFiles && (
+                  <button
+                    type="button"
+                    onClick={() => setCompactDensity((prev) => !prev)}
+                    className="sfx-icon-btn"
+                    style={{
+                      color: compactDensity ? "var(--primary-400)" : undefined,
+                    }}
+                    aria-pressed={compactDensity}
+                    aria-label={
+                      compactDensity
+                        ? "Switch to spacious density"
+                        : "Switch to compact density"
+                    }
+                    title={
+                      compactDensity
+                        ? "Switch to spacious density"
+                        : "Switch to compact density"
+                    }
+                  >
+                    <Rows3 size={15} />
+                  </button>
+                )}
               </div>
             </div>
 
-        {/* Tier 2: Full-Width Hero Search Command Bar */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            setShowHistory(false);
-            if (hasIndexedFiles) {
-              runSearch();
-            }
-          }}
-          className="sfx-command-row"
-        >
-          <div className="sfx-search-box-wrap">
-            <div
-              className={`sfx-search-hero-box ${
-                !hasIndexedFiles ? "disabled" : ""
-              }`}
-            >
-              <Search size={17} className="sfx-search-hero-icon" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                aria-label="Search sounds"
-                disabled={!hasIndexedFiles}
-                value={query}
-                onFocus={() => setShowHistory(true)}
-                onBlur={() => setTimeout(() => setShowHistory(false), 180)}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={
-                  hasIndexedFiles
-                    ? 'Search sounds by description ("heavy wooden door slam, reverb") or operators (dur:0-2 loop:true -voice)...'
-                    : "Search unlocks once your first sound file is indexed"
-                }
-                className="sfx-search-hero-input"
-              />
-              {extractQueryTokens(query).map((tok) => (
-                <span
-                  key={tok}
-                  className="ds-badge ds-badge-accent ds-tnum"
-                  style={{ flexShrink: 0 }}
-                  title="Active inline query filter"
-                >
-                  {tok}
-                </span>
-              ))}
-              {!query && hasIndexedFiles && (
-                <kbd
-                  className="sfx-kbd"
-                  title="Press / anywhere to focus search"
-                  style={{ flexShrink: 0 }}
-                >
-                  /
-                </kbd>
-              )}
-              {history.length > 0 && hasIndexedFiles && (
-                <button
-                  type="button"
-                  onClick={() => setShowHistory((prev) => !prev)}
-                  className="sfx-icon-btn"
-                  aria-label="Recent queries and syntax helpers"
-                  title="Recent queries & syntax helpers"
-                >
-                  <History size={14} />
-                </button>
-              )}
-            </div>
-
-            {showHistory && hasIndexedFiles && (
-              <div
-                className="ds-menu"
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  top: "calc(100% + 6px)",
-                  zIndex: 50,
+            {hasIndexedFiles && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  setShowHistory(false);
+                  if (isSimilarityView && !query.trim()) {
+                    exitSimilarity();
+                    return;
+                  }
+                  runSearch();
                 }}
+                className="sfx-command-row"
               >
-                <div className="ds-menu-header">Quick syntax operators</div>
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 6,
-                    padding: "4px 10px 8px",
-                  }}
-                >
-                  {[
-                    { token: "dur:0-2", desc: "Short (<2s)" },
-                    { token: "dur:5-30", desc: "Long (5–30s)" },
-                    { token: "loop:true", desc: "Seamless loop" },
-                    { token: "fmt:wav", desc: "WAV only" },
-                    { token: "-voice", desc: "Exclude term" },
-                  ].map((op) => (
-                    <button
-                      key={op.token}
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        const nextQ = `${query.trim()} ${op.token}`.trim();
-                        setQuery(nextQ);
-                        searchInputRef.current?.focus();
+                <div className="sfx-search-box-wrap">
+                  <div className="sfx-search-hero-box">
+                    <Search size={17} className="sfx-search-hero-icon" />
+                    {isSimilarityView && similarLabel && (
+                      <span className="sfx-similar-chip">
+                        <span className="sfx-similar-chip-label" title={similarLabel}>
+                          {similarLabel}
+                        </span>
+                        <button
+                          type="button"
+                          className="sfx-similar-chip-x"
+                          aria-label="Exit similarity view"
+                          title="Back to the previous results"
+                          onClick={exitSimilarity}
+                        >
+                          <X size={13} />
+                        </button>
+                      </span>
+                    )}
+                    <input
+                      ref={searchInputRef}
+                      type="text"
+                      aria-label="Search sounds"
+                      value={query}
+                      onFocus={() => {
+                        if (historyTimerRef.current !== null) {
+                          window.clearTimeout(historyTimerRef.current);
+                          historyTimerRef.current = null;
+                        }
+                        setShowHistory(true);
                       }}
-                      className="ds-badge ds-badge-neutral"
-                      style={{
-                        cursor: "pointer",
-                        border: "var(--border-width) solid var(--border-subtle)",
-                      }}
-                      title={op.desc}
-                    >
-                      {op.token}
-                    </button>
-                  ))}
-                </div>
-                {history.length > 0 && (
-                  <>
-                    <div className="ds-menu-sep" />
-                    <div className="ds-menu-header">Recent queries</div>
-                    {history.map((hItem) => (
-                      <button
-                        key={hItem}
-                        type="button"
-                        onMouseDown={() => {
-                          setQuery(hItem);
+                      onBlur={() => {
+                        historyTimerRef.current = window.setTimeout(() => {
+                          historyTimerRef.current = null;
                           setShowHistory(false);
-                          runSearch(hItem);
-                        }}
-                        className="ds-menu-item"
+                        }, 180);
+                      }}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search sounds"
+                      className="sfx-search-hero-input"
+                    />
+                    {extractQueryTokens(query).map((tok) => (
+                      <span
+                        key={tok}
+                        className="ds-badge ds-badge-accent ds-tnum"
+                        style={{ flexShrink: 0 }}
+                        title="Active inline query filter"
                       >
-                        <Clock size={13} />
-                        <span className="l">{hItem}</span>
-                      </button>
+                        {tok}
+                      </span>
                     ))}
-                  </>
+                    {!query && (
+                      <kbd
+                        className="sfx-kbd"
+                        title="Press / anywhere to focus search"
+                        style={{ flexShrink: 0 }}
+                      >
+                        /
+                      </kbd>
+                    )}
+                    {history.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowHistory((prev) => !prev)}
+                        className="sfx-icon-btn"
+                        aria-label="Recent searches"
+                        title="Recent searches"
+                      >
+                        <History size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {showHistory && history.length > 0 && (
+                    <div
+                      className="ds-menu"
+                      style={{
+                        position: "absolute",
+                        left: 0,
+                        right: 0,
+                        top: "calc(100% + 6px)",
+                        zIndex: 50,
+                      }}
+                    >
+                      <div className="ds-menu-header">Recent searches</div>
+                      {history.map((hItem) => (
+                        <button
+                          key={hItem}
+                          type="button"
+                          onMouseDown={() => {
+                            setQuery(hItem);
+                            setShowHistory(false);
+                            runSearch(hItem);
+                          }}
+                          className="ds-menu-item"
+                        >
+                          <Clock size={13} />
+                          <span className="l">{hItem}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="sfx-command-actions">
+                  <DsSelect
+                    value={sort}
+                    width={154}
+                    height="var(--control-height-lg)"
+                    ariaLabel="Sort order"
+                    options={[
+                      { value: "relevance", label: "Sort: Relevance" },
+                      { value: "name_asc", label: "Name (A–Z)" },
+                      { value: "name_desc", label: "Name (Z–A)" },
+                      { value: "duration_asc", label: "Shortest first" },
+                      { value: "duration_desc", label: "Longest first" },
+                      { value: "lufs_desc", label: "Loudest first" },
+                      { value: "lufs_asc", label: "Quietest first" },
+                    ]}
+                    onChange={(val) => {
+                      const nextSort = val as SortMode;
+                      setSort(nextSort);
+                      runSearch(baseQuery, filters, nextSort);
+                    }}
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="ds-btn ds-btn-primary sfx-btn-lg"
+                  >
+                    <Search size={15} />
+                    {loading ? "Searching" : "Search"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowFilters((prev) => !prev)}
+                    className={`ds-btn sfx-btn-lg ${
+                      showFilters || activeFilterCount > 0
+                        ? "ds-btn-secondary"
+                        : "ds-btn-ghost"
+                    }`}
+                  >
+                    <Filter size={14} />
+                    Filters
+                    {activeFilterCount > 0 && (
+                      <span className="ds-badge ds-badge-accent ds-tnum">
+                        {activeFilterCount}
+                      </span>
+                    )}
+                  </button>
+
+                  <label
+                    className="ds-btn ds-btn-secondary sfx-btn-lg"
+                    title="Upload or drop a reference audio file to find similar sounds"
+                  >
+                    <Upload size={14} />
+                    Match audio
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) {
+                          handleDropFile(f);
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
+              </form>
+            )}
+
+            {/* Collapsible filter drawer: changes apply immediately */}
+            {showFilters && hasIndexedFiles && (
+              <div className="sfx-filter-drawer">
+                <div className="sfx-filter-grid">
+                  <div className="ds-input-field">
+                    <label className="ds-microlabel">Duration (s)</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div className="ds-input-box" style={{ width: 76 }}>
+                        <input
+                          type="number"
+                          step="0.5"
+                          aria-label="Minimum duration"
+                          placeholder="Min"
+                          value={filters.minDuration}
+                          onChange={(e) =>
+                            changeFilters({ minDuration: e.target.value }, true)
+                          }
+                          className="ds-input ds-tnum"
+                        />
+                      </div>
+                      <span style={{ color: "var(--text-tertiary)" }}>–</span>
+                      <div className="ds-input-box" style={{ width: 76 }}>
+                        <input
+                          type="number"
+                          step="0.5"
+                          aria-label="Maximum duration"
+                          placeholder="Max"
+                          value={filters.maxDuration}
+                          onChange={(e) =>
+                            changeFilters({ maxDuration: e.target.value }, true)
+                          }
+                          className="ds-input ds-tnum"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="ds-input-field">
+                    <label className="ds-microlabel">Loudness (LUFS)</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <div className="ds-input-box" style={{ width: 76 }}>
+                        <input
+                          type="number"
+                          step="1"
+                          aria-label="Minimum loudness"
+                          placeholder="Min"
+                          value={filters.minLufs}
+                          onChange={(e) =>
+                            changeFilters({ minLufs: e.target.value }, true)
+                          }
+                          className="ds-input ds-tnum"
+                        />
+                      </div>
+                      <span style={{ color: "var(--text-tertiary)" }}>–</span>
+                      <div className="ds-input-box" style={{ width: 76 }}>
+                        <input
+                          type="number"
+                          step="1"
+                          aria-label="Maximum loudness"
+                          placeholder="Max"
+                          value={filters.maxLufs}
+                          onChange={(e) =>
+                            changeFilters({ maxLufs: e.target.value }, true)
+                          }
+                          className="ds-input ds-tnum"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="ds-input-field">
+                    <label className="ds-microlabel">Format</label>
+                    <DsSelect
+                      value={filters.format}
+                      width={128}
+                      ariaLabel="Audio format"
+                      options={[
+                        { value: "", label: "All formats" },
+                        ...(
+                          availFilters?.formats || ["wav", "flac", "mp3", "ogg", "aiff"]
+                        ).map((fmt) => ({
+                          value: fmt,
+                          label: fmt.toUpperCase(),
+                        })),
+                      ]}
+                      onChange={(val) => changeFilters({ format: val })}
+                    />
+                  </div>
+
+                  <div className="ds-input-field">
+                    <label className="ds-microlabel">Tag</label>
+                    <DsSelect
+                      value={filters.userTag}
+                      width={130}
+                      ariaLabel="Tag"
+                      options={[
+                        { value: "", label: "Any tag" },
+                        ...(availFilters?.user_tags || []).map((t) => ({
+                          value: t,
+                          label: `#${t}`,
+                        })),
+                      ]}
+                      onChange={(val) => changeFilters({ userTag: val })}
+                    />
+                  </div>
+
+                  <FilterCheck
+                    label="Favorites only"
+                    checked={filters.favoritesOnly}
+                    onChange={(on) => changeFilters({ favoritesOnly: on })}
+                  />
+                  <FilterCheck
+                    label="Loopable only"
+                    checked={filters.minLoopScore !== ""}
+                    onChange={(on) =>
+                      changeFilters({ minLoopScore: on ? LOOPABLE_MIN_SCORE : "" })
+                    }
+                  />
+                </div>
+
+                {activeFilterCount > 0 && (
+                  <div className="sfx-filter-actions">
+                    <button
+                      type="button"
+                      onClick={() => changeFilters({ ...DEFAULT_FILTERS })}
+                      className="ds-btn ds-btn-ghost ds-btn-sm"
+                    >
+                      Clear filters
+                    </button>
+                  </div>
                 )}
               </div>
             )}
-          </div>
+          </header>
 
-          <div className="sfx-command-actions">
-            <DsSelect
-              disabled={!hasIndexedFiles}
-              value={sort}
-              width={154}
-              height="var(--control-height-lg)"
-              ariaLabel="Sort order"
-              options={[
-                { value: "relevance", label: "Sort: Relevance" },
-                { value: "name_asc", label: "Name (A–Z)" },
-                { value: "name_desc", label: "Name (Z–A)" },
-                { value: "duration_asc", label: "Shortest first" },
-                { value: "duration_desc", label: "Longest first" },
-                { value: "lufs_desc", label: "Loudest first" },
-                { value: "lufs_asc", label: "Quietest first" },
-              ]}
-              onChange={(val) => {
-                const nextSort = val as SortMode;
-                setSort(nextSort);
-                if (hasIndexedFiles) {
-                  runSearch(query, filters, nextSort);
-                }
-              }}
-            />
-
-            <button
-              type="submit"
-              disabled={!hasIndexedFiles || loading}
-              className="ds-btn ds-btn-primary sfx-btn-lg"
-            >
-              <Search size={15} />
-              {loading ? "Searching" : "Search"}
-            </button>
-
-            <button
-              type="button"
-              disabled={!hasIndexedFiles}
-              onClick={() => setShowFilters((prev) => !prev)}
-              className={`ds-btn sfx-btn-lg ${
-                showFilters || activeFilterCount > 0
-                  ? "ds-btn-secondary"
-                  : "ds-btn-ghost"
-              }`}
-            >
-              <Filter size={14} />
-              Filters
-              {activeFilterCount > 0 && (
-                <span className="ds-badge ds-badge-accent ds-tnum">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-
-            <label
-              className={`ds-btn ds-btn-secondary sfx-btn-lg ${
-                !hasIndexedFiles ? "disabled" : ""
-              }`}
-              style={{
-                pointerEvents: hasIndexedFiles ? "auto" : "none",
-                opacity: hasIndexedFiles ? 1 : 0.5,
-              }}
-              title="Upload or drop a reference audio file to find similar sounds"
-            >
-              <Upload size={14} />
-              Match audio
-              <input
-                type="file"
-                accept="audio/*"
-                style={{ display: "none" }}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (f) {
-                    handleDropFile(f);
-                  }
-                }}
-              />
-            </label>
-          </div>
-        </form>
-
-        {/* Collapsible Filter Drawer */}
-        {showFilters && hasIndexedFiles && (
-          <div className="sfx-filter-drawer">
-            <div className="sfx-filter-grid">
-              <div className="ds-input-field">
-                <label className="ds-microlabel">Duration (s)</label>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <div className="ds-input-box" style={{ width: 76 }}>
-                    <input
-                      type="number"
-                      step="0.5"
-                      placeholder="Min"
-                      value={filters.minDuration}
-                      onChange={(e) =>
-                        setFilters({ ...filters, minDuration: e.target.value })
-                      }
-                      className="ds-input ds-tnum"
-                    />
+          {/* Background scan progress (once the library has sounds; the first scan is shown by the setup screen) */}
+          {isIndexing && indexing && hasIndexedFiles && (
+            <div className="sfx-index-banner">
+              <span className="ds-spinner" style={{ width: 14, height: 14 }} />
+              <div style={{ flex: 1 }}>
+                <div className="ds-progress-row">
+                  <div className="ds-progress-label">
+                    <span style={{ color: "var(--text-primary)" }}>
+                      Scanning your folders:{" "}
+                      <strong className="ds-tnum">
+                        {doneFiles} / {totalToIndex || "…"}
+                      </strong>{" "}
+                      files
+                    </span>
+                    <span className="ds-progress-pct ds-tnum">
+                      {indexing.files_per_min > 0
+                        ? `${indexing.files_per_min.toFixed(0)} files/min · ETA ${indexing.eta_seconds.toFixed(
+                            0
+                          )}s · `
+                        : ""}
+                      {progressPct}%
+                    </span>
                   </div>
-                  <span style={{ color: "var(--text-tertiary)" }}>–</span>
-                  <div className="ds-input-box" style={{ width: 76 }}>
-                    <input
-                      type="number"
-                      step="0.5"
-                      placeholder="Max"
-                      value={filters.maxDuration}
-                      onChange={(e) =>
-                        setFilters({ ...filters, maxDuration: e.target.value })
-                      }
-                      className="ds-input ds-tnum"
+                  <div className="ds-progress-track">
+                    <div
+                      className="ds-progress-fill"
+                      style={{ width: `${Math.max(3, progressPct)}%` }}
                     />
                   </div>
                 </div>
               </div>
-
-              <div className="ds-input-field">
-                <label className="ds-microlabel">Loudness (LUFS)</label>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <div className="ds-input-box" style={{ width: 76 }}>
-                    <input
-                      type="number"
-                      step="1"
-                      placeholder="-40"
-                      value={filters.minLufs}
-                      onChange={(e) =>
-                        setFilters({ ...filters, minLufs: e.target.value })
-                      }
-                      className="ds-input ds-tnum"
-                    />
-                  </div>
-                  <span style={{ color: "var(--text-tertiary)" }}>–</span>
-                  <div className="ds-input-box" style={{ width: 76 }}>
-                    <input
-                      type="number"
-                      step="1"
-                      placeholder="0"
-                      value={filters.maxLufs}
-                      onChange={(e) =>
-                        setFilters({ ...filters, maxLufs: e.target.value })
-                      }
-                      className="ds-input ds-tnum"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="ds-input-field">
-                <label className="ds-microlabel">Format</label>
-                <DsSelect
-                  value={filters.format}
-                  width={128}
-                  ariaLabel="Audio format"
-                  options={[
-                    { value: "", label: "All formats" },
-                    ...(
-                      availFilters?.formats || ["wav", "flac", "mp3", "ogg", "aiff"]
-                    ).map((fmt) => ({
-                      value: fmt,
-                      label: fmt.toUpperCase(),
-                    })),
-                  ]}
-                  onChange={(val) => setFilters({ ...filters, format: val })}
-                />
-              </div>
-
-              <div className="ds-input-field">
-                <label className="ds-microlabel">Folder root</label>
-                <DsSelect
-                  value={filters.root}
-                  width={190}
-                  ariaLabel="Folder root"
-                  options={[
-                    { value: "", label: "All roots" },
-                    ...(availFilters?.roots || []).map((rt) => ({
-                      value: rt,
-                      label: rt,
-                    })),
-                  ]}
-                  onChange={(val) => setFilters({ ...filters, root: val })}
-                />
-              </div>
-
-              <div className="ds-input-field">
-                <label className="ds-microlabel">Min loop score</label>
-                <div className="ds-input-box" style={{ width: 90 }}>
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="0"
-                    max="1"
-                    placeholder="0.0–1.0"
-                    value={filters.minLoopScore}
-                    onChange={(e) =>
-                      setFilters({ ...filters, minLoopScore: e.target.value })
-                    }
-                    className="ds-input ds-tnum"
-                  />
-                </div>
-              </div>
-
-              <div className="ds-input-field">
-                <label className="ds-microlabel">User tag</label>
-                <DsSelect
-                  value={filters.userTag}
-                  width={130}
-                  ariaLabel="User tag"
-                  options={[
-                    { value: "", label: "Any tag" },
-                    ...(availFilters?.user_tags || []).map((t) => ({
-                      value: t,
-                      label: `#${t}`,
-                    })),
-                  ]}
-                  onChange={(val) => setFilters({ ...filters, userTag: val })}
-                />
-              </div>
-            </div>
-
-            <div className="sfx-filter-actions">
               <button
                 type="button"
-                role="checkbox"
-                aria-checked={filters.favoritesOnly}
-                className="ds-check"
-                style={{
-                  height: "var(--control-height-md)",
-                  background: "none",
-                  border: 0,
-                  padding: 0,
-                  font: "inherit",
-                }}
-                onClick={() =>
-                  setFilters({ ...filters, favoritesOnly: !filters.favoritesOnly })
-                }
-              >
-                <div
-                  className={`ds-checkbox ${filters.favoritesOnly ? "on" : ""}`}
-                >
-                  {filters.favoritesOnly && <div className="ds-checkbox-inner" />}
-                </div>
-                <span
-                  className="ds-check-label"
-                  style={{ fontSize: "var(--font-size-sm)" }}
-                >
-                  Favorites only
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => runSearch(query, filters)}
-                className="ds-btn ds-btn-primary ds-btn-sm"
-              >
-                Apply
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setFilters(DEFAULT_FILTERS);
-                  runSearch(query, DEFAULT_FILTERS);
-                }}
+                onClick={() => setLibraryModalOpen(true)}
                 className="ds-btn ds-btn-ghost ds-btn-sm"
               >
-                <RotateCcw size={13} />
-                Reset
+                Folders
               </button>
             </div>
-          </div>
-        )}
-      </header>
-
-      {/* Background Indexing Progress Banner */}
-      {isIndexing && indexing && (
-        <div className="sfx-index-banner">
-          <span className="ds-spinner" style={{ width: 14, height: 14 }} />
-          <div style={{ flex: 1 }}>
-            <div className="ds-progress-row">
-              <div className="ds-progress-label">
-                <span style={{ color: "var(--text-primary)" }}>
-                  Scanning library in background:{" "}
-                  <strong className="ds-tnum">
-                    {doneFiles} / {totalToIndex || "scanning..."}
-                  </strong>{" "}
-                  files indexed
-                  {!hasIndexedFiles &&
-                    " — search unlocks as soon as the first file finishes"}
-                </span>
-                <span className="ds-progress-pct ds-tnum">
-                  {indexing.files_per_min > 0
-                    ? `${indexing.files_per_min.toFixed(0)} files/min · ETA ${indexing.eta_seconds.toFixed(
-                        0
-                      )}s · `
-                    : ""}
-                  {progressPct}%
-                </span>
-              </div>
-              <div className="ds-progress-track">
-                <div
-                  className="ds-progress-fill"
-                  style={{ width: `${Math.max(3, progressPct)}%` }}
-                />
-              </div>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setLibraryModalOpen(true)}
-            className="ds-btn ds-btn-ghost ds-btn-sm"
-          >
-            Details
-          </button>
-        </div>
-      )}
+          )}
 
       {/* Missing Library Roots Warning */}
       {missingRoots.length > 0 && (
@@ -2108,15 +2089,16 @@ export const App: React.FC = () => {
             {missingRoots.length === 1
               ? "Library folder not found on disk: "
               : "Library folders not found on disk: "}
-            {missingRoots.join(" · ")}. Files may have moved — indexed results
-            can be stale.
+            {missingRoots.join(" · ")}.
+            {hasIndexedFiles &&
+              " Files may have moved, so results can be out of date."}
           </span>
           <button
             type="button"
             onClick={() => void handleRescan(false)}
             className="ds-btn ds-btn-ghost ds-btn-sm"
           >
-            Rescan
+            Scan for changes
           </button>
           <button
             type="button"
@@ -2205,22 +2187,6 @@ export const App: React.FC = () => {
           </button>
         )}
         <main className="sfx-main">
-          {/* Sticky Column Header when files exist */}
-          {hasIndexedFiles && (
-            <div className="sfx-list-head">
-              <span />
-              <span>Sound</span>
-              <span className="col-wave">Waveform</span>
-              <span className="col-specs" style={{ textAlign: "right" }}>
-                Duration
-              </span>
-              <span className="col-match" style={{ textAlign: "right" }}>
-                Match
-              </span>
-              <span />
-            </div>
-          )}
-
           {/* Content: Onboarding Empty State vs Results List */}
           <div
             ref={resultsListRef}
@@ -2229,105 +2195,19 @@ export const App: React.FC = () => {
             aria-label={results.length > 0 ? "Search results" : undefined}
           >
             {!hasIndexedFiles ? (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minHeight: "100%",
-                  padding: "var(--space-8)",
-                }}
-              >
-                <div style={{ width: 540, maxWidth: "100%" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      paddingBottom: "var(--space-3)",
-                      marginBottom: "var(--space-4)",
-                      borderBottom: "var(--border-width) solid var(--border-subtle)",
-                    }}
-                  >
-                    <span className="ds-panel-title">Library setup</span>
-                    {isIndexing && (
-                      <span className="ds-badge ds-badge-accent">
-                        Scanning
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    <div style={{ marginBottom: "var(--space-5)" }}>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "var(--space-2)",
-                          marginBottom: "var(--space-2)",
-                        }}
-                      >
-                        {isIndexing ? (
-                          <span className="ds-spinner" />
-                        ) : (
-                          <FolderPlus
-                            size={18}
-                            style={{ color: "var(--primary-400)" }}
-                          />
-                        )}
-                        <div className="ds-empty-title">
-                          {roots.length === 0
-                            ? "Add your sound-effects folders"
-                            : "Indexing your first audio files"}
-                        </div>
-                      </div>
-                      <div
-                        className="ds-empty-desc"
-                        style={{ maxWidth: "none", textAlign: "left" }}
-                      >
-                        {roots.length === 0
-                          ? "Define one or more folders containing your audio library. Files are decoded and embedded in the background, and search becomes available as soon as the first sound is indexed."
-                          : `Scanning ${roots.join(
-                              ", "
-                            )}. Search will activate automatically once the first file completes.`}
-                      </div>
-                    </div>
-
-                    <AddFolderControl
-                      onBrowse={handleBrowseAndAddRoot}
-                      onAddPath={handleAddRoot}
-                      primary
-                    />
-
-                    {roots.length > 0 && (
-                      <div style={{ marginTop: "var(--space-4)" }}>
-                        <div
-                          className="ds-microlabel"
-                          style={{ marginBottom: "var(--space-2)" }}
-                        >
-                          Active folders
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            flexWrap: "wrap",
-                            gap: "var(--space-2)",
-                          }}
-                        >
-                          {roots.map((r) => (
-                            <span
-                              key={r}
-                              className="ds-badge ds-badge-neutral"
-                              style={{ textTransform: "none", letterSpacing: 0 }}
-                            >
-                              {r}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
+              stats === null ? (
+                <div className="sfx-setup" aria-busy="true">
+                  <span className="ds-spinner" />
                 </div>
-              </div>
+              ) : (
+                <SetupPanel
+                  roots={roots}
+                  indexing={indexing}
+                  onBrowse={handleBrowseAndAddRoot}
+                  onAddPath={handleAddRoot}
+                  onRetry={() => void handleRescan(false)}
+                />
+              )
             ) : results.length === 0 && !loading ? (
               <div className="ds-empty" style={{ marginTop: "var(--space-10)" }}>
                 <div className="ds-empty-title">No matching sounds</div>
@@ -2345,6 +2225,7 @@ export const App: React.FC = () => {
                     isSelected={idx === selectedIndex}
                     isRowPlaying={playingFileId === hit.file_id && isPlaying}
                     rowTime={playingFileId === hit.file_id ? currentTimeS : null}
+                    showMatch={isSimilarityView || committedQuery !== ""}
                     rowRefs={rowRefs}
                     actions={rowActions}
                   />
@@ -2388,38 +2269,22 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          {/* Bottom Footer Status Bar */}
-          <footer className="sfx-statusbar">
-            <span className="ds-tnum">
-              {statusLabel ||
-                (hasIndexedFiles
-                  ? `Showing ${results.length.toLocaleString()} of ${(
-                      totalResults || results.length
-                    ).toLocaleString()} sounds`
-                  : roots.length === 0
-                  ? "No library folders configured"
-                  : "Indexing initial audio files...")}
-              {isSimilarityView && (
-                <button
-                  type="button"
-                  className="sfx-similar-exit"
-                  title="Exit similarity view — back to search results"
-                  aria-label="Exit similarity view"
-                  onClick={() => {
-                    setIsSimilarityView(false);
-                    setStatusLabel("");
-                    void runSearch();
-                  }}
-                >
-                  <X size={11} />
-                  exit
-                </button>
+          {/* Bottom footer status bar: only when it has something true to say */}
+          {(hasIndexedFiles || statusLabel) && (
+            <footer className="sfx-statusbar">
+              <span className="ds-tnum">
+                {statusLabel ||
+                  `Showing ${results.length.toLocaleString()} of ${(
+                    totalResults || results.length
+                  ).toLocaleString()} sounds`}
+              </span>
+              {hasIndexedFiles && (
+                <span className="sfx-statusbar-shortcuts">
+                  ↑↓ navigate · Space play · E edit · R reveal · F favorite · Enter inspector · / search · drag row to export
+                </span>
               )}
-            </span>
-            <span className="sfx-statusbar-shortcuts">
-              ↑↓ navigate · Space play · E edit · R reveal · F favorite · Enter inspector · / search · drag row to export
-            </span>
-          </footer>
+            </footer>
+          )}
         </main>
 
         {detailOpen && selectedHit && (
