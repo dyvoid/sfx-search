@@ -229,7 +229,7 @@ test.describe("focus handling around mouse and Tab", () => {
   test("L9 after a mouse click on the row's Edit button the Studio opens and Escape returns to a keyboard-ready library", async ({
     app,
   }) => {
-    await row(app, 1).getByRole("button", { name: "Edit audio" }).click();
+    await row(app, 1).getByRole("button", { name: "Edit in Studio" }).click();
     await expect(studioShell(app)).toBeVisible();
     await app.keyboard.press("Escape");
     await expect(studioShell(app)).toHaveCount(0);

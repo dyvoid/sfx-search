@@ -2018,6 +2018,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
       {/* Studio Transport Deck */}
       <div className="sfx-editor-transport-bar">
         <div className="sfx-editor-transport-left">
+          {activeModule === "loop" && (
+            <button
+              type="button"
+              disabled={!processedChannels}
+              onClick={auditionSeam}
+              className="ds-btn ds-btn-ghost ds-btn-sm"
+              title="Jump 1.2s before the loop end to immediately audition the E → S seam transition (S)"
+            >
+              Test Seam
+            </button>
+          )}
           {loopEnabled && activeModule === "loop" && (
             <>
               <span className="sfx-rack-hint">Preview</span>
@@ -2093,17 +2104,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </span>
           </div>
 
-          {activeModule === "loop" && (
-            <button
-              type="button"
-              disabled={!processedChannels}
-              onClick={auditionSeam}
-              className="ds-btn ds-btn-ghost ds-btn-sm"
-              title="Jump 1.2s before the loop end to immediately audition the E → S seam transition (S)"
-            >
-              Test Seam
-            </button>
-          )}
         </div>
 
         <div className="sfx-editor-transport-right">
@@ -2308,7 +2308,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
             {/* Column 2: Auto-Loop Detection & Candidate Ranking */}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Auto-Loop Finder</span>
+                <span className="ds-panel-title">Loop Finder</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   {candidates.length > 0 && (
                     <button
@@ -2332,7 +2332,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                     title="Scan audio for seamless loop points (F)"
                   >
                     <Wand2 size={13} />
-                    {searching ? "Scanning…" : "Find Seamless Loops"}
+                    {searching ? "Scanning…" : "Find Loops"}
                   </button>
                 </div>
               </div>
@@ -2412,7 +2412,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                 <div className="sfx-candidate-grid">
                   {candidates.length === 0 ? (
                     <div className="sfx-candidate-empty">
-                      Click <strong>Find Seamless Loops</strong> (or press{" "}
+                      Click <strong>Find Loops</strong> (or press{" "}
                       <kbd className="sfx-kbd">F</kbd>) to scan for phase-aligned
                       loop regions.
                     </div>
@@ -2455,7 +2455,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
               />
               <div className="sfx-seam-caption">
                 <span>
-                  Visualizes the last 25ms (<strong style={{ color: "var(--danger-400)" }}>TAIL</strong>) wrapping into the first 25ms (<strong style={{ color: "var(--success-500)" }}>HEAD</strong>) of the baked loop.
+                  The last 25 ms of the loop (<strong style={{ color: "var(--danger-400)" }}>Tail</strong>) running into its first 25 ms (<strong style={{ color: "var(--success-500)" }}>Head</strong>).
                 </span>
               </div>
             </section>
@@ -2467,7 +2467,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
             {/* Column 1: Crop / Trim Region */}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Crop / Trim Region</span>
+                <span className="ds-panel-title">Trim</span>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <button
                     type="button"
@@ -3388,16 +3388,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
             {/* Column 3: Generated Round-Robin Takes & Curation */}
             <section className="sfx-rack-card sfx-rack-card-wide">
               <div className="sfx-rack-card-head">
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span className="ds-panel-title">
-                    Round-Robin Takes ({variations.length})
-                  </span>
-                  {variations.some((v) => v.liked) && (
-                    <span className="ds-badge ds-badge-accent ds-tnum">
-                      {variations.filter((v) => v.liked).length} liked
-                    </span>
-                  )}
-                </div>
+                <span className="ds-panel-title">Round-Robin Takes</span>
 
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <button
@@ -3407,7 +3398,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                     className="ds-btn ds-btn-primary ds-btn-sm"
                   >
                     <Dices size={13} />
-                    Generate {varSpec.count} Takes
+                    Generate
                   </button>
 
 
@@ -3738,10 +3729,10 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
               ? [{ keys: "← →", label: "Nudge (Shift: 10 ms)" }]
               : []),
             { keys: "Ctrl+S", label: "Save" },
+            { keys: "Esc", label: "Back to library" },
             { keys: "1–4", label: "Modules" },
             { keys: "Scroll", label: "Zoom" },
             { keys: "Drag", label: "Pan" },
-            { keys: "Esc", label: "Back to library" },
           ]}
         />
       </footer>

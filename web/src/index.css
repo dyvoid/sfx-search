@@ -819,7 +819,8 @@ body.sfx-resizing-x {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 55%;
   height: 26px;
   padding: 0 2px 0 var(--space-3);
@@ -945,6 +946,11 @@ body.sfx-resizing-x {
 .sfx-main.sfx-main-setup {
   background: transparent;
   border-color: transparent;
+}
+
+.sfx-path {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .sfx-status-err {
@@ -1471,7 +1477,6 @@ body.sfx-resizing-x {
 
 .sfx-module-tab.active {
   color: var(--text-primary);
-  font-weight: 600;
   background: var(--surface-raised);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-sm);
@@ -1483,6 +1488,9 @@ body.sfx-resizing-x {
 }
 
 .sfx-module-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -1702,8 +1710,8 @@ body.sfx-resizing-x {
     display: none;
   }
 
-  /* Module tabs fall back to icons (they keep aria-label and title). */
-  .sfx-module-tab > span:not(.sfx-module-dot) {
+  /* Inactive module tabs fall back to icons (they keep aria-label and title). */
+  .sfx-module-tab:not(.active) > span:not(.sfx-module-dot) {
     display: none;
   }
 }
@@ -2073,7 +2081,12 @@ body.sfx-resizing-x {
 
 @media (max-width: 1120px) {
   .sfx-rack-grid-variations {
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  /* The takes card gets its own full row instead of half a row. */
+  .sfx-rack-grid-variations .sfx-rack-card-wide {
+    grid-column: 1 / -1;
   }
 }
 

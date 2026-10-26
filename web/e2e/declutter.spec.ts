@@ -253,12 +253,15 @@ test.describe("missing folder banner", () => {
 
 test.describe("scan in progress with sounds", () => {
   test.use({ apiOptions: { indexing: true } });
-  test("progress bar button is named Folders", async ({ app, pageErrors }) => {
+  test("progress banner doesn't repeat the top bar's Folders button", async ({
+    app,
+    pageErrors,
+  }) => {
     void pageErrors;
     const banner = app.locator(".sfx-index-banner");
     await expect(banner).toBeVisible();
-    await expect(banner.getByRole("button", { name: "Folders" })).toBeVisible();
-    await expect(banner.getByRole("button", { name: "Details" })).toHaveCount(0);
+    await expect(banner.getByRole("button")).toHaveCount(0);
+    await expect(app.getByRole("button", { name: /^Folders/ })).toBeVisible();
   });
 });
 

@@ -357,16 +357,16 @@ export const EditorWaveform = React.forwardRef<
         g.fill();
 
         if (isActive) {
-          g.font = '600 9px "DM Mono", ui-monospace, monospace';
+          g.font = '600 12px "DM Mono", ui-monospace, monospace';
           const tw = g.measureText(label).width;
-          const pillX = Math.max(4, Math.min(hx + 8, w - tw - 12));
+          const pillX = Math.max(4, Math.min(hx + 8, w - tw - 14));
           g.fillStyle = resolvePalette().pillBg;
-          g.fillRect(pillX, 4, tw + 8, 14);
+          g.fillRect(pillX, 3, tw + 10, 18);
           g.strokeStyle = color;
           g.lineWidth = 1;
-          g.strokeRect(pillX, 4, tw + 8, 14);
+          g.strokeRect(pillX, 3, tw + 10, 18);
           g.fillStyle = color;
-          g.fillText(label, pillX + 4, 14);
+          g.fillText(label, pillX + 5, 16);
         }
         g.lineWidth = 1;
       };
@@ -423,11 +423,11 @@ export const EditorWaveform = React.forwardRef<
         g.stroke();
 
         g.fillStyle = COLORS.legend;
-        g.font = '10px "DM Mono", ui-monospace, monospace';
+        g.font = '12px "DM Mono", ui-monospace, monospace';
         for (const [x, t] of labels) {
           const text = fmtTick(t, step);
           const tx = Math.min(x + 4, w - g.measureText(text).width - 3);
-          g.fillText(text, Math.max(3, tx), wh + 16);
+          g.fillText(text, Math.max(3, tx), wh + 17);
         }
       };
 
@@ -531,10 +531,10 @@ export const EditorWaveform = React.forwardRef<
               g.stroke();
               g.restore();
 
-              if (cfx1 - cfx0 > 56) {
+              if (cfx1 - cfx0 > 72) {
                 g.fillStyle = COLORS.fadeLabel;
-                g.font = '500 10px "DM Mono", ui-monospace, monospace';
-                g.fillText("X-FADE", Math.max(6, fx0 + 6), wh - 8);
+                g.font = '500 12px "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif';
+                g.fillText("Crossfade", Math.max(6, fx0 + 6), wh - 8);
               }
             }
           }

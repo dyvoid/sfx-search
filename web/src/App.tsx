@@ -467,8 +467,8 @@ const ResultRow = React.memo(function ResultRow({
             actions.edit(idx);
           }}
           className="sfx-icon-btn"
-          aria-label="Edit audio"
-          title="Edit audio (E)"
+          aria-label="Edit in Studio"
+          title="Edit in Studio (E)"
         >
           <Sliders size={14} />
         </button>
@@ -1809,7 +1809,7 @@ export const App: React.FC = () => {
                         }, 180);
                       }}
                       onChange={(e) => setQuery(e.target.value)}
-                      placeholder="Search sounds"
+                      placeholder={isSimilarityView && similarLabel ? "" : "Search sounds"}
                       className="sfx-search-hero-input"
                     />
                     {extractQueryTokens(query).map((tok) => (
@@ -2113,13 +2113,6 @@ export const App: React.FC = () => {
                   </div>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setLibraryModalOpen(true)}
-                className="ds-btn ds-btn-secondary ds-btn-sm"
-              >
-                Folders
-              </button>
             </div>
           )}
 
@@ -2148,7 +2141,13 @@ export const App: React.FC = () => {
             {missingRoots.length === 1
               ? "Library folder not found on disk: "
               : "Library folders not found on disk: "}
-            {missingRoots.join(" · ")}.
+            {missingRoots.map((r, i) => (
+              <React.Fragment key={r}>
+                {i > 0 && " · "}
+                <span className="sfx-path">{r}</span>
+              </React.Fragment>
+            ))}
+            .
             {hasIndexedFiles &&
               " Files may have moved, so results can be out of date."}
           </span>
@@ -2162,7 +2161,7 @@ export const App: React.FC = () => {
           <button
             type="button"
             onClick={() => setLibraryModalOpen(true)}
-            className="ds-btn ds-btn-ghost ds-btn-sm"
+            className="ds-btn ds-btn-secondary ds-btn-sm"
           >
             Manage folders
           </button>
@@ -2342,7 +2341,7 @@ export const App: React.FC = () => {
                   hints={[
                     { keys: "↑ ↓", label: "Navigate" },
                     { keys: "Space", label: "Play" },
-                    { keys: "E", label: "Edit" },
+                    { keys: "E", label: "Edit in Studio" },
                     { keys: "R", label: "Show in Explorer" },
                     { keys: "F", label: "Favorite" },
                     { keys: "Enter", label: "Inspector" },

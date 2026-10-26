@@ -277,7 +277,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
                 className="ds-btn ds-btn-secondary ds-btn-sm"
               >
                 {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-                {isPlaying ? "Pause" : "Audition"}
+                {isPlaying ? "Pause" : "Play"}
               </button>
               <span className="sfx-audition-time">
                 {currentTimeS !== null

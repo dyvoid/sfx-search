@@ -138,14 +138,14 @@ export const SeamScope: React.FC<SeamScopeProps> = ({
     g.stroke();
 
     // Labels
-    g.font = '500 9px "DM Mono", ui-monospace, monospace';
+    g.font = '500 12px "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif';
     g.fillStyle = tailColor;
-    g.fillText("TAIL →", 6, 13);
+    g.fillText("Tail", 6, 15);
     g.fillStyle = headColor;
-    g.fillText("→ HEAD", w - 44, 13);
+    g.fillText("Head", w - g.measureText("Head").width - 6, 15);
     if (fadeSamples > 0) {
       g.fillStyle = seamColor;
-      g.fillText("SEAM", midX + 4, h - 6);
+      g.fillText("Seam", midX + 4, h - 6);
     }
   }, [bakedChannels, sampleRate, fadeSamples]);
 
@@ -225,7 +225,7 @@ export const EqResponseGraph: React.FC<EqResponseGraphProps> = ({
       Math.pow(10, minLog + (x / Math.max(1, w)) * (maxLog - minLog));
 
     // Frequency grid ticks
-    g.font = '9px "DM Mono", ui-monospace, monospace';
+    g.font = '12px "DM Mono", ui-monospace, monospace';
     g.fillStyle = textColor;
     for (const [hz, lbl] of [
       [100, "100"],
@@ -233,7 +233,7 @@ export const EqResponseGraph: React.FC<EqResponseGraphProps> = ({
       [10000, "10k"],
     ] as const) {
       const fx = freqToX(hz);
-      g.fillText(lbl, fx - 8, h - 4);
+      g.fillText(lbl, fx - g.measureText(lbl).width / 2, h - 4);
     }
 
     // Response curve fill + stroke
