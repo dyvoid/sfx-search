@@ -197,6 +197,7 @@ export class MockApi {
       return json({ results });
     }
     if (p === "/api/library" && m === "GET") return json(library());
+    if (p === "/api/library/pick-folder") return json({ path: "D:/Picked" });
     if (p === "/api/library/roots") return json(library());
     if (p === "/api/library/rescan") return json(library());
     if (p === "/api/stats") return json(this.stats());

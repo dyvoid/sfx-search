@@ -1,12 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  Folder,
-  FolderPlus,
-  RefreshCw,
-  Trash2,
-  X,
-} from "lucide-react";
+import { Folder, RefreshCw, Trash2, X } from "lucide-react";
 import { IndexingProgress, LibraryStats } from "../types";
+import { AddFolderControl } from "./AddFolderControl";
 
 interface LibraryModalProps {
   open: boolean;
@@ -31,9 +26,6 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
   onRemoveRoot,
   onRescan,
 }) => {
-  const [pathInput, setPathInput] = useState<string>("");
-  const [errorMsg, setErrorMsg] = useState<string>("");
-  const [busy, setBusy] = useState<boolean>(false);
   // Two-step confirm for destructive actions: first click arms for 3s.
   const [armed, setArmed] = useState<string | null>(null);
 
@@ -115,38 +107,6 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = pathInput.trim();
-    if (!clean) {
-      return;
-    }
-    setBusy(true);
-    setErrorMsg("");
-    try {
-      await onAddRoot(clean);
-      setPathInput("");
-    } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Failed to add folder");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleBrowse = async () => {
-    setBusy(true);
-    setErrorMsg("");
-    try {
-      await onBrowseRoot();
-    } catch (err) {
-      setErrorMsg(
-        err instanceof Error ? err.message : "Failed to pick folder"
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div
       className="ds-scrim"
@@ -188,140 +148,45 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
           className="ds-dialog-body"
           style={{ display: "flex", flexDirection: "column", gap: "var(--space-5)" }}
         >
-          {/* Add folder form */}
-          <form onSubmit={handleSubmit} className="ds-input-field">
-            <label className="ds-input-label">
-              Add folder to scan in the background
-            </label>
-            <div style={{ display: "flex", gap: "var(--space-2)" }}>
-              <div
-                className={`ds-input-box ${errorMsg ? "error" : ""}`}
-                style={{ flex: 1 }}
-              >
-                <input
-                  type="text"
-                  value={pathInput}
-                  onChange={(e) => {
-                    setPathInput(e.target.value);
-                    setErrorMsg("");
-                  }}
-                  placeholder="D:/SFX or C:/Audio/Foley"
-                  className="ds-input"
-                  style={{ fontFamily: "var(--font-mono)" }}
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={busy || !pathInput.trim()}
-                className="ds-btn ds-btn-primary"
-              >
-                <FolderPlus size={14} />
-                Add folder
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={handleBrowse}
-                className="ds-btn ds-btn-secondary"
-              >
-                <Folder size={14} />
-                Browse
-              </button>
-            </div>
-            {errorMsg && <span className="ds-input-error">{errorMsg}</span>}
-          </form>
+          {roots.length === 0 ? (
+            <p className="sfx-folders-empty">
+              No folders yet. Add the folders that hold your sound effects;
+              they are scanned in the background.
+            </p>
+          ) : (
+            <ul className="sfx-folder-list">
+              {roots.map((rt) => (
+                <li key={rt} className="sfx-folder-item">
+                  <Folder size={14} className="sfx-folder-item-icon" />
+                  <span className="sfx-folder-item-path">{rt}</span>
+                  <button
+                    type="button"
+                    disabled={isRunning}
+                    onClick={confirmThen(`rm:${rt}`, () => {
+                      void onRemoveRoot(rt);
+                    })}
+                    className={`ds-btn ds-btn-sm ${
+                      armed === `rm:${rt}` ? "ds-btn-danger" : "ds-btn-ghost"
+                    }`}
+                    style={
+                      armed === `rm:${rt}`
+                        ? undefined
+                        : { color: "var(--danger-400)" }
+                    }
+                  >
+                    <Trash2 size={14} />
+                    {armed === `rm:${rt}` ? "Confirm remove" : "Remove"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
 
-          {/* Configured roots table */}
-          <div>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                marginBottom: "var(--space-2)",
-              }}
-            >
-              <span className="ds-microlabel">
-                Configured folders ({roots.length})
-              </span>
-              {stats && (
-                <span
-                  className="ds-tnum"
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "var(--font-size-xs)",
-                    color: "var(--text-tertiary)",
-                  }}
-                >
-                  {stats.ok_files.toLocaleString()} files indexed
-                </span>
-              )}
-            </div>
-
-            {roots.length === 0 ? (
-              <div
-                style={{
-                  padding: "var(--space-6)",
-                  border: "var(--border-width) dashed var(--border-strong)",
-                  borderRadius: "var(--radius-sm)",
-                  textAlign: "center",
-                  color: "var(--text-tertiary)",
-                  fontSize: "var(--font-size-sm)",
-                }}
-              >
-                No library folders configured yet. Add a folder above to start
-                scanning.
-              </div>
-            ) : (
-              <div className="ds-table-wrap">
-                <table className="ds-table">
-                  <thead>
-                    <tr>
-                      <th>Folder path</th>
-                      <th style={{ width: 90, textAlign: "right" }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {roots.map((rt) => (
-                      <tr key={rt}>
-                        <td
-                          style={{
-                            fontFamily: "var(--font-mono)",
-                            fontSize: "var(--font-size-xs)",
-                            wordBreak: "break-all",
-                          }}
-                        >
-                          {rt}
-                        </td>
-                        <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                          <button
-                            type="button"
-                            disabled={isRunning}
-                            onClick={confirmThen(`rm:${rt}`, () => {
-                              void onRemoveRoot(rt);
-                            })}
-                            className={`ds-btn ds-btn-sm ${
-                              armed === `rm:${rt}`
-                                ? "ds-btn-danger"
-                                : "ds-btn-ghost"
-                            }`}
-                            style={
-                              armed === `rm:${rt}`
-                                ? undefined
-                                : { color: "var(--danger-400)" }
-                            }
-                          >
-                            <Trash2 size={14} />
-                            {armed === `rm:${rt}` ? "Confirm remove" : "Remove"}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          <AddFolderControl
+            onBrowse={onBrowseRoot}
+            onAddPath={onAddRoot}
+            primary={roots.length === 0}
+          />
 
           {/* Live Indexer Status */}
           {isRunning && indexing && (
@@ -374,6 +239,11 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
         </div>
 
         <div className="ds-dialog-foot">
+          {stats && roots.length > 0 && (
+            <span className="sfx-folders-summary ds-tnum">
+              {stats.ok_files.toLocaleString()} files indexed
+            </span>
+          )}
           {roots.length > 0 && (
             <>
               <button

@@ -46,6 +46,7 @@ import { DetailPanel } from "./components/DetailPanel";
 import { DsSelect } from "./components/DsSelect";
 import { FolderTree } from "./components/FolderTree";
 import { LibraryModal } from "./components/LibraryModal";
+import { AddFolderControl } from "./components/AddFolderControl";
 import { MiniWaveform } from "./components/MiniWaveform";
 import { SpectrumMeter } from "./components/SpectrumMeter";
 import { StudioView } from "./editor/StudioView";
@@ -549,9 +550,6 @@ export const App: React.FC = () => {
   const [loopEnabled, setLoopEnabled] = useState<boolean>(false);
 
   const [isDraggingFile, setIsDraggingFile] = useState<boolean>(false);
-  const [onboardingInput, setOnboardingInput] = useState<string>("");
-  const [onboardingError, setOnboardingError] = useState<string>("");
-  const [onboardingBusy, setOnboardingBusy] = useState<boolean>(false);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -1082,10 +1080,8 @@ export const App: React.FC = () => {
         await handleAddRoot(picked);
       }
     } catch (err) {
-      setOnboardingError(
-        err instanceof Error ? err.message : "Could not add folder"
-      );
       setStatusLabel(err instanceof Error ? err.message : "Add folder failed");
+      throw err;
     }
   };
 
@@ -1119,26 +1115,6 @@ export const App: React.FC = () => {
       void refreshLibraryState();
     } catch (err) {
       setStatusLabel(err instanceof Error ? err.message : "Rescan failed");
-    }
-  };
-
-  const handleOnboardingSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = onboardingInput.trim();
-    if (!clean) {
-      return;
-    }
-    setOnboardingBusy(true);
-    setOnboardingError("");
-    try {
-      await handleAddRoot(clean);
-      setOnboardingInput("");
-    } catch (err) {
-      setOnboardingError(
-        err instanceof Error ? err.message : "Failed to add folder"
-      );
-    } finally {
-      setOnboardingBusy(false);
     }
   };
 
@@ -2340,52 +2316,11 @@ export const App: React.FC = () => {
                       </div>
                     </div>
 
-                    <form
-                      onSubmit={handleOnboardingSubmit}
-                      className="ds-input-field"
-                    >
-                      <label className="ds-input-label">Folder path</label>
-                      <div style={{ display: "flex", gap: "var(--space-2)" }}>
-                        <div
-                          className={`ds-input-box ${
-                            onboardingError ? "error" : ""
-                          }`}
-                          style={{ flex: 1 }}
-                        >
-                          <input
-                            type="text"
-                            value={onboardingInput}
-                            onChange={(e) => {
-                              setOnboardingInput(e.target.value);
-                              setOnboardingError("");
-                            }}
-                            placeholder="D:/SFX or C:/Projects/Audio"
-                            className="ds-input"
-                            style={{ fontFamily: "var(--font-mono)" }}
-                          />
-                        </div>
-                        <button
-                          type="submit"
-                          disabled={onboardingBusy || !onboardingInput.trim()}
-                          className="ds-btn ds-btn-primary"
-                        >
-                          <FolderPlus size={14} />
-                          Add folder
-                        </button>
-                        <button
-                          type="button"
-                          disabled={onboardingBusy}
-                          onClick={handleBrowseAndAddRoot}
-                          className="ds-btn ds-btn-secondary"
-                        >
-                          <FolderOpen size={14} />
-                          Browse
-                        </button>
-                      </div>
-                      {onboardingError && (
-                        <span className="ds-input-error">{onboardingError}</span>
-                      )}
-                    </form>
+                    <AddFolderControl
+                      onBrowse={handleBrowseAndAddRoot}
+                      onAddPath={handleAddRoot}
+                      primary
+                    />
 
                     {roots.length > 0 && (
                       <div style={{ marginTop: "var(--space-4)" }}>
@@ -2403,7 +2338,11 @@ export const App: React.FC = () => {
                           }}
                         >
                           {roots.map((r) => (
-                            <span key={r} className="ds-badge ds-badge-neutral">
+                            <span
+                              key={r}
+                              className="ds-badge ds-badge-neutral"
+                              style={{ textTransform: "none", letterSpacing: 0 }}
+                            >
                               {r}
                             </span>
                           ))}

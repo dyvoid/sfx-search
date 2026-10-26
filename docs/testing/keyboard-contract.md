@@ -41,6 +41,7 @@ Global principles:
 | L17 | Remove root / Rebuild all | click | First click arms ("Confirm …") for ~3 s; only a second click acts. Remove is disabled while a scan runs. |
 | L18 | Best offset switch, Favorites only checkbox | Tab, then Space / Enter | Reachable by Tab and toggled by keyboard; exposes role and checked state. |
 | L19 | transient footer error (e.g. reveal failed) | — | Clears after ~5 s. The "Similar to …" label is not transient. |
+| L20 | Library modal / first-run screen | click / Enter | "Add folder…" opens the native picker and adds the pick. "or paste a path" reveals an empty, focused path field (no placeholder); Enter adds and hides it; Cancel hides it and returns focus to "or paste a path". |
 
 ## Studio
 

@@ -23,6 +23,13 @@ const popup = (page: Page) => page.locator(".ds-select-pop");
 const isAudioPaused = (page: Page) =>
   page.evaluate(() => document.querySelector("audio")?.paused ?? true);
 
+const pathField = (page: Page) => page.getByRole("textbox", { name: "Folder path" });
+
+async function openPathField(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "or paste a path" }).click();
+  await expect(pathField(page)).toBeFocused();
+}
+
 /** Load the app with a controllable clock (for the ~3 s / ~5 s timers). */
 async function loadWithClock(page: Page): Promise<void> {
   await page.clock.install();
@@ -392,14 +399,13 @@ test.describe("Library (folders) modal", () => {
     expect(forward).toContain("Done");
     expect(forward.slice(0, 7)).toEqual(forward.slice(7, 14));
     expect(forward.filter((n) => n === "Close dialog").length).toBeGreaterThanOrEqual(2);
-    expect(forward, "disabled Add folder is skipped").not.toContain("Add folder");
 
     // Shift+Tab from the first control wraps to the last one.
     await app.getByRole("button", { name: "Close dialog" }).focus();
     await app.keyboard.press("Shift+Tab");
     await expect(app.getByRole("button", { name: "Done" })).toBeFocused();
     const backward = await focusCycle(app, "Shift+Tab", 10);
-    expect(backward, "disabled Add folder is skipped").not.toContain("Add folder");
+    expect(backward).toContain("Close dialog");
   });
 
   test("L15 a focus that starts outside the modal is pulled back in", async ({ app }) => {
@@ -419,12 +425,12 @@ test.describe("Library (folders) modal", () => {
         await expect(app.getByRole("button", { name })).toBeDisabled();
       }
       const forward = await focusCycle(app, "Tab", 10);
-      for (const skipped of ["Remove", "Scan for changes", "Rebuild all", "Add folder"]) {
+      for (const skipped of ["Remove", "Scan for changes", "Rebuild all"]) {
         expect(forward).not.toContain(skipped);
       }
       expect(forward).toContain("Done");
       const backward = await focusCycle(app, "Shift+Tab", 10);
-      for (const skipped of ["Remove", "Scan for changes", "Rebuild all", "Add folder"]) {
+      for (const skipped of ["Remove", "Scan for changes", "Rebuild all"]) {
         expect(backward).not.toContain(skipped);
       }
     });
@@ -438,7 +444,7 @@ test.describe("Library (folders) modal", () => {
     const callsBefore = api.calls.length;
 
     // Move focus into the text field so Space/Enter cannot activate a button.
-    await app.getByPlaceholder(/D:\/SFX/).click();
+    await openPathField(app);
     for (const k of ["ArrowDown", "ArrowDown", "Space", "Enter", "f", "r", "e", "/"]) {
       await app.keyboard.press(k);
     }
@@ -466,7 +472,7 @@ test.describe("Library (folders) modal", () => {
 
   test("L16 Escape from inside the path field also closes the modal", async ({ app }) => {
     await openFolders(app);
-    await app.getByPlaceholder(/D:\/SFX/).click();
+    await openPathField(app);
     await app.keyboard.press("Escape");
     await expect(foldersModal(app)).toHaveCount(0);
     await expect(foldersButton(app)).toBeFocused();
@@ -530,6 +536,39 @@ test.describe("Library (folders) modal", () => {
     await rebuild.click();
     await expect.poll(rescans).toBe(before + 1);
     await expect(rebuild).toHaveText("Rebuild all");
+  });
+
+  test("L20 Add folder… opens the picker and adds the picked folder", async ({ app, api }) => {
+    await openFolders(app);
+    await expect(pathField(app)).toHaveCount(0);
+    await app.getByRole("button", { name: "Add folder…" }).click();
+    await expect.poll(() => api.callsTo("POST /api/library/roots").length).toBe(1);
+    expect(api.callsTo("POST /api/library/pick-folder")).toHaveLength(1);
+  });
+
+  test("L20 or paste a path reveals an empty, focused field; Enter adds it", async ({
+    app,
+    api,
+  }) => {
+    await openFolders(app);
+    await openPathField(app);
+    await expect(pathField(app)).toHaveValue("");
+    await expect(pathField(app)).not.toHaveAttribute("placeholder");
+    await app.keyboard.type("D:/SFX/Foley");
+    await app.keyboard.press("Enter");
+    await expect.poll(() => api.callsTo("POST /api/library/roots").length).toBe(1);
+    await expect(pathField(app)).toHaveCount(0);
+    await expect(foldersModal(app)).toBeVisible();
+  });
+
+  test("L20 Cancel hides the path field and returns focus to its toggle", async ({ app, api }) => {
+    await openFolders(app);
+    await openPathField(app);
+    await app.keyboard.type("D:/half");
+    await app.getByRole("button", { name: "Cancel" }).click();
+    await expect(pathField(app)).toHaveCount(0);
+    await expect(app.getByRole("button", { name: "or paste a path" })).toBeFocused();
+    expect(api.callsTo("POST /api/library/roots")).toEqual([]);
   });
 
   test.describe("while a scan runs", () => {

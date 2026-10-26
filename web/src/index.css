@@ -2074,3 +2074,89 @@ button.ds-check:focus-visible {
   box-shadow: var(--focus-ring);
   border-radius: var(--radius-xs);
 }
+
+/* Library folders: plain list + picker-first add control */
+.sfx-folder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: var(--border-width) solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.sfx-folder-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+}
+
+.sfx-folder-item + .sfx-folder-item {
+  border-top: var(--border-width) solid var(--border-subtle);
+}
+
+.sfx-folder-item-icon {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.sfx-folder-item-path {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.sfx-folders-empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.sfx-folders-summary {
+  margin-right: auto;
+  align-self: center;
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.sfx-add-folder {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sfx-add-folder-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.sfx-add-folder-paste {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.sfx-text-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.sfx-text-btn:hover {
+  color: var(--text-primary);
+}
+
+.sfx-text-btn:focus-visible {
+  outline: none;
+  border-radius: var(--radius-xs);
+  box-shadow: var(--focus-ring);
+}
