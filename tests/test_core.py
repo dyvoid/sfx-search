@@ -610,3 +610,35 @@ def test_indexer_walk_error_protects_only_that_subtree(
     assert stats.marked_missing == 1
     assert stats.offline_roots == []
     assert store.get_library_stats()["ok_files"] == 2
+
+
+def test_tokenize_fold_only_latin_diacritics() -> None:
+    assert tokenize_identifier("ガラス") == ["ガラス"]
+    assert tokenize_identifier("ไม้") == ["ไม้"]
+    assert tokenize_identifier("Türknall_01") == ["türknall", "turknall"]
+    assert tokenize_identifier("café") == ["café", "cafe"]
+    assert "boom" in tokenize_identifier("ｂｏｏｍ")  # fullwidth folds (wav is noise)
+    # folded form that is a noise token / digits is not emitted
+    assert tokenize_identifier("fínal") == ["fínal"]
+    assert tokenize_identifier("m²") == ["m²", "m2"]
+
+
+def test_is_protected_prefix_walk() -> None:
+    from sfxsearch.indexer import _is_protected
+
+    prefixes = {f"d:/lib/dir{i}" for i in range(500)} | {
+        "d:",
+        "//srv/share/priv",
+        "/mnt/x",
+    }
+    assert _is_protected("d:/lib/dir42/a/b.wav", prefixes)
+    assert _is_protected("d:/other/b.wav", prefixes)  # whole drive protected
+    assert _is_protected("d:/lib/dir42", prefixes)
+    assert not _is_protected("e:/lib/dir42/b.wav", prefixes)
+    assert not _is_protected("d:/lib/dir500/b.wav", {f"d:/lib/dir{i}" for i in range(500)})
+    assert _is_protected("//srv/share/priv/a.wav", prefixes)
+    assert not _is_protected("//srv/share/pub/a.wav", prefixes)
+    assert not _is_protected("//srv/share/a.wav", {"//srv"})  # never above the share
+    assert _is_protected("/mnt/x/a/b.wav", prefixes)
+    assert not _is_protected("/mnt/y/a.wav", prefixes)
+    assert _is_protected("/anything/a.wav", {""})  # posix root "/"
