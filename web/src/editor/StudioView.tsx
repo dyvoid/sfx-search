@@ -1434,7 +1434,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
         }
         return;
       }
-      if (nonTextInput && e.key === "Escape" && !saveDlg) {
+      // Custom toggles (<label role="checkbox"> etc.) blur on Escape like
+      // native ones, so the first Escape never leaves the Studio from them.
+      const toggleControl =
+        nonTextInput ||
+        Boolean(
+          target?.closest("[role='checkbox'], [role='switch'], [role='radio']")
+        );
+      if (toggleControl && e.key === "Escape" && !saveDlg) {
         target?.blur();
         return;
       }
@@ -1475,6 +1482,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
         if (isSaveChord) {
           e.preventDefault(); // still block the browser's "Save page" dialog
         }
+        return;
+      }
+
+      // The save chord is matched on the typed key (layout-independent), so it
+      // can't be dispatched through the e.code switch below.
+      if (isSaveChord) {
+        runSave();
         return;
       }
 
@@ -1531,17 +1545,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
           }
           break;
         case "KeyS":
-          if (isSaveChord) {
-            e.preventDefault();
-            if (hit) {
-              openSaveDialog();
-            } else {
-              handleExportDownload();
-            }
-          } else if (!e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            auditionSeam();
-          }
+          e.preventDefault();
+          auditionSeam();
           break;
         case "BracketLeft":
           e.preventDefault();
