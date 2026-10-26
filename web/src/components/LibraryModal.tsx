@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Folder,
   FolderPlus,
@@ -34,6 +34,16 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
   const [pathInput, setPathInput] = useState<string>("");
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [busy, setBusy] = useState<boolean>(false);
+  // Two-step confirm for destructive actions: first click arms for 3s.
+  const [armed, setArmed] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!armed) {
+      return;
+    }
+    const timer = window.setTimeout(() => setArmed(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
 
   if (!open) {
     return null;
@@ -44,6 +54,15 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
   const totalCount = indexing?.to_index_count || 0;
   const pct =
     totalCount > 0 ? Math.min(100, Math.round((doneCount / totalCount) * 100)) : 0;
+
+  const confirmThen = (key: string, action: () => void) => () => {
+    if (armed === key) {
+      setArmed(null);
+      action();
+    } else {
+      setArmed(key);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,12 +243,23 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                         <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                           <button
                             type="button"
-                            onClick={() => onRemoveRoot(rt)}
-                            className="ds-btn ds-btn-ghost ds-btn-sm"
-                            style={{ color: "var(--danger-400)" }}
+                            disabled={isRunning}
+                            onClick={confirmThen(`rm:${rt}`, () => {
+                              void onRemoveRoot(rt);
+                            })}
+                            className={`ds-btn ds-btn-sm ${
+                              armed === `rm:${rt}`
+                                ? "ds-btn-danger"
+                                : "ds-btn-ghost"
+                            }`}
+                            style={
+                              armed === `rm:${rt}`
+                                ? undefined
+                                : { color: "var(--danger-400)" }
+                            }
                           >
                             <Trash2 size={14} />
-                            Remove
+                            {armed === `rm:${rt}` ? "Confirm remove" : "Remove"}
                           </button>
                         </td>
                       </tr>
@@ -305,10 +335,14 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
               <button
                 type="button"
                 disabled={isRunning}
-                onClick={() => onRescan(true)}
-                className="ds-btn ds-btn-ghost"
+                onClick={confirmThen("rebuild", () => {
+                  void onRescan(true);
+                })}
+                className={`ds-btn ${
+                  armed === "rebuild" ? "ds-btn-danger" : "ds-btn-ghost"
+                }`}
               >
-                Rebuild all
+                {armed === "rebuild" ? "Confirm rebuild" : "Rebuild all"}
               </button>
             </>
           )}

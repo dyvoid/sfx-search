@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertTriangle,
   Clock,
@@ -246,6 +252,216 @@ function handleRowDragStart(e: React.DragEvent, hit: SearchHit) {
   dt.setData("application/x-sfxsearch-file-id", hit.file_id);
   dt.setData("application/x-sfxsearch-filename", filename);
 }
+
+interface RowActions {
+  select: (idx: number) => void;
+  play: (hit: SearchHit, seekS?: number) => void;
+  openDetail: () => void;
+  edit: (idx: number) => void;
+  reveal: (e: React.MouseEvent, hit: SearchHit) => void;
+  similar: (fileId: string, filename?: string) => void;
+  favorite: (e: React.MouseEvent, hit: SearchHit) => void;
+  dragEnd: () => void;
+}
+
+interface ResultRowProps {
+  hit: SearchHit;
+  idx: number;
+  isSelected: boolean;
+  isRowPlaying: boolean;
+  rowTime: number | null;
+  rowRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
+  actions: RowActions;
+}
+
+// Memoized so the ~30fps playhead updates only re-render the playing row.
+const ResultRow = React.memo(function ResultRow({
+  hit,
+  idx,
+  isSelected,
+  isRowPlaying,
+  rowTime,
+  rowRefs,
+  actions,
+}: ResultRowProps) {
+  return (
+    <div
+      ref={(el) => {
+        rowRefs.current[idx] = el;
+      }}
+      role="option"
+      aria-selected={isSelected}
+      draggable
+      onPointerDown={() => prefetchDragFile(hit)}
+      onDragStart={(e) => handleRowDragStart(e, hit)}
+      onDragEnd={() => actions.dragEnd()}
+      onClick={(e) => {
+        if (e.detail > 1) {
+          return;
+        }
+        actions.select(idx);
+        actions.play(hit);
+      }}
+      onDoubleClick={() => {
+        actions.select(idx);
+        actions.openDetail();
+      }}
+      style={
+        {
+          "--row-idx": Math.min(idx % PAGE_SIZE, 12),
+        } as React.CSSProperties
+      }
+      className={`sfx-row ${isSelected ? "selected" : ""} ${
+        isRowPlaying ? "is-playing" : ""
+      }`}
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          actions.select(idx);
+          actions.play(hit);
+        }}
+        className={`sfx-play-btn ${
+          isRowPlaying ? "playing" : ""
+        }`}
+        aria-label={isRowPlaying ? "Pause" : "Play"}
+      >
+        {isRowPlaying ? (
+          <Pause size={14} />
+        ) : (
+          <Play size={14} />
+        )}
+      </button>
+
+      <div className="sfx-row-info">
+        <div className="sfx-row-title-line">
+          <span
+            className="sfx-row-filename"
+            title={hit.filename}
+          >
+            {hit.filename}
+          </span>
+          {hit.user_tags.map((t) => (
+            <span key={t} className="ds-badge ds-badge-accent">
+              {t}
+            </span>
+          ))}
+        </div>
+        <div className="sfx-row-folder" title={hit.folder}>
+          {formatQuietFolder(hit.folder, hit.root)}
+        </div>
+      </div>
+
+      <div className="sfx-row-wave">
+        <MiniWaveform
+          fileId={hit.file_id}
+          durationS={hit.duration_s}
+          bestOffsetS={hit.best_offset_s}
+          bestEndS={hit.best_end_s}
+          currentTimeS={rowTime}
+          isPlaying={isRowPlaying}
+          onSeek={(timeS) => {
+            actions.select(idx);
+            actions.play(hit, timeS);
+          }}
+        />
+      </div>
+
+      <div className="sfx-row-specs">
+        <span className="sfx-row-dur">
+          {hit.duration_s.toFixed(2)}s
+        </span>
+      </div>
+
+      <div
+        className="sfx-row-score"
+        title={`RRF: ${hit.rrf_score.toFixed(5)} | CLAP: ${
+          hit.clap_score !== null
+            ? hit.clap_score.toFixed(3)
+            : "—"
+        } | BM25: ${
+          hit.bm25_score !== null
+            ? hit.bm25_score.toFixed(2)
+            : "—"
+        }`}
+      >
+        <span
+          style={{
+            fontSize: "var(--font-size-xs)",
+            color:
+              hit.clap_score !== null && hit.clap_score > 0.25
+                ? "var(--text-secondary)"
+                : "var(--text-tertiary)",
+          }}
+        >
+          {hit.clap_score !== null
+            ? `${(hit.clap_score * 100).toFixed(0)}%`
+            : hit.bm25_score !== null
+            ? `${hit.bm25_score.toFixed(1)} kw`
+            : "—"}
+        </span>
+      </div>
+
+      <div className="sfx-row-actions">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.edit(idx);
+          }}
+          className="sfx-icon-btn"
+          aria-label="Edit audio"
+          title="Edit audio (E)"
+        >
+          <Sliders size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={(e) => actions.reveal(e, hit)}
+          className="sfx-icon-btn sfx-reveal-btn"
+          aria-label="Reveal file in Explorer"
+          title="Reveal file in Explorer (R)"
+        >
+          <FolderOpen size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            actions.similar(hit.file_id, hit.filename);
+          }}
+          className="sfx-icon-btn"
+          aria-label="Find similar sounds"
+          title="Find similar sounds"
+        >
+          <Sparkles size={14} />
+        </button>
+
+        <button
+          type="button"
+          onClick={(e) => actions.favorite(e, hit)}
+          className={`sfx-icon-btn ${
+            hit.favorite ? "fav-active" : ""
+          }`}
+          aria-label={
+            hit.favorite
+              ? "Remove from favorites"
+              : "Add to favorites"
+          }
+          title="Toggle favorite (F)"
+        >
+          <Heart
+            size={14}
+            fill={hit.favorite ? "currentColor" : "none"}
+          />
+        </button>
+      </div>
+    </div>
+  );
+});
 
 export const App: React.FC = () => {
   const [query, setQuery] = useState<string>("");
@@ -505,6 +721,15 @@ export const App: React.FC = () => {
     }
   }, [loading, loadingMore, isSimilarityView, results.length, totalResults]);
 
+  // Transient messages auto-clear; the "Similar to …" label belongs to the view.
+  useEffect(() => {
+    if (!statusLabel || isSimilarityView || loading) {
+      return;
+    }
+    const timer = window.setTimeout(() => setStatusLabel(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [statusLabel, isSimilarityView, loading]);
+
   useEffect(() => {
     rowRefs.current.length = results.length;
   }, [results.length]);
@@ -723,18 +948,35 @@ export const App: React.FC = () => {
         return;
       }
       // Space/Enter on a focused control must activate it natively, not the app.
-      const onControl = !!targetEl?.closest?.(
-        "button, a, [role='button'], [role='option'], [role='menuitem'], [role='switch'], [role='checkbox']"
-      );
+      // Buttons inside a result row never swallow the library shortcuts
+      // (focus lingers there after a click); blur so they can't also activate.
+      const inRow = !!targetEl?.closest?.(".sfx-row");
+      const onControl =
+        !inRow &&
+        !!targetEl?.closest?.(
+          "button, a, [role='button'], [role='option'], [role='menuitem'], [role='switch'], [role='checkbox']"
+        );
       if (onControl && (e.key === " " || e.key === "Enter")) {
         return;
+      }
+      if (inRow && (e.key === " " || e.key === "Enter")) {
+        e.preventDefault();
+        targetEl?.blur();
       }
 
       if (e.key === "Escape") {
         // Not inside an input (handled above); an open dropdown owns Escape.
-        if (!document.querySelector('[role="listbox"]')) {
+        if (!document.querySelector(".ds-select-pop")) {
           setDetailOpen(false);
         }
+        return;
+      }
+
+      // An open DsSelect owns the arrow keys.
+      if (
+        (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+        document.querySelector(".ds-select-pop")
+      ) {
         return;
       }
 
@@ -1082,6 +1324,33 @@ export const App: React.FC = () => {
     await toggleFavoriteFile(hit);
   };
 
+  // Stable action bundle for memoized rows; always delegates to the latest
+  // handlers so rows don't re-render when those closures change.
+  const rowHandlersRef = useRef<RowActions | null>(null);
+  rowHandlersRef.current = {
+    select: setSelectedIndex,
+    play: playHit,
+    openDetail: () => setDetailOpen(true),
+    edit: openEditorForHit,
+    reveal: handleRevealRow,
+    similar: handleFindSimilarFile,
+    favorite: handleToggleFavoriteRow,
+    dragEnd: () => setIsDraggingFile(false),
+  };
+  const rowActions = useMemo<RowActions>(
+    () => ({
+      select: (i) => rowHandlersRef.current?.select(i),
+      play: (h, t) => rowHandlersRef.current?.play(h, t),
+      openDetail: () => rowHandlersRef.current?.openDetail(),
+      edit: (i) => rowHandlersRef.current?.edit(i),
+      reveal: (e, h) => rowHandlersRef.current?.reveal(e, h),
+      similar: (id, n) => rowHandlersRef.current?.similar(id, n),
+      favorite: (e, h) => rowHandlersRef.current?.favorite(e, h),
+      dragEnd: () => rowHandlersRef.current?.dragEnd(),
+    }),
+    []
+  );
+
   const handleUserUpdated = (
     fileId: string,
     favorite: boolean,
@@ -1309,8 +1578,17 @@ export const App: React.FC = () => {
 
                 <div className="sfx-divider-v" />
 
-                <label
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={startAtBestOffset}
                   className="ds-switch-item"
+                  style={{
+                    background: "none",
+                    border: 0,
+                    padding: 0,
+                    font: "inherit",
+                  }}
                   onClick={() => setStartAtBestOffset((prev) => !prev)}
                   title="Start playback at best-matching 10s window offset"
                 >
@@ -1326,7 +1604,7 @@ export const App: React.FC = () => {
                   >
                     Best offset
                   </span>
-                </label>
+                </button>
 
                 <button
                   type="button"
@@ -1334,6 +1612,7 @@ export const App: React.FC = () => {
                   className={`ds-btn ds-btn-sm ${
                     loopEnabled ? "ds-btn-primary" : "ds-btn-ghost"
                   }`}
+                  aria-pressed={loopEnabled}
                   title="Loop playback"
                 >
                   <Repeat size={13} />
@@ -1369,6 +1648,7 @@ export const App: React.FC = () => {
                   style={{
                     color: compactDensity ? "var(--primary-400)" : undefined,
                   }}
+                  aria-pressed={compactDensity}
                   aria-label={
                     compactDensity
                       ? "Switch to spacious density"
@@ -1407,6 +1687,7 @@ export const App: React.FC = () => {
               <input
                 ref={searchInputRef}
                 type="text"
+                aria-label="Search sounds"
                 disabled={!hasIndexedFiles}
                 value={query}
                 onFocus={() => setShowHistory(true)}
@@ -1915,6 +2196,7 @@ export const App: React.FC = () => {
                 className="ds-input"
                 value={folderFilterText}
                 onChange={(e) => setFolderFilterText(e.target.value)}
+                aria-label="Filter folders"
                 placeholder="Filter folders..."
                 spellCheck={false}
               />
@@ -1971,7 +2253,12 @@ export const App: React.FC = () => {
           )}
 
           {/* Content: Onboarding Empty State vs Results List */}
-          <div ref={resultsListRef} className="sfx-results-list ds-scroll">
+          <div
+            ref={resultsListRef}
+            className="sfx-results-list ds-scroll"
+            role={results.length > 0 ? "listbox" : undefined}
+            aria-label={results.length > 0 ? "Search results" : undefined}
+          >
             {!hasIndexedFiles ? (
               <div
                 style={{
@@ -2119,190 +2406,18 @@ export const App: React.FC = () => {
               </div>
             ) : (
               <>
-                {results.map((hit, idx) => {
-                  const isSelected = idx === selectedIndex;
-                  const isRowPlaying =
-                    playingFileId === hit.file_id && isPlaying;
-                  const rowTime =
-                    playingFileId === hit.file_id ? currentTimeS : null;
-
-                  return (
-                    <div
-                      key={`${hit.file_id}-${searchSeq}`}
-                      ref={(el) => {
-                        rowRefs.current[idx] = el;
-                      }}
-                      draggable
-                      onPointerDown={() => prefetchDragFile(hit)}
-                      onDragStart={(e) => handleRowDragStart(e, hit)}
-                      onDragEnd={() => setIsDraggingFile(false)}
-                      onClick={(e) => {
-                        if (e.detail > 1) {
-                          return;
-                        }
-                        setSelectedIndex(idx);
-                        playHit(hit);
-                      }}
-                      onDoubleClick={() => {
-                        setSelectedIndex(idx);
-                        setDetailOpen(true);
-                      }}
-                      style={
-                        {
-                          "--row-idx": Math.min(idx % PAGE_SIZE, 12),
-                        } as React.CSSProperties
-                      }
-                      className={`sfx-row ${isSelected ? "selected" : ""} ${
-                        isRowPlaying ? "is-playing" : ""
-                      }`}
-                    >
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedIndex(idx);
-                          playHit(hit);
-                        }}
-                        className={`sfx-play-btn ${
-                          isRowPlaying ? "playing" : ""
-                        }`}
-                        aria-label={isRowPlaying ? "Pause" : "Play"}
-                      >
-                        {isRowPlaying ? (
-                          <Pause size={14} />
-                        ) : (
-                          <Play size={14} />
-                        )}
-                      </button>
-
-                      <div className="sfx-row-info">
-                        <div className="sfx-row-title-line">
-                          <span
-                            className="sfx-row-filename"
-                            title={hit.filename}
-                          >
-                            {hit.filename}
-                          </span>
-                          {hit.user_tags.map((t) => (
-                            <span key={t} className="ds-badge ds-badge-accent">
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                        <div className="sfx-row-folder" title={hit.folder}>
-                          {formatQuietFolder(hit.folder, hit.root)}
-                        </div>
-                      </div>
-
-                      <div className="sfx-row-wave">
-                        <MiniWaveform
-                          fileId={hit.file_id}
-                          durationS={hit.duration_s}
-                          bestOffsetS={hit.best_offset_s}
-                          bestEndS={hit.best_end_s}
-                          currentTimeS={rowTime}
-                          isPlaying={isRowPlaying}
-                          onSeek={(timeS) => {
-                            setSelectedIndex(idx);
-                            playHit(hit, timeS);
-                          }}
-                        />
-                      </div>
-
-                      <div className="sfx-row-specs">
-                        <span className="sfx-row-dur">
-                          {hit.duration_s.toFixed(2)}s
-                        </span>
-                      </div>
-
-                      <div
-                        className="sfx-row-score"
-                        title={`RRF: ${hit.rrf_score.toFixed(5)} | CLAP: ${
-                          hit.clap_score !== null
-                            ? hit.clap_score.toFixed(3)
-                            : "—"
-                        } | BM25: ${
-                          hit.bm25_score !== null
-                            ? hit.bm25_score.toFixed(2)
-                            : "—"
-                        }`}
-                      >
-                        <span
-                          style={{
-                            fontSize: "var(--font-size-xs)",
-                            color:
-                              hit.clap_score !== null && hit.clap_score > 0.25
-                                ? "var(--text-secondary)"
-                                : "var(--text-tertiary)",
-                          }}
-                        >
-                          {hit.clap_score !== null
-                            ? `${(hit.clap_score * 100).toFixed(0)}%`
-                            : hit.bm25_score !== null
-                            ? `${hit.bm25_score.toFixed(1)} kw`
-                            : "—"}
-                        </span>
-                      </div>
-
-                      <div className="sfx-row-actions">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditorForHit(idx);
-                          }}
-                          className="sfx-icon-btn"
-                          aria-label="Edit audio"
-                          title="Edit audio (E)"
-                        >
-                          <Sliders size={14} />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => handleRevealRow(e, hit)}
-                          className="sfx-icon-btn sfx-reveal-btn"
-                          aria-label="Reveal file in Explorer"
-                          title="Reveal file in Explorer (R)"
-                        >
-                          <FolderOpen size={14} />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleFindSimilarFile(hit.file_id, hit.filename);
-                          }}
-                          className="sfx-icon-btn"
-                          aria-label="Find similar sounds"
-                          title="Find similar sounds"
-                        >
-                          <Sparkles size={14} />
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={(e) => handleToggleFavoriteRow(e, hit)}
-                          className={`sfx-icon-btn ${
-                            hit.favorite ? "fav-active" : ""
-                          }`}
-                          aria-label={
-                            hit.favorite
-                              ? "Remove from favorites"
-                              : "Add to favorites"
-                          }
-                          title="Toggle favorite (F)"
-                        >
-                          <Heart
-                            size={14}
-                            fill={hit.favorite ? "currentColor" : "none"}
-                          />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                {results.map((hit, idx) => (
+                  <ResultRow
+                    key={`${hit.file_id}-${searchSeq}`}
+                    hit={hit}
+                    idx={idx}
+                    isSelected={idx === selectedIndex}
+                    isRowPlaying={playingFileId === hit.file_id && isPlaying}
+                    rowTime={playingFileId === hit.file_id ? currentTimeS : null}
+                    rowRefs={rowRefs}
+                    actions={rowActions}
+                  />
+                ))}
 
                 {!isSimilarityView && results.length < totalResults && (
                   <div
