@@ -44,6 +44,7 @@ export const DsSelect: React.FC<DsSelectProps> = ({
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        e.stopPropagation(); // an open dropdown owns Escape; keep it from the app
         setOpen(false);
         triggerRef.current?.focus();
       }
