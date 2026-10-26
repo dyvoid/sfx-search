@@ -297,6 +297,15 @@ const ResultRow = React.memo(function ResultRow({
         // Space/Enter); keyboard activations have detail === 0 and keep focus.
         if (e.detail > 0 && e.target instanceof Element) {
           (e.target.closest("button") as HTMLElement | null)?.blur();
+          // Focus left elsewhere (e.g. a DsSelect trigger, since the waveform's
+          // mousedown preventDefault keeps it) would swallow Space too.
+          const active = document.activeElement;
+          if (
+            active instanceof HTMLElement &&
+            !e.currentTarget.contains(active)
+          ) {
+            active.blur();
+          }
         }
       }}
       onPointerDown={() => prefetchDragFile(hit)}

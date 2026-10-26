@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Folder,
   FolderPlus,
@@ -44,6 +44,57 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
     const timer = window.setTimeout(() => setArmed(null), 3000);
     return () => window.clearTimeout(timer);
   }, [armed]);
+
+  const dlgRef = useRef<HTMLDivElement | null>(null);
+
+  // Focus management: move focus in on open, trap Tab, restore on close.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const opener =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const focusables = (): HTMLElement[] =>
+      Array.from(
+        dlgRef.current?.querySelectorAll<HTMLElement>(
+          "input, button, select, textarea, a[href], [tabindex]:not([tabindex='-1'])"
+        ) ?? []
+      ).filter((el) => !(el as HTMLButtonElement).disabled);
+    (focusables()[0] ?? dlgRef.current)?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !dlgRef.current) {
+        return;
+      }
+      const f = focusables();
+      if (f.length === 0) {
+        e.preventDefault();
+        dlgRef.current.focus();
+        return;
+      }
+      const first = f[0];
+      const last = f[f.length - 1];
+      const active = document.activeElement;
+      if (!dlgRef.current.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && (active === first || active === dlgRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      if (opener && opener.isConnected) {
+        opener.focus();
+      }
+    };
+  }, [open]);
 
   if (!open) {
     return null;
@@ -106,6 +157,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
       }}
     >
       <div
+        ref={dlgRef}
+        tabIndex={-1}
         className="ds-dialog"
         role="dialog"
         aria-modal="true"
