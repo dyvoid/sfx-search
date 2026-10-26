@@ -164,6 +164,30 @@ Sharp **2px** corners on all controls and panels; **full pill** only for switche
 ### Canvas Instruments
 - `EditorWaveform`, `MiniWaveform`, `SeamScope`, `EqResponseGraph`, `SpectrumMeter`, `VariationWaveCardCanvas` — all read palette from the same tokens (`resolvePalette`/`readTokenColor`); canvas is rebrand-safe by convention.
 
+## UX Rules
+
+Hard rules for every screen and state. They come from real review failures; check each new or
+changed screen against them in every state it can be in (first run, indexing, results, empty,
+error, each Studio module, each dialog).
+
+1. **Only what works now.** Show a control, hint or keyboard shortcut only when it can do
+   something in the current state. No disabled-but-visible chrome "for later": on first run
+   there is no search bar, transport or key-hint footer, just the setup.
+2. **No fake values.** No example data in fields or placeholders (`D:/SFX`, sample names). An
+   empty field is empty; the label says what goes in it.
+3. **No insider vocabulary.** Users never see implementation names: RRF, BM25, CLAP, chunk,
+   embedding, rule IDs. Describe what the user gets, not how it is computed.
+4. **Name the capability, not an example of it.** A free-text path field is "enter a path",
+   not "paste a path". Labels must not narrow what a control accepts.
+5. **One obvious main action per screen or panel.** The common path is primary; alternatives
+   are visibly secondary (quiet link, ghost button), never the other way around.
+6. **Every element earns its place.** No headers, captions or frames that restate the
+   obvious (a table header "Folder path / Action" over a list of folders with a Remove button).
+7. **Data keeps its shape.** Paths, filenames and user text are shown as-is: never uppercased,
+   truncated mid-word without a tooltip, or restyled into micro-labels.
+8. **Context follows the mode.** Module-specific controls appear only in their module (Test
+   Seam only in Seamless Loop); status-bar hints match the active screen.
+
 ## Do's and Don'ts
 
 ### Do:

@@ -100,6 +100,10 @@ export interface ApiOptions {
   saveDelayMs: number;
   /** Length of the decodeable WAV served by /api/audio/*. */
   audioSeconds: number;
+  /** Configured library folders ([] = first run, nothing set up). */
+  roots: string[];
+  /** Configured folders reported as not found on disk. */
+  missingRoots: string[];
 }
 
 export const DEFAULT_API_OPTIONS: ApiOptions = {
@@ -111,6 +115,8 @@ export const DEFAULT_API_OPTIONS: ApiOptions = {
   saveErrorDetail: "Save failed",
   saveDelayMs: 0,
   audioSeconds: 10,
+  roots: ["/lib"],
+  missingRoots: [],
 };
 
 export class MockApi {
@@ -142,7 +148,7 @@ export class MockApi {
       total_size_bytes: total * 200_000,
       embedding_model: "laion/larger_clap_general",
       embedding_dim: 512,
-      roots: ["/lib"],
+      roots: this.opts.roots,
       formats: { wav: total },
       favorites_count: this.favorites.size,
     };
@@ -171,8 +177,8 @@ export class MockApi {
     const json = (body: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     const library = () => ({
-      roots: ["/lib"],
-      missing_roots: [],
+      roots: this.opts.roots,
+      missing_roots: this.opts.missingRoots,
       stats: this.stats(),
       indexing: this.indexing(),
     });
