@@ -262,6 +262,27 @@ def _is_under(path_low: str, root_low: str) -> bool:
     return path_low == root_low or path_low.startswith(root_low + "/")
 
 
+def _is_protected(path_low: str, prefixes: set[str]) -> bool:
+    """True if path_low equals or lies under any prefix (rstripped, lower-case).
+
+    Walks ancestors instead of scanning every prefix; stops at a drive (`d:`)
+    or at the share of a UNC path (`//srv/share`), never above it.
+    """
+    p = path_low
+    while True:
+        if p in prefixes:
+            return True
+        i = p.rfind("/")
+        if i < 0:
+            return False
+        if i == 0:
+            return "" in prefixes and p != "/"
+        parent = p[:i]
+        if parent.startswith("//") and "/" not in parent[2:]:
+            return False
+        p = parent
+
+
 def run_indexer(
     config: Config,
     store: SfxStore,
@@ -321,7 +342,7 @@ def run_indexer(
     # root always errors on e.g. "System Volume Information".
     for err_dir in walk_errors:
         logger.warning("Unreadable directory (not marking files missing): %s", err_dir)
-    protected = [r.lower().rstrip("/") for r in offline_roots] + [e.rstrip("/") for e in errors_low]
+    protected = {r.lower().rstrip("/") for r in offline_roots} | {e.rstrip("/") for e in errors_low}
 
     diff = diff_manifest(
         scanned=scanned_files,
@@ -333,7 +354,7 @@ def run_indexer(
     missing_ids = [
         fid
         for fid in diff.missing_ids
-        if not any(_is_under(existing_manifest[fid].path.lower(), rl) for rl in protected)
+        if not _is_protected(existing_manifest[fid].path.lower(), protected)
     ]
     if missing_ids:
         store.mark_missing(missing_ids)

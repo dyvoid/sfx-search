@@ -68,7 +68,7 @@ def _split_words(text: str) -> list[str]:
 def _fold_accents(token: str) -> str:
     decomposed = unicodedata.normalize("NFKD", token)
     return unicodedata.normalize(
-        "NFC", "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+        "NFC", "".join(c for c in decomposed if not "\u0300" <= c <= "\u036f")
     )
 
 
@@ -110,7 +110,12 @@ def tokenize_identifier(text: str) -> list[str]:
                 continue
             tokens.append(low)
             folded = _fold_accents(low)
-            if folded != low and len(folded) >= 2:
+            if (
+                folded != low
+                and len(folded) >= 2
+                and not folded.isdigit()
+                and folded not in NOISE_TOKENS
+            ):
                 tokens.append(folded)
     return tokens
 
