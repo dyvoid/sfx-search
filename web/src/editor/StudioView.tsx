@@ -98,6 +98,8 @@ const LabelWithTip: React.FC<{ label: string; tip: string }> = ({
 
 interface StudioViewProps {
   hit: SearchHit | null;
+  /** A local file to edit instead of a library hit (opened by dropping it on the library). */
+  localFile?: File | null;
   hasPrev: boolean;
   hasNext: boolean;
   onPrevHit: () => void;
@@ -116,6 +118,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onBackToLibrary,
   onFindSimilarFromAudio,
   onSavedToLibrary,
+  localFile = null,
 }) => {
   const waveRef = useRef<EditorWaveformHandle | null>(null);
   const transportRef = useRef<StudioTransport | null>(null);
@@ -393,6 +396,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
       reportError(`Could not decode file: ${msg}`);
     }
   }, []);
+
+  useEffect(() => {
+    if (localFile) {
+      void loadLocalFile(localFile);
+    }
+  }, [localFile, loadLocalFile]);
 
   // Recompute Processed Channels whenever source, shaper, or eq changes
   const prevProcLenRef = useRef<number>(0);

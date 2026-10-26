@@ -48,7 +48,3 @@ Format: what, decision, why. Newest last within each section.
   pre-existing, possibly intended (keeps typing context).
 - **MCP `batch_search` over-limit error text is hidden by FastMCP** ("Error executing tool
   batch_search"). Accepted: the call still fails loudly instead of truncating silently.
-- **Studio without a library file (local-file mode) is no longer reachable.** The top-bar
-  "Edit Audio" button was its only entry; Edit Audio remains in the inspector, the row icon and
-  the E key (all need a selected row). The matching S5 e2e test is `fixme` until a new entry
-  point exists.

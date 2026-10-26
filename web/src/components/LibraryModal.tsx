@@ -231,7 +231,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
             <div className="ds-toast">
               <span className="ds-toast-dot danger" />
               <div className="ds-toast-body">
-                <div className="ds-toast-title">Indexer error</div>
+                <div className="ds-toast-title">Scanning stopped</div>
                 <div className="ds-toast-msg">{indexing.error}</div>
               </div>
             </div>

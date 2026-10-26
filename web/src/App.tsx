@@ -581,6 +581,9 @@ export const App: React.FC = () => {
 
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
   const [appView, setAppView] = useState<"library" | "editor">("library");
+  // A file dropped on "Edit in Studio": the Studio edits it instead of the selected hit.
+  const [localStudioFile, setLocalStudioFile] = useState<File | null>(null);
+  const [dropZone, setDropZone] = useState<"similar" | "edit" | null>(null);
   // Below the 960px breakpoint the inspector is a blocking overlay, so it
   // starts collapsed there -- the edge tab (or Enter) opens it explicitly.
   const [detailOpen, setDetailOpen] = useState<boolean>(
@@ -1486,10 +1489,12 @@ export const App: React.FC = () => {
           return;
         }
         setIsDraggingFile(false);
+        setDropZone(null);
       }}
       onDrop={(e) => {
         e.preventDefault();
         setIsDraggingFile(false);
+        setDropZone(null);
         if (!hasIndexedFiles) {
           return;
         }
@@ -1551,18 +1556,50 @@ export const App: React.FC = () => {
         }}
       />
 
-      {/* Drag & drop reference overlay */}
+      {/* Drop targets while a file is dragged over the library. A drop
+          outside "Edit in Studio" falls through to the shell: find similar. */}
       {isDraggingFile && (
-        <div className="ds-scrim">
-          <div className="ds-dialog" style={{ width: 440, textAlign: "center" }}>
-            <div className="ds-dialog-body">
-              <div className="ds-empty">
-                <div className="ds-empty-title">Drop reference audio</div>
-                <div className="ds-empty-desc">
-                  Release any WAV, FLAC, AIFF, MP3, OGG, or M4A file to search
-                  for acoustically similar sounds.
-                </div>
-              </div>
+        <div className="ds-scrim sfx-drop-scrim">
+          <div className="sfx-drop-zones">
+            <div
+              className={`sfx-drop-zone ${dropZone === "similar" ? "over" : ""}`}
+              onDragOver={() => setDropZone("similar")}
+            >
+              <Sparkles size={22} />
+              <div className="sfx-drop-zone-title">Find similar sounds</div>
+            </div>
+            <div
+              className={`sfx-drop-zone ${dropZone === "edit" ? "over" : ""}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDropZone("edit");
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingFile(false);
+                setDropZone(null);
+                const selfId = e.dataTransfer.getData(
+                  "application/x-sfxsearch-file-id"
+                );
+                if (selfId) {
+                  const idx = resultsRef.current.findIndex(
+                    (h) => h.file_id === selfId
+                  );
+                  if (idx >= 0) {
+                    openEditorForHit(idx);
+                  }
+                  return;
+                }
+                const f = e.dataTransfer.files?.[0];
+                if (f) {
+                  setLocalStudioFile(f);
+                  openEditorForHit();
+                }
+              }}
+            >
+              <Sliders size={22} />
+              <div className="sfx-drop-zone-title">Edit in Studio</div>
             </div>
           </div>
         </div>
@@ -1583,7 +1620,8 @@ export const App: React.FC = () => {
 
       {appView === "editor" ? (
         <StudioView
-          hit={selectedHit}
+          hit={localStudioFile ? null : selectedHit}
+          localFile={localStudioFile}
           hasPrev={selectedIndex > 0}
           hasNext={selectedIndex < results.length - 1}
           onPrevHit={() =>
@@ -1594,7 +1632,10 @@ export const App: React.FC = () => {
               Math.min(results.length - 1, prev + 1)
             )
           }
-          onBackToLibrary={() => setAppView("library")}
+          onBackToLibrary={() => {
+            setLocalStudioFile(null);
+            setAppView("library");
+          }}
           onFindSimilarFromAudio={(file) => {
             setAppView("library");
             void handleDropFile(file);
@@ -2080,6 +2121,23 @@ export const App: React.FC = () => {
               </button>
             </div>
           )}
+
+      {/* A failed scan with sounds already indexed (first run shows it in SetupPanel) */}
+      {hasIndexedFiles && indexing?.state === "error" && indexing.error && (
+        <div className="sfx-warning-banner" role="alert">
+          <AlertTriangle size={14} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1 }} title={indexing.error}>
+            Scanning stopped: {indexing.error.split(/\r?\n/)[0]}
+          </span>
+          <button
+            type="button"
+            onClick={() => void handleRescan(false)}
+            className="ds-btn ds-btn-ghost ds-btn-sm"
+          >
+            Try again
+          </button>
+        </div>
+      )}
 
       {/* Missing Library Roots Warning */}
       {missingRoots.length > 0 && (

@@ -23,6 +23,23 @@ const timeNow = (page: Page) => page.locator(".sfx-tp-time span").first();
 const snapCheckbox = (page: Page) => page.getByRole("checkbox", { name: /Snap markers/ });
 const outputGain = (page: Page) => page.getByLabel("Output Gain (dB)", { exact: true });
 
+/** Drag a WAV over the library and drop it on the named drop target. */
+async function dropFile(page: Page, target: string, name: string): Promise<void> {
+  const dt = await page.evaluateHandle(
+    ([b64, fileName]) => {
+      const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const data = new DataTransfer();
+      data.items.add(new File([bytes], fileName, { type: "audio/wav" }));
+      return data;
+    },
+    [makeWav(1).toString("base64"), name] as const
+  );
+  await page.locator(".sfx-shell").dispatchEvent("dragover", { dataTransfer: dt });
+  const zone = page.locator(".sfx-drop-zone", { hasText: target });
+  await zone.dispatchEvent("dragover", { dataTransfer: dt });
+  await zone.dispatchEvent("drop", { dataTransfer: dt });
+}
+
 /** Count `new Worker(...)` calls from now on (the loop finder spawns one per run). */
 async function countWorkers(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -328,24 +345,21 @@ test.describe("Studio, save chord (S5)", () => {
     await expect(saveDialog(app)).toBeVisible();
   });
 
-  // The top-bar "Edit Audio" button was the only way into the Studio without a
-  // library file; with it gone, local-file mode is unreachable from the UI.
-  test.fixme("S5 without a library file (local file) Ctrl+S downloads instead of opening the dialog", async ({
+  test("a file dropped on Find similar sounds searches by it and stays in the library", async ({
+    app,
+    api,
+  }) => {
+    await dropFile(app, "Find similar sounds", "ref.wav");
+    await expect.poll(() => api.callsTo("POST /api/similar/upload").length).toBe(1);
+    await expect(studioShell(app)).toHaveCount(0);
+  });
+
+  test("S5 without a library file (local file) Ctrl+S downloads instead of opening the dialog", async ({
     app,
   }) => {
-    // Favorites-only with no favorites -> empty results -> the Studio has no library file.
-    await app.getByRole("button", { name: /^Filters/ }).click();
-    await app.getByRole("checkbox", { name: "Favorites only" }).click();
-    await expect(app.locator(".sfx-row")).toHaveCount(0);
-    await app.getByRole("button", { name: "Edit Audio" }).click();
+    await dropFile(app, "Edit in Studio", "local.wav");
     await expect(studioShell(app)).toBeVisible();
     await expect(app.getByRole("button", { name: "Save to Library" })).toHaveCount(0);
-
-    await app.locator("input[type=file][hidden]").setInputFiles({
-      name: "local.wav",
-      mimeType: "audio/wav",
-      buffer: makeWav(1),
-    });
     await expect(app.getByRole("button", { name: "Export WAV" })).toBeEnabled();
     await expect(app.locator(".sfx-editor-filename")).toHaveText("local.wav");
 

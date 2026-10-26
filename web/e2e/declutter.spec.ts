@@ -261,3 +261,15 @@ test.describe("scan in progress with sounds", () => {
     await expect(banner.getByRole("button", { name: "Details" })).toHaveCount(0);
   });
 });
+
+test.describe("library: scan failed with sounds indexed", () => {
+  test.use({ apiOptions: { indexingError: "CUDA error: no kernel image\nstack line" } });
+
+  test("shows the first error line with Try again", async ({ app, api }) => {
+    const banner = app.getByRole("alert").filter({ hasText: "Scanning stopped" });
+    await expect(banner).toContainText("CUDA error: no kernel image");
+    await expect(banner).not.toContainText("stack line");
+    await banner.getByRole("button", { name: "Try again" }).click();
+    await expect.poll(() => api.callsTo("POST /api/library/rescan").length).toBe(1);
+  });
+});

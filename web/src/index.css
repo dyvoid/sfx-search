@@ -2232,3 +2232,36 @@ button.ds-check:focus-visible {
   border-radius: var(--radius-xs);
   box-shadow: var(--focus-ring);
 }
+
+/* Drop targets shown while a file is dragged over the library */
+.sfx-drop-zones {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.sfx-drop-zone {
+  width: 240px;
+  height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  border: var(--border-width) dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-panel);
+  color: var(--text-secondary);
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+
+.sfx-drop-zone.over {
+  border-color: var(--primary-400);
+  border-style: solid;
+  color: var(--text-primary);
+  background: var(--surface-raised);
+}
+
+.sfx-drop-zone-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
