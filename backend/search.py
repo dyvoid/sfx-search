@@ -35,7 +35,7 @@ SortMode = Literal[
 ]
 
 _INLINE_DUR_RE = re.compile(
-    r"\bdur:(?:(\d+(?:\.\d+)?))?-(?:(\d+(?:\.\d+)?))?(?=\s|$)", re.IGNORECASE
+    r"\bdur:(?:(\d+(?:\.\d+)?))?-(?:(\d+(?:\.\d+)?))?(?=\s|$|[,.;:)\]])", re.IGNORECASE
 )
 _INLINE_DUR_CMP_RE = re.compile(r"\bdur:([<>]=?)(\d+(?:\.\d+)?)\b", re.IGNORECASE)
 _INLINE_LOOP_RE = re.compile(r"\bloop:(true|false|\d+(?:\.\d+)?)\b", re.IGNORECASE)

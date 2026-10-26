@@ -116,8 +116,10 @@ def create_mcp_server(
             favorites_only=favorites_only,
             min_loop_score=min_loop_score,
         )
+        if len(queries) > MAX_BATCH_QUERIES:
+            raise ValueError(f"batch_search accepts at most {MAX_BATCH_QUERIES} queries per batch")
         batch_out: list[dict[str, Any]] = []
-        for q in queries[:MAX_BATCH_QUERIES]:
+        for q in queries:
             hits = engine.search(query=q, k=k, mode=mode, filters=filters)
             batch_out.append(
                 {

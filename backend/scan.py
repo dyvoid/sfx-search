@@ -84,6 +84,7 @@ def walk_roots(
     roots: Iterable[str | Path],
     extensions: Iterable[str],
     limit: int | None = None,
+    errors: list[str] | None = None,
 ) -> list[ScannedFile]:
     allowed_exts = {ext.lower() if ext.startswith(".") else f".{ext.lower()}" for ext in extensions}
     results: list[ScannedFile] = []
@@ -98,7 +99,14 @@ def walk_roots(
         # Junctions/symlinked dirs are followed (common for SFX libraries split
         # across drives); realpath dedup prevents ancestor-cycle loops.
         seen_dirs: set[str] = set()
-        for dirpath, dirnames, filenames in os.walk(os_root, followlinks=True):
+
+        def _on_error(exc: OSError, root_path: str = os_root) -> None:
+            # os.walk silently skips unreadable directories; report them so
+            # callers can avoid treating the unseen files as deleted.
+            if errors is not None:
+                errors.append(normalize_path(exc.filename or root_path))
+
+        for dirpath, dirnames, filenames in os.walk(os_root, followlinks=True, onerror=_on_error):
             dirnames.sort()
             filenames.sort()
             real_dir = os.path.normcase(os.path.realpath(dirpath))

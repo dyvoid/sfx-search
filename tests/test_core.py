@@ -29,6 +29,7 @@ from sfxsearch.features import (
 from sfxsearch.indexer import run_indexer
 from sfxsearch.metadata import extract_metadata, parse_wav_chunks, tokenize_identifier
 from sfxsearch.scan import (
+    ScannedFile,
     compute_file_id,
     normalize_path,
     to_os_path,
@@ -434,8 +435,8 @@ def test_slice_audio_windows_deterministic_and_last_window_aligned() -> None:
 
 
 def test_tokenize_identifier_keeps_non_ascii_letters() -> None:
-    assert tokenize_identifier("Türknall_01") == ["türknall"]
-    assert tokenize_identifier("café_door") == ["café", "door"]
+    assert tokenize_identifier("Türknall_01") == ["türknall", "turknall"]
+    assert tokenize_identifier("café_door") == ["café", "cafe", "door"]
     assert tokenize_identifier("雨音_heavy") == ["雨音", "heavy"]
 
 
@@ -499,6 +500,7 @@ def test_indexer_offline_root_is_not_marked_missing(tmp_path: Path) -> None:
     # A root removed from config still gets its files marked missing as before.
     other = tmp_path / "other"
     write_sine_wav(other / "c.wav", freq_hz=300.0, duration_s=1.0)
+    write_sine_wav(other / "d.wav", freq_hz=350.0, duration_s=1.0)
     cfg2 = cfg.model_copy(update={"library": LibraryConfig(roots=[str(lib_root), str(other)])})
     run_indexer(config=cfg2, store=store, embedder=embedder)
     (other / "c.wav").unlink()
@@ -523,3 +525,88 @@ def test_search_clamps_k(tmp_path: Path) -> None:
     assert len(engine.search("rain", k=0)) == 1
     assert len(engine.search("", k=0)) == 1
     assert len(engine.search("rain", k=10_000)) == 4
+
+
+def test_tokenize_identifier_normalizes_and_folds_accents() -> None:
+    import unicodedata
+
+    nfc = tokenize_identifier("café_door")
+    nfd = tokenize_identifier(unicodedata.normalize("NFD", "café_door"))
+    assert nfc == nfd
+    assert "café" in nfc and "cafe" in nfc and "door" in nfc
+    assert tokenize_identifier("ครัว")[0] == "ครัว"
+    toks = tokenize_identifier("Türknall_01")
+    assert "türknall" in toks and "turknall" in toks
+
+
+def test_parse_query_open_ended_duration_with_punctuation() -> None:
+    from sfxsearch.search import parse_query
+
+    p = parse_query("rain (dur:5-10)")
+    assert (p.filters.min_duration, p.filters.max_duration) == (5.0, 10.0)
+    assert p.semantic_query.startswith("rain") and "dur" not in p.semantic_query
+    p2 = parse_query("rain dur:5-10, thunder")
+    assert (p2.filters.min_duration, p2.filters.max_duration) == (5.0, 10.0)
+    assert "dur" not in p2.semantic_query and "thunder" in p2.semantic_query
+
+
+def test_config_rejects_hop_larger_than_window() -> None:
+    with pytest.raises(ValidationError):
+        Config.model_validate({"embedding": {"window_s": 5.0, "hop_s": 10.0}})
+
+
+def test_indexer_empty_existing_root_keeps_files(tmp_path: Path) -> None:
+    lib_root = tmp_path / "library"
+    write_sine_wav(lib_root / "a.wav", freq_hz=200.0, duration_s=1.0)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+        indexing=IndexingConfig(decode_workers=1),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+    chunks_before = store.db.open_table("chunks").count_rows()
+
+    (lib_root / "a.wav").unlink()  # root still exists but is empty (e.g. unmounted)
+    stats = run_indexer(config=cfg, store=store, embedder=embedder)
+    assert stats.marked_missing == 0
+    assert stats.offline_roots == [normalize_path(lib_root)]
+    assert store.get_library_stats()["ok_files"] == 1
+    assert store.db.open_table("chunks").count_rows() == chunks_before
+
+
+def test_indexer_walk_error_protects_only_that_subtree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sfxsearch.indexer as indexer_mod
+
+    lib_root = tmp_path / "library"
+    write_sine_wav(lib_root / "locked" / "a.wav", freq_hz=200.0, duration_s=1.0)
+    write_sine_wav(lib_root / "open" / "b.wav", freq_hz=400.0, duration_s=1.0)
+    write_sine_wav(lib_root / "open" / "c.wav", freq_hz=600.0, duration_s=1.0)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+        indexing=IndexingConfig(decode_workers=1),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+
+    locked = normalize_path(lib_root / "locked")
+
+    def walk_with_unreadable_dir(*args: object, **kwargs: object) -> list[ScannedFile]:
+        files = walk_roots(*args, **kwargs)  # type: ignore[arg-type]
+        errors = kwargs.get("errors")
+        if isinstance(errors, list):
+            errors.append(locked)
+        return [f for f in files if not f.path.lower().startswith(locked.lower() + "/")]
+
+    monkeypatch.setattr(indexer_mod, "walk_roots", walk_with_unreadable_dir)
+    (lib_root / "open" / "c.wav").unlink()
+    stats = run_indexer(config=cfg, store=store, embedder=embedder)
+    # The unreadable subtree is protected, but the rest of the root is not.
+    assert stats.marked_missing == 1
+    assert stats.offline_roots == []
+    assert store.get_library_stats()["ok_files"] == 2

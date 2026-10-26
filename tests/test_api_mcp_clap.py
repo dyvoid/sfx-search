@@ -443,6 +443,9 @@ async def test_mcp_server_tools(tmp_path: Path) -> None:
     batch_parsed = json.loads(batch_content[0].text)
     assert len(batch_parsed["batches"]) == 2
 
+    with pytest.raises(Exception, match="Error executing tool batch_search"):
+        await mcp.call_tool("batch_search", {"queries": [f"q{i}" for i in range(21)]})
+
     res_get = await mcp.call_tool("get_sound", {"file_id": compute_file_id(wav1)})
     get_content = getattr(res_get, "content", res_get)
     get_parsed = json.loads(get_content[0].text)
