@@ -51,7 +51,7 @@ Global principles:
 | S3 | Studio | `[` / `]` | Select the start / end marker (crop handle in Trim & Gain). |
 | S4 | Studio | ArrowLeft / ArrowRight | Nudge the active marker 1 ms; Shift = 10 ms; auto-repeat keeps nudging. |
 | S5 | Studio | Ctrl/Cmd+S | With a library file: open the save dialog. Without one (local file): download. Never the browser's Save Page dialog, including while audio is still decoding and on auto-repeat. Ctrl+Shift+S and Ctrl+Alt+S are not the save chord. Matched on the typed key, not the physical key. |
-| S6 | Studio | S / F / Home | Audition the loop seam / run loop search / restart the loop. |
+| S6 | Studio | S / F / Home | Audition the loop seam (Seamless Loop only; elsewhere S is not handled and the Test Seam button is hidden) / run loop search / restart the loop. |
 | S7 | slider (range input) focused | ArrowLeft/Right/Up/Down, Home, End, PageUp/Down | Move the slider natively; no marker nudge. |
 | S8 | slider focused | Space, Digit1–4, Ctrl/Cmd+S | Studio shortcuts still work. |
 | S9 | checkbox / radio focused | Space / Enter | Toggle natively, once per press. |

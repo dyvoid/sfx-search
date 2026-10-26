@@ -1545,8 +1545,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
           }
           break;
         case "KeyS":
-          e.preventDefault();
-          auditionSeam();
+          if (activeModule === "loop") {
+            e.preventDefault();
+            auditionSeam();
+          }
           break;
         case "BracketLeft":
           e.preventDefault();
@@ -1606,6 +1608,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     restartLoop,
     runLoopSearch,
     auditionSeam,
+    activeModule,
     activeMarker,
     loopStart,
     loopEnd,
@@ -2098,7 +2101,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </span>
           </div>
 
-          {(loopEnabled || activeModule === "loop") && (
+          {activeModule === "loop" && (
             <button
               type="button"
               disabled={!processedChannels}
@@ -3758,7 +3761,8 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
           <span className="ds-tnum">{statusMsg}</span>
         )}
         <span className="sfx-statusbar-shortcuts">
-          Space preview · F find loops · S test seam · Ctrl+S save · 1–4 modules ·
+          Space preview · F find loops ·{" "}
+          {activeModule === "loop" ? "S test seam · " : ""}Ctrl+S save · 1–4 modules ·
           [ / ] pick marker · ←/→ nudge (Shift 10ms) · Scroll zoom · Drag
           pan · Esc back to library
         </span>

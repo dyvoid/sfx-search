@@ -139,6 +139,22 @@ test.describe("Studio, nothing focused", () => {
     await expect(statusbar(app)).toContainText("Auditioning loop seam");
   });
 
+  test("S6 S and the Test Seam button are Seamless Loop only", async ({ app }) => {
+    const testSeam = app.getByRole("button", { name: "Test Seam" });
+    // Nudging a loop marker enables the loop; the button must still stay in its module.
+    await app.keyboard.press("Digit3");
+    await app.keyboard.press("ArrowRight");
+    await expect(testSeam).toBeVisible();
+    for (const digit of ["Digit1", "Digit2", "Digit4"]) {
+      await app.keyboard.press(digit);
+      await expect(testSeam).toHaveCount(0);
+      await app.keyboard.press("s");
+      await expect(studioPlayButton(app)).not.toHaveClass(/playing/);
+    }
+    await app.keyboard.press("Digit3");
+    await expect(testSeam).toBeVisible();
+  });
+
   test("S6 F runs the loop search", async ({ app }) => {
     await countWorkers(app);
     await app.keyboard.press("Digit3");
