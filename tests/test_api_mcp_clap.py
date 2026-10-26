@@ -327,6 +327,34 @@ def test_save_edited_overwrite_keeps_target_user_data(tmp_path: Path) -> None:
     assert hit["user_tags"] == ["keep", "loop"]
 
 
+def test_save_edited_rejects_riff_header_with_junk_body(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    before = wav.read_bytes()
+    junk = b"RIFF\x00\x00\x00\x00WAVE" + b"x" * 100
+    r = client.post(
+        f"/api/files/{wid}/save-edited",
+        params={"overwrite": "true"},
+        files={"file": ("x.wav", junk, "audio/wav")},
+    )
+    assert r.status_code == 400
+    assert wav.read_bytes() == before
+    assert not list(wav.parent.glob("*.tmp"))
+
+
+def test_save_edited_ignores_orphan_target_user_data(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    body = {"favorite": False, "user_tags": ["src"], "note": "srcnote"}
+    assert client.put(f"/api/files/{wid}/user", json=body).status_code == 200
+    oid = _post_edit(client, wid, tmp_path, name="other").json()["hit"]["file_id"]
+    stale = {"favorite": True, "user_tags": ["stale"], "note": "stale"}
+    assert client.put(f"/api/files/{oid}/user", json=stale).status_code == 200
+    (wav.parent / "other.wav").unlink()
+    hit = _post_edit(client, wid, tmp_path, name="other").json()["hit"]
+    assert hit["note"] == "srcnote"
+    assert hit["favorite"] is False
+    assert hit["user_tags"] == ["src", "loop"]
+
+
 def test_save_edited_long_name_is_bounded(tmp_path: Path) -> None:
     client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
     r = _post_edit(client, wid, tmp_path, name="a" * 600)
