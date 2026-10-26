@@ -1399,22 +1399,46 @@ export const StudioView: React.FC<StudioViewProps> = ({
         }
         return;
       }
+      const inputType =
+        tag === "input" ? (target as HTMLInputElement).type : "";
+      const nonTextInput = ["range", "checkbox", "radio", "button"].includes(
+        inputType
+      );
+      const isSaveChord = e.code === "KeyS" && (e.ctrlKey || e.metaKey);
+      const runSave = () => {
+        if (saveDlg || !processedChannels) {
+          return;
+        }
+        if (hit) {
+          openSaveDialog();
+        } else {
+          handleExportDownload();
+        }
+      };
       if (
-        tag === "input" ||
+        (tag === "input" && !nonTextInput) ||
         tag === "textarea" ||
         tag === "select" ||
         target?.isContentEditable
       ) {
-        if (e.code === "KeyS" && (e.ctrlKey || e.metaKey)) {
+        if (isSaveChord) {
           e.preventDefault(); // block the browser's "Save page" dialog
+          runSave();
         }
         if (e.key === "Escape") {
           target?.blur();
         }
         return;
       }
+      if (nonTextInput && e.key === "Escape" && !saveDlg) {
+        target?.blur();
+        return;
+      }
 
       if (saveDlg) {
+        if (isSaveChord) {
+          e.preventDefault();
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           setSaveDlg(false);
@@ -1443,6 +1467,29 @@ export const StudioView: React.FC<StudioViewProps> = ({
           "button, a, [role='button'], [role='option'], [role='menuitem'], [role='switch'], [role='checkbox'], [role='tab']"
         )
       );
+
+      // Keep native keys native on focused sliders / checkboxes.
+      if (
+        inputType === "range" &&
+        [
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowDown",
+          "Home",
+          "End",
+          "PageUp",
+          "PageDown",
+        ].includes(e.code)
+      ) {
+        return;
+      }
+      if (
+        (inputType === "checkbox" || inputType === "radio") &&
+        (e.code === "Space" || e.code === "Enter")
+      ) {
+        return;
+      }
 
       switch (e.code) {
         case "Space":
