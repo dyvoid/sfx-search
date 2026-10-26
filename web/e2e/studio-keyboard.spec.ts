@@ -155,6 +155,17 @@ test.describe("Studio, nothing focused", () => {
     await expect(testSeam).toBeVisible();
   });
 
+  test("S3/S4/S6 marker keys and F do nothing in modules without markers", async ({ app }) => {
+    for (const digit of ["Digit2", "Digit4"]) {
+      await app.keyboard.press(digit);
+      for (const code of ["BracketLeft", "ArrowRight", "KeyF"]) {
+        expect(await keydownPrevented(app, { code, key: code === "KeyF" ? "f" : code })).toBe(false);
+      }
+      await expect(statusbar(app)).not.toContainText("F find loops");
+      await expect(statusbar(app)).not.toContainText("nudge");
+    }
+  });
+
   test("S6 F runs the loop search", async ({ app }) => {
     await countWorkers(app);
     await app.keyboard.press("Digit3");

@@ -460,11 +460,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
       cropStartSamples,
     ]
   );
+  // Latest marker positions for the keyboard handler. Synced every render and
+  // advanced immediately on each nudge, so keys pressed faster than React
+  // re-registers the handler build on the newest position, not a stale one.
+  const markersRef = useRef({ cropIn: 0, cropOut: 0, loopStart: 0, loopEnd: 0 });
+  markersRef.current = {
+    cropIn: cropStartSamples,
+    cropOut: cropEndSamples,
+    loopStart,
+    loopEnd,
+  };
 
   const updateCropPoints = useCallback(
-    (nextInSample: number, nextOutSample: number) => {
+    (nextInSample: number, nextOutSample: number): [number, number] | null => {
       if (rawTotalSamples < 4) {
-        return;
+        return null;
       }
       const clampedIn = Math.max(
         0,
@@ -484,6 +494,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
         trimStartMs: nextTrimStartMs,
         trimEndMs: nextTrimEndMs,
       }));
+      // The positions the new state will derive (ms-rounded, as cropStart/EndSamples do).
+      const inSamples = Math.round((nextTrimStartMs / 1000) * sampleRate);
+      return [
+        inSamples,
+        Math.max(
+          inSamples + 4,
+          rawTotalSamples - Math.round((nextTrimEndMs / 1000) * sampleRate)
+        ),
+      ];
     },
     [rawTotalSamples, sampleRate]
   );
@@ -596,10 +615,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
   );
 
   const updateLoopPoints = useCallback(
-    (nextStart: number, nextEnd: number, shouldSnap = snapZero) => {
+    (
+      nextStart: number,
+      nextEnd: number,
+      shouldSnap = snapZero
+    ): [number, number] | null => {
       const ch = processedChannels?.[0] ?? sourceChannels?.[0];
       if (!ch) {
-        return;
+        return null;
       }
       const len = ch.length;
       const s = shouldSnap ? snapSample(nextStart, true) : Math.round(nextStart);
@@ -610,6 +633,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       setLoopEnd(clampedE);
       setLoopEnabled(true);
       setSaveSuffix((prev) => (prev === ".edit" ? ".loop" : prev));
+      return [clampedS, clampedE];
     },
     [processedChannels, sourceChannels, snapZero, snapSample]
   );
@@ -1526,6 +1550,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
         return;
       }
 
+      // Markers exist only in Trim & Gain (crop handles) and Seamless Loop.
+      const hasMarkers = activeModule === "shaper" || activeModule === "loop";
+      if (
+        !hasMarkers &&
+        ["BracketLeft", "BracketRight", "ArrowLeft", "ArrowRight"].includes(e.code)
+      ) {
+        return;
+      }
+
       switch (e.code) {
         case "Space":
           if (onControl) {
@@ -1539,7 +1572,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           restartLoop();
           break;
         case "KeyF":
-          if (!e.ctrlKey && !e.metaKey) {
+          if (activeModule === "loop" && !e.ctrlKey && !e.metaKey) {
             e.preventDefault();
             runLoopSearch();
           }
@@ -1572,16 +1605,23 @@ export const StudioView: React.FC<StudioViewProps> = ({
         case "ArrowRight": {
           e.preventDefault();
           const delta = (e.code === "ArrowRight" ? 1 : -1) * stepSamples;
+          const m = markersRef.current;
           if (activeModule === "shaper") {
-            if (activeMarker === "start") {
-              updateCropPoints(cropStartSamples + delta, cropEndSamples);
-            } else {
-              updateCropPoints(cropStartSamples, cropEndSamples + delta);
+            const next =
+              activeMarker === "start"
+                ? updateCropPoints(m.cropIn + delta, m.cropOut)
+                : updateCropPoints(m.cropIn, m.cropOut + delta);
+            if (next) {
+              [m.cropIn, m.cropOut] = next;
             }
-          } else if (activeMarker === "start") {
-            updateLoopPoints(loopStart + delta, loopEnd, false);
           } else {
-            updateLoopPoints(loopStart, loopEnd + delta, false);
+            const next =
+              activeMarker === "start"
+                ? updateLoopPoints(m.loopStart + delta, m.loopEnd, false)
+                : updateLoopPoints(m.loopStart, m.loopEnd + delta, false);
+            if (next) {
+              [m.loopStart, m.loopEnd] = next;
+            }
           }
           break;
         }
@@ -1934,7 +1974,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             </span>
           </div>
         ) : (
-          (loopEnabled || activeModule === "loop") && (
+          activeModule === "loop" && (
             <div className="sfx-editor-stage-hud-left">
               <span className="sfx-hud-pill start">
                 <span className="dot" />S {(loopStart / sampleRate).toFixed(3)}s
@@ -1971,7 +2011,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           >
             <ZoomOut size={13} />
           </button>
-          {(loopEnabled || activeModule === "loop") && (
+          {activeModule === "loop" && (
             <>
               <button
                 type="button"
@@ -2132,7 +2172,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   : "—"}
               </strong>
             </span>
-            {(loopEnabled || activeModule === "loop") && (
+            {activeModule === "loop" && (
               <span title="Computed loop seam continuity score">
                 Seam{" "}
                 <strong
@@ -3721,10 +3761,20 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
           <span className="ds-tnum">{statusMsg}</span>
         )}
         <span className="sfx-statusbar-shortcuts">
-          Space preview · F find loops ·{" "}
-          {activeModule === "loop" ? "S test seam · " : ""}Ctrl+S save · 1–4 modules ·
-          [ / ] pick marker · ←/→ nudge (Shift 10ms) · Scroll zoom · Drag
-          pan · Esc back to library
+          {[
+            "Space preview",
+            ...(activeModule === "loop" ? ["F find loops", "S test seam"] : []),
+            ...(activeModule === "shaper" ? ["[ / ] pick handle"] : []),
+            ...(activeModule === "loop" ? ["[ / ] pick marker"] : []),
+            ...(activeModule === "shaper" || activeModule === "loop"
+              ? ["←/→ nudge (Shift 10ms)"]
+              : []),
+            "Ctrl+S save",
+            "1–4 modules",
+            "Scroll zoom",
+            "Drag pan",
+            "Esc back to library",
+          ].join(" · ")}
         </span>
       </footer>
 
