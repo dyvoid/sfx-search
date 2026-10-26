@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Check,
   Copy,
   FolderOpen,
   Heart,
@@ -116,7 +117,13 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   };
 
   const reportError = (err: unknown) => {
-    setActionError(err instanceof Error ? err.message : "Action failed");
+    setActionError(
+      err instanceof Error
+        ? err.message
+        : typeof err === "string"
+        ? err
+        : "Action failed"
+    );
   };
 
   const handleToggleFavorite = () => {
@@ -220,7 +227,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
           <div className="sfx-inspector-head-actions">
             <button
               type="button"
-              onClick={() => revealInExplorer(hit.file_id).catch(() => {})}
+              onClick={() => revealInExplorer(hit.file_id).catch(reportError)}
               className="sfx-icon-btn"
               aria-label="Reveal file in Explorer"
               title="Reveal file in Explorer"
@@ -234,7 +241,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               aria-label="Copy file path"
               title={copied ? "Copied!" : "Copy full path"}
             >
-              <Copy size={14} />
+              {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
           </div>
         </div>

@@ -28,6 +28,7 @@ export const DsSelect: React.FC<DsSelectProps> = ({
 }) => {
   const [open, setOpen] = useState<boolean>(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
 
   const selectedOption =
     options.find((o) => o.value === value) || options[0] || { value: "", label: "" };
@@ -44,6 +45,7 @@ export const DsSelect: React.FC<DsSelectProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setOpen(false);
+        triggerRef.current?.focus();
       }
     };
     document.addEventListener("mousedown", handlePointerDown);
@@ -54,9 +56,51 @@ export const DsSelect: React.FC<DsSelectProps> = ({
     };
   }, [open]);
 
+  // Move focus into the list on open so the arrow keys drive the options.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const opts = wrapRef.current?.querySelectorAll<HTMLElement>("[role='option']");
+    (wrapRef.current?.querySelector<HTMLElement>(".ds-select-option.sel") ??
+      opts?.[0])?.focus();
+  }, [open]);
+
+  const handleKeyNav = (e: React.KeyboardEvent) => {
+    if (!open) {
+      return;
+    }
+    if (e.key === "Tab") {
+      setOpen(false);
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    const opts = Array.from(
+      wrapRef.current?.querySelectorAll<HTMLElement>("[role='option']") ?? []
+    );
+    if (opts.length === 0) {
+      return;
+    }
+    const cur = opts.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+        ? opts.length - 1
+        : e.key === "ArrowDown"
+        ? Math.min(opts.length - 1, cur + 1)
+        : Math.max(0, cur - 1);
+    opts[next].focus();
+  };
+
   return (
     <div
       ref={wrapRef}
+      onKeyDown={handleKeyNav}
       style={{
         position: "relative",
         width,
@@ -66,6 +110,7 @@ export const DsSelect: React.FC<DsSelectProps> = ({
       }}
     >
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         aria-haspopup="listbox"
@@ -113,6 +158,7 @@ export const DsSelect: React.FC<DsSelectProps> = ({
                 onClick={() => {
                   onChange(opt.value);
                   setOpen(false);
+                  triggerRef.current?.focus();
                 }}
                 className={`ds-select-option ${isSel ? "sel" : ""}`}
               >
