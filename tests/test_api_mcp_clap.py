@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -211,6 +212,93 @@ def test_fastapi_endpoints_range_and_transcode(tmp_path: Path) -> None:
         )
     assert r_save2.status_code == 200
     assert r_save2.json()["hit"]["filename"] == "laser_zap_01.loop_2.wav"
+
+
+def _save_edited_client(tmp_path: Path) -> tuple[TestClient, Path, Path, str, str]:
+    lib_root = tmp_path / "sfx"
+    wav = write_sine_wav(lib_root / "SciFi" / "zap.wav", freq_hz=660.0, duration_s=1.0)
+    aiff = lib_root / "SciFi" / "door.aiff"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-y", "-v", "error", "-i", str(wav), "-acodec", "pcm_s16be"]
+        + [str(aiff)],
+        check=True,
+    )
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+    client = TestClient(create_app(config=cfg, store=store, embedder=embedder))
+    return client, wav, aiff, compute_file_id(wav), compute_file_id(aiff)
+
+
+def _post_edit(client: TestClient, fid: str, tmp_path: Path, **params: str) -> Any:
+    payload = tmp_path / "payload.wav"
+    write_sine_wav(payload, freq_hz=440.0, duration_s=0.5)
+    with payload.open("rb") as f:
+        return client.post(
+            f"/api/files/{fid}/save-edited",
+            params=params,
+            files={"file": ("x.wav", f, "audio/wav")},
+        )
+
+
+def test_save_edited_custom_name(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    d = wav.parent
+
+    r = _post_edit(client, wid, tmp_path, name="My Take.WAV")
+    assert r.status_code == 200
+    assert r.json()["hit"]["filename"] == "My Take.wav"
+    # Collision without overwrite auto-increments, and never touches the source.
+    r = _post_edit(client, wid, tmp_path, name="My Take")
+    assert r.json()["hit"]["filename"] == "My Take_2.wav"
+    src_bytes = wav.read_bytes()
+    r = _post_edit(client, wid, tmp_path, name="zap")
+    assert r.json()["hit"]["filename"] == "zap_2.wav"
+    assert wav.read_bytes() == src_bytes
+    # Overwrite replaces the named file in place.
+    r = _post_edit(client, wid, tmp_path, name="My Take", overwrite="true")
+    assert r.json()["hit"]["filename"] == "My Take.wav"
+    assert not (d / "My Take_3.wav").exists()
+
+    # Traversal / junk is flattened into the source directory or rejected.
+    r = _post_edit(client, wid, tmp_path, name="../../evil")
+    assert r.status_code == 200
+    assert Path(r.json()["hit"]["path"]).parent == d
+    assert not (tmp_path / "evil.wav").exists()
+    assert _post_edit(client, wid, tmp_path, name="..  ").status_code == 400
+    assert _post_edit(client, wid, tmp_path, name="///").status_code == 400
+
+
+@pytest.mark.parametrize("bad", ["CON", "nul", "COM1", "lpt9", "con.take", "Aux "])
+def test_save_edited_windows_reserved_names(tmp_path: Path, bad: str) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    r = _post_edit(client, wid, tmp_path, name=bad)
+    assert r.status_code == 200
+    stem = Path(r.json()["hit"]["filename"]).stem
+    assert stem.split(".")[0].strip().upper() not in {"CON", "NUL", "COM1", "LPT9", "AUX"}
+
+
+def test_save_edited_overwrite_never_writes_wav_into_non_wav_source(tmp_path: Path) -> None:
+    client, _wav, aiff, _wid, aid = _save_edited_client(tmp_path)
+    before = aiff.read_bytes()
+    r = _post_edit(client, aid, tmp_path, overwrite="true")
+    assert r.status_code == 400
+    assert aiff.read_bytes() == before
+    # A custom name is fine: writes a sibling .wav.
+    r = _post_edit(client, aid, tmp_path, overwrite="true", name="door_edit")
+    assert r.status_code == 200
+    assert aiff.read_bytes() == before
+
+
+def test_save_edited_long_name_is_bounded(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    r = _post_edit(client, wid, tmp_path, name="a" * 600)
+    assert r.status_code == 200
+    assert len(Path(r.json()["hit"]["filename"]).name) <= 255
 
 
 @pytest.mark.asyncio
