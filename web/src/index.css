@@ -2134,7 +2134,7 @@ button.ds-check:focus-visible {
   gap: var(--space-3);
 }
 
-.sfx-add-folder-paste {
+.sfx-add-folder-manual {
   display: flex;
   gap: var(--space-2);
 }

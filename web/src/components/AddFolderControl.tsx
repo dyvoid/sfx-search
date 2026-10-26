@@ -4,14 +4,14 @@ import { FolderPlus } from "lucide-react";
 interface AddFolderControlProps {
   /** Opens the native folder picker and adds the picked folder. */
   onBrowse: () => Promise<void>;
-  /** Adds a folder from a typed or pasted path. */
+  /** Adds a folder from a manually entered path. */
   onAddPath: (path: string) => Promise<void>;
   /** Render the picker button as the primary action (e.g. on the empty state). */
   primary?: boolean;
 }
 
 /**
- * Adding a library folder: the native picker is the action; a typed/pasted
+ * Adding a library folder: the native picker is the action; a manually entered
  * path is a secondary option revealed on demand.
  */
 export const AddFolderControl: React.FC<AddFolderControlProps> = ({
@@ -19,11 +19,11 @@ export const AddFolderControl: React.FC<AddFolderControlProps> = ({
   onAddPath,
   primary = false,
 }) => {
-  const [pasteOpen, setPasteOpen] = useState<boolean>(false);
+  const [manualOpen, setManualOpen] = useState<boolean>(false);
   const [path, setPath] = useState<string>("");
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
-  const pasteToggleRef = useRef<HTMLButtonElement | null>(null);
+  const manualToggleRef = useRef<HTMLButtonElement | null>(null);
 
   const run = async (action: () => Promise<void>): Promise<boolean> => {
     setBusy(true);
@@ -39,12 +39,12 @@ export const AddFolderControl: React.FC<AddFolderControlProps> = ({
     }
   };
 
-  const closePaste = () => {
-    setPasteOpen(false);
+  const closeManual = () => {
+    setManualOpen(false);
     setPath("");
     setError("");
     // The toggle re-mounts on the next render; focus it once it exists.
-    window.setTimeout(() => pasteToggleRef.current?.focus(), 0);
+    window.setTimeout(() => manualToggleRef.current?.focus(), 0);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,7 +54,7 @@ export const AddFolderControl: React.FC<AddFolderControlProps> = ({
       return;
     }
     if (await run(() => onAddPath(clean))) {
-      setPasteOpen(false);
+      setManualOpen(false);
       setPath("");
     }
   };
@@ -71,23 +71,23 @@ export const AddFolderControl: React.FC<AddFolderControlProps> = ({
           <FolderPlus size={14} />
           Add folder…
         </button>
-        {!pasteOpen && (
+        {!manualOpen && (
           <button
-            ref={pasteToggleRef}
+            ref={manualToggleRef}
             type="button"
             className="sfx-text-btn"
             onClick={() => {
               setError("");
-              setPasteOpen(true);
+              setManualOpen(true);
             }}
           >
-            or paste a path
+            or enter a path
           </button>
         )}
       </div>
 
-      {pasteOpen && (
-        <form onSubmit={handleSubmit} className="sfx-add-folder-paste">
+      {manualOpen && (
+        <form onSubmit={handleSubmit} className="sfx-add-folder-manual">
           <div
             className={`ds-input-box ${error ? "error" : ""}`}
             style={{ flex: 1 }}
@@ -114,7 +114,7 @@ export const AddFolderControl: React.FC<AddFolderControlProps> = ({
           >
             Add
           </button>
-          <button type="button" onClick={closePaste} className="ds-btn ds-btn-ghost">
+          <button type="button" onClick={closeManual} className="ds-btn ds-btn-ghost">
             Cancel
           </button>
         </form>

@@ -26,7 +26,7 @@ const isAudioPaused = (page: Page) =>
 const pathField = (page: Page) => page.getByRole("textbox", { name: "Folder path" });
 
 async function openPathField(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "or paste a path" }).click();
+  await page.getByRole("button", { name: "or enter a path" }).click();
   await expect(pathField(page)).toBeFocused();
 }
 
@@ -546,7 +546,7 @@ test.describe("Library (folders) modal", () => {
     expect(api.callsTo("POST /api/library/pick-folder")).toHaveLength(1);
   });
 
-  test("L20 or paste a path reveals an empty, focused field; Enter adds it", async ({
+  test("L20 or enter a path reveals an empty, focused field; Enter adds it", async ({
     app,
     api,
   }) => {
@@ -567,7 +567,7 @@ test.describe("Library (folders) modal", () => {
     await app.keyboard.type("D:/half");
     await app.getByRole("button", { name: "Cancel" }).click();
     await expect(pathField(app)).toHaveCount(0);
-    await expect(app.getByRole("button", { name: "or paste a path" })).toBeFocused();
+    await expect(app.getByRole("button", { name: "or enter a path" })).toBeFocused();
     expect(api.callsTo("POST /api/library/roots")).toEqual([]);
   });
 
