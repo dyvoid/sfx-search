@@ -2067,3 +2067,10 @@ body.sfx-resizing-x {
   transform: translateY(0);
 }
 
+
+/* Keyboard focus for the button-based Favorites-only checkbox. */
+button.ds-check:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-xs);
+}

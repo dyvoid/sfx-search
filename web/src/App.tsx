@@ -289,9 +289,16 @@ const ResultRow = React.memo(function ResultRow({
       ref={(el) => {
         rowRefs.current[idx] = el;
       }}
-      role="option"
-      aria-selected={isSelected}
+      role="listitem"
+      aria-current={isSelected || undefined}
       draggable
+      onClickCapture={(e) => {
+        // Mouse clicks must not leave focus on a row button (it would swallow
+        // Space/Enter); keyboard activations have detail === 0 and keep focus.
+        if (e.detail > 0 && e.target instanceof Element) {
+          (e.target.closest("button") as HTMLElement | null)?.blur();
+        }
+      }}
       onPointerDown={() => prefetchDragFile(hit)}
       onDragStart={(e) => handleRowDragStart(e, hit)}
       onDragEnd={() => actions.dragEnd()}
@@ -948,20 +955,12 @@ export const App: React.FC = () => {
         return;
       }
       // Space/Enter on a focused control must activate it natively, not the app.
-      // Buttons inside a result row never swallow the library shortcuts
-      // (focus lingers there after a click); blur so they can't also activate.
-      const inRow = !!targetEl?.closest?.(".sfx-row");
-      const onControl =
-        !inRow &&
-        !!targetEl?.closest?.(
-          "button, a, [role='button'], [role='option'], [role='menuitem'], [role='switch'], [role='checkbox']"
-        );
+      // (Row buttons blur after a mouse click, so lingering focus never lands here.)
+      const onControl = !!targetEl?.closest?.(
+        "button, a, [role='button'], [role='option'], [role='menuitem'], [role='switch'], [role='checkbox']"
+      );
       if (onControl && (e.key === " " || e.key === "Enter")) {
         return;
-      }
-      if (inRow && (e.key === " " || e.key === "Enter")) {
-        e.preventDefault();
-        targetEl?.blur();
       }
 
       if (e.key === "Escape") {
@@ -2044,9 +2043,18 @@ export const App: React.FC = () => {
             </div>
 
             <div className="sfx-filter-actions">
-              <label
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={filters.favoritesOnly}
                 className="ds-check"
-                style={{ height: "var(--control-height-md)" }}
+                style={{
+                  height: "var(--control-height-md)",
+                  background: "none",
+                  border: 0,
+                  padding: 0,
+                  font: "inherit",
+                }}
                 onClick={() =>
                   setFilters({ ...filters, favoritesOnly: !filters.favoritesOnly })
                 }
@@ -2062,7 +2070,7 @@ export const App: React.FC = () => {
                 >
                   Favorites only
                 </span>
-              </label>
+              </button>
 
               <button
                 type="button"
@@ -2256,7 +2264,7 @@ export const App: React.FC = () => {
           <div
             ref={resultsListRef}
             className="sfx-results-list ds-scroll"
-            role={results.length > 0 ? "listbox" : undefined}
+            role={results.length > 0 ? "list" : undefined}
             aria-label={results.length > 0 ? "Search results" : undefined}
           >
             {!hasIndexedFiles ? (
