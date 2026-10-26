@@ -203,7 +203,7 @@ Requirements:
 
 Single-page app focused on speed of auditioning.
 
-- **Search bar** with mode selector and a collapsible filter panel (duration, loudness, format, folder, favorites, loop score).
+- **Search bar** (always hybrid; the mode stays an API/CLI/MCP/eval parameter) with a collapsible filter panel (duration, loudness, format, folder, favorites, loop score).
 - **Results list**: file name, folder path, duration, format, score breakdown on hover, a mini waveform, and a marker showing the best-matching moment.
 - **Playback**: one-click play on a row, starts at the best-chunk offset by default (toggle to start from 0). Arrow keys move between results, Space plays/pauses, Enter opens the detail panel. Only one sound plays at a time. Optional loop toggle.
 - **Detail panel**: full waveform (wavesurfer.js) with click-to-seek and region selection, full metadata and raw tags, user tags and notes, "Find similar" for the whole file or the selected region's chunk, "Reveal in folder", "Copy path".

@@ -482,7 +482,6 @@ const ResultRow = React.memo(function ResultRow({
 
 export const App: React.FC = () => {
   const [query, setQuery] = useState<string>("");
-  const [mode, setMode] = useState<SearchMode>("hybrid");
   const [sort, setSort] = useState<SortMode>("relevance");
   const [filters, setFilters] = useState<FilterState>(() => {
     try {
@@ -565,7 +564,6 @@ export const App: React.FC = () => {
   const refreshRef = useRef<() => Promise<void>>(async () => {});
   const committedSearchRef = useRef<{
     q: string;
-    m: SearchMode;
     f: FilterState;
     s: SortMode;
   } | null>(null);
@@ -608,13 +606,11 @@ export const App: React.FC = () => {
   const runSearch = useCallback(
     async (
       qOverride?: string,
-      modeOverride?: SearchMode,
       filtersOverride?: FilterState,
       sortOverride?: SortMode,
       preserveView: boolean = false
     ) => {
       let q = qOverride !== undefined ? qOverride : query;
-      let m = modeOverride !== undefined ? modeOverride : mode;
       let f = filtersOverride !== undefined ? filtersOverride : filters;
       let s = sortOverride !== undefined ? sortOverride : sort;
       if (preserveView) {
@@ -626,10 +622,10 @@ export const App: React.FC = () => {
         if (!committed) {
           return;
         }
-        ({ q, m, f, s } = committed);
+        ({ q, f, s } = committed);
       }
 
-      const effectiveMode: SearchMode = !q.trim() ? "keyword_only" : m;
+      const effectiveMode: SearchMode = !q.trim() ? "keyword_only" : "hybrid";
       const reqId = ++searchReqRef.current;
       if (!preserveView) {
         userSearchReqRef.current = reqId;
@@ -653,7 +649,7 @@ export const App: React.FC = () => {
             Math.min(prev, Math.max(0, page.results.length - 1))
           );
         } else {
-          committedSearchRef.current = { q, m, f, s };
+          committedSearchRef.current = { q, f, s };
           paginationFailedRef.current = false;
           setSearchSeq((seq) => seq + 1);
           setSelectedIndex(0);
@@ -676,7 +672,7 @@ export const App: React.FC = () => {
         }
       }
     },
-    [query, mode, filters, sort, recordHistory]
+    [query, filters, sort, recordHistory]
   );
 
   const loadMoreResults = useCallback(async () => {
@@ -696,7 +692,7 @@ export const App: React.FC = () => {
     }
     const effectiveMode: SearchMode = !committed.q.trim()
       ? "keyword_only"
-      : committed.m;
+      : "hybrid";
     const reqId = searchReqRef.current;
     const offset = nextOffsetRef.current || results.length;
     setLoadingMore(true);
@@ -800,7 +796,7 @@ export const App: React.FC = () => {
         ) {
           // Newly indexed files mid-run: refresh results without resetting
           // scroll/selection or writing the query to history.
-          runSearch(undefined, undefined, undefined, undefined, true);
+          runSearch(undefined, undefined, undefined, true);
         }
       }
       if (nextOk === 0) {
@@ -1100,7 +1096,7 @@ export const App: React.FC = () => {
       } else {
         // Re-run the committed search (not whatever is typed in the box).
         const committed = committedSearchRef.current;
-        runSearch(committed?.q, committed?.m, committed?.f, committed?.s);
+        runSearch(committed?.q, committed?.f, committed?.s);
       }
     } catch (err) {
       setStatusLabel(err instanceof Error ? err.message : "Failed to remove folder");
@@ -1235,16 +1231,16 @@ export const App: React.FC = () => {
       }
       const next = { ...filters, folders: [...sel].sort() };
       setFilters(next);
-      runSearch(query, mode, next, sort);
+      runSearch(query, next, sort);
     },
-    [filters, query, mode, sort, runSearch]
+    [filters, query, sort, runSearch]
   );
 
   const clearFolderFilters = useCallback(() => {
     const next = { ...filters, folders: [] };
     setFilters(next);
-    runSearch(query, mode, next, sort);
-  }, [filters, query, mode, sort, runSearch]);
+    runSearch(query, next, sort);
+  }, [filters, query, sort, runSearch]);
 
   const handlePaneDragDown =
     (side: "l" | "r") => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -1791,26 +1787,6 @@ export const App: React.FC = () => {
           <div className="sfx-command-actions">
             <DsSelect
               disabled={!hasIndexedFiles}
-              value={mode}
-              width={148}
-              height="var(--control-height-lg)"
-              ariaLabel="Search mode"
-              options={[
-                { value: "hybrid", label: "Hybrid (RRF)" },
-                { value: "audio_only", label: "Audio (CLAP)" },
-                { value: "keyword_only", label: "Keyword (BM25)" },
-              ]}
-              onChange={(val) => {
-                const nextMode = val as SearchMode;
-                setMode(nextMode);
-                if (hasIndexedFiles) {
-                  runSearch(query, nextMode, filters, sort);
-                }
-              }}
-            />
-
-            <DsSelect
-              disabled={!hasIndexedFiles}
               value={sort}
               width={154}
               height="var(--control-height-lg)"
@@ -1828,7 +1804,7 @@ export const App: React.FC = () => {
                 const nextSort = val as SortMode;
                 setSort(nextSort);
                 if (hasIndexedFiles) {
-                  runSearch(query, mode, filters, nextSort);
+                  runSearch(query, filters, nextSort);
                 }
               }}
             />
@@ -2059,7 +2035,7 @@ export const App: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => runSearch(query, mode, filters)}
+                onClick={() => runSearch(query, filters)}
                 className="ds-btn ds-btn-primary ds-btn-sm"
               >
                 Apply
@@ -2069,7 +2045,7 @@ export const App: React.FC = () => {
                 type="button"
                 onClick={() => {
                   setFilters(DEFAULT_FILTERS);
-                  runSearch(query, mode, DEFAULT_FILTERS);
+                  runSearch(query, DEFAULT_FILTERS);
                 }}
                 className="ds-btn ds-btn-ghost ds-btn-sm"
               >
@@ -2356,8 +2332,7 @@ export const App: React.FC = () => {
               <div className="ds-empty" style={{ marginTop: "var(--space-10)" }}>
                 <div className="ds-empty-title">No matching sounds</div>
                 <div className="ds-empty-desc">
-                  Adjust your query, switch search mode, or clear active
-                  filters.
+                  Adjust your query or clear active filters.
                 </div>
               </div>
             ) : (

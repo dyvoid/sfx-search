@@ -275,10 +275,10 @@ test.describe("focus handling around mouse and Tab", () => {
   test("L11 after picking a dropdown option by mouse then clicking a waveform, Space plays/pauses and the dropdown stays closed", async ({
     app,
   }) => {
-    await selectTrigger(app, "Search mode").click();
-    await app.getByRole("option", { name: "Audio (CLAP)" }).click();
+    await selectTrigger(app, "Sort order").click();
+    await app.getByRole("option", { name: "Shortest first" }).click();
     await expect(popup(app)).toHaveCount(0);
-    await expect(selectTrigger(app, "Search mode")).toContainText("Audio (CLAP)");
+    await expect(selectTrigger(app, "Sort order")).toContainText("Shortest first");
     await expect(row(app, 1)).toBeVisible();
 
     await row(app, 1).locator(".sfx-row-wave").click();
@@ -329,7 +329,7 @@ test.describe("dropdowns (DsSelect)", () => {
     app,
   }) => {
     await expect(inspector(app)).toBeVisible();
-    const trigger = selectTrigger(app, "Search mode");
+    const trigger = selectTrigger(app, "Sort order");
     await trigger.click();
     await expect(popup(app)).toBeVisible();
     await app.keyboard.press("ArrowDown");
@@ -337,7 +337,7 @@ test.describe("dropdowns (DsSelect)", () => {
     await expect(popup(app)).toHaveCount(0);
     await expect(inspector(app)).toBeVisible();
     await expect(trigger).toBeFocused();
-    await expect(trigger).toContainText("Hybrid");
+    await expect(trigger).toContainText("Relevance");
   });
 
   test("L14 Enter and Space on an option select it, close the dropdown and focus the trigger", async ({
