@@ -79,7 +79,7 @@ components:
 
 SFX Search has two faces, and the design serves both without splitting. The first room is the **library**: a dim, quiet space built for auditioning — rows of waveforms, instant playback, keyboard-first navigation, nothing competing with the sound. The second room is the **studio**: a workbench where a found sound gets shaped fast — trim, EQ, seamless looping, variation takes — dense controls that reward precision over ceremony.
 
-The visual system is dyvoided.2, dark-first: a cool graphite neutral scale carries the UI while four seed-driven identity colors sit on top, each assigned to a **category of meaning**, never to decoration. Density is professional (presence 0.45): soft tactile gradients and inset rails, never loud. Everything numeric wears monospace with tabular figures.
+The visual system is dyvoided.2, dark-first: a cool graphite neutral scale carries the UI while four seed-driven identity colors sit on top, each assigned to a **category of meaning**, never to decoration. Density is professional (presence 0.45): soft tactile gradients and inset rails, never loud. Everything numeric wears monospace with tabular figures; words are set in the body font.
 
 **Key Characteristics:**
 - Neutral graphite canvas; accents are semantic categories, not ornament
@@ -114,21 +114,26 @@ One neutral family plus four identity hues with assigned meaning; functional hue
 
 **Display Font:** Familjen Grotesk (page titles, large values; negative tracking)
 **Body Font:** Hanken Grotesk (labels, buttons, paragraphs)
-**Label/Mono Font:** JetBrains Mono ("DM Mono" inside canvas) — uppercase micro-labels, panel headers, and *every* number that measures something (`ds-tnum` tabular figures)
+**Mono Font:** JetBrains Mono ("DM Mono" inside canvas) — *every* number that measures something (`ds-tnum` tabular figures), paths, and key caps. Never for words.
 
 **Character:** Grotesk pair for a calm technical voice; mono reserved for measurement, not decoration.
 
 ### Hierarchy
 - **Display** (Familjen 600, negative tracking): file titles, hero numbers
-- **Title** (Hanken 500–600, `--text-sm`): rack labels, card titles, row filenames
-- **Body** (Hanken 400, `--text-sm`/`--text-base`, 1.5): descriptions, buttons
-- **Label** (JetBrains Mono 500, `2xs–xs`, +0.08em, UPPERCASE): panel titles, data keys, HUD pills, readouts, tick labels, scores
+- **Section title** (Hanken 600, `--font-size-base`, `--text-primary`, as written): panel and card titles (`ds-panel-title`), filenames
+- **Label** (Hanken 400–500, `--font-size-sm`, `--text-secondary`): control labels, rack row labels, filter labels (`ds-microlabel`)
+- **Key** (Hanken 400, `--font-size-xs`, `--text-tertiary`): data keys above or beside a value (`sfx-param-label`, `sfx-kv-key`)
+- **Body** (Hanken 400, `--font-size-sm`/`--font-size-base`, 1.5): descriptions, buttons
+- **Value** (JetBrains Mono, `xs–sm`, tabular): readouts, durations, levels, scores, tick labels, paths
 
 ## Layout
 
-Two shells: **library** (toolbar + hero search + folder pane / results list / inspector tri-pane, resizable via `.sfx-pane-divider`) and **studio** (topbar + module tabs + stage with canvas + HUD, transport bar, control rack of `.sfx-rack-card` columns). Spacing runs on the `--space-*` scale; rack rows are label-left / controls-right with `min-height: 28px`. Container queries (`main-list`, `inspector`) drive per-pane breakpoints; `[data-density="compact"]` tightens everything for power users.
+Two shells: **library** (toolbar + hero search + folder pane / results list / inspector tri-pane, resizable via `.sfx-pane-divider`) and **studio** (topbar + module tabs + stage with canvas + HUD, transport bar, control rack of `.sfx-rack-card` columns). Spacing runs on the `--space-*` scale; rack rows are label-left / controls-right with `min-height: 32px`. Container queries (`main-list`, `inspector`) drive per-pane breakpoints; `[data-density="compact"]` tightens everything for power users.
 
 ## Elevation & Depth
+
+Three layers, always distinguishable: the **background** (`--surface-app`) carries bars and gutters; **panels** (`--surface-panel`, subtle border, `--radius-md`) hold content and sit on the background with a gutter around them; **controls** sit inside panels (sunken inputs, raised buttons). A panel never sits on a panel of the same tone.
+
 
 Tonal layering driven by a single `--presence` knob (0.45 default): surfaces get gradient faces, `--inset-rail` recesses tracks/inputs, `--inset-highlight` adds a specular top edge, and layered `--shadow-sm/md/lg` float overlays. Panels carry the signature top-edge line. At presence 0 the system is near-flat; the tokens do the work either way — never write bespoke shadows.
 
@@ -164,6 +169,26 @@ Sharp **2px** corners on all controls and panels; **full pill** only for switche
 ### Canvas Instruments
 - `EditorWaveform`, `MiniWaveform`, `SeamScope`, `EqResponseGraph`, `SpectrumMeter`, `VariationWaveCardCanvas` — all read palette from the same tokens (`resolvePalette`/`readTokenColor`); canvas is rebrand-safe by convention.
 
+## Readability Rules
+
+Learned from comparing the Studio against a redesign mock: the mock read better at every size
+because of space and layering, not fonts. These apply to every screen.
+
+1. **Panels on a background.** Content regions (results, folder tree, inspector, waveform
+   stage, each Studio rack card, dialogs) are panels separated by a gutter, not one sheet
+   split by hairlines. Bars (header, toolbar, transport, footer) sit on the background.
+2. **Words in the body font, values in mono.** Section titles, labels, buttons, hints and
+   HUD buttons use Hanken Grotesk as written (no uppercase, no letter-spacing). Mono is for
+   numbers, times, levels, paths and key caps.
+3. **Readable floor.** No text below 12px; control labels 13px; section titles 14px semibold.
+   Controls in panels are at least 28px high; rows at least 32px apart.
+4. **Controls get the space they need.** In the Studio the rack takes its natural height and
+   the waveform takes what is left (with a sensible minimum), not the other way around.
+5. **Key hints are keys.** Shortcuts render as a key cap plus a plain word
+   (`[Space] Preview`), never as one run-on mono string.
+6. **Group by job.** A toolbar splits into "work on this sound" (left) and "save / export"
+   (right); a panel header holds its title and at most one or two actions that never wrap.
+
 ## UX Rules
 
 Hard rules for every screen and state. They come from real review failures; check each new or
@@ -193,7 +218,7 @@ error, each Studio module, each dialog).
 ### Do:
 - **Do** spend accents by category: teal for live audio, amber for processing, magenta for machine proposals, indigo for user intent.
 - **Do** render controls with the kit's compound markup (`ds-slider-track/fill/knob`, `ds-select-*`, `ds-check`) rather than re-skinning native elements.
-- **Do** keep numbers in mono with `ds-tnum`, and labels in uppercase mono micro-style.
+- **Do** keep numbers in mono with `ds-tnum`, and words (titles, labels, hints) in the body font as written.
 - **Do** give every interactive element a `:focus-visible` `--focus-ring` and an accessible name.
 
 ### Don't:

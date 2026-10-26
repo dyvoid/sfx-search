@@ -297,7 +297,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             <button
               type="button"
               onClick={onOpenEditor}
-              className="ds-btn ds-btn-primary ds-btn-sm"
+              className="ds-btn ds-btn-primary"
               title="Open in Audio Editor (E)"
             >
               <Sliders size={14} />
@@ -306,7 +306,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             <button
               type="button"
               onClick={() => onFindSimilarFile(hit.file_id, hit.filename)}
-              className="ds-btn ds-btn-secondary ds-btn-sm"
+              className="ds-btn ds-btn-secondary"
             >
               <Sparkles size={14} />
               <span className="sfx-btn-label">Find similar sounds</span>

@@ -178,8 +178,8 @@ test.describe("Studio, nothing focused", () => {
       for (const code of ["BracketLeft", "ArrowRight", "KeyF"]) {
         expect(await keydownPrevented(app, { code, key: code === "KeyF" ? "f" : code })).toBe(false);
       }
-      await expect(statusbar(app)).not.toContainText("F find loops");
-      await expect(statusbar(app)).not.toContainText("nudge");
+      await expect(statusbar(app)).not.toContainText(/find loops/i);
+      await expect(statusbar(app)).not.toContainText(/nudge/i);
     }
   });
 

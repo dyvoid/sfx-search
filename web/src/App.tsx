@@ -47,6 +47,7 @@ import { LibraryModal } from "./components/LibraryModal";
 import { SetupPanel } from "./components/SetupPanel";
 import { MiniWaveform } from "./components/MiniWaveform";
 import { SpectrumMeter } from "./components/SpectrumMeter";
+import { KeyHints } from "./components/KeyHints";
 import { StudioView } from "./editor/StudioView";
 import {
   AvailableFilters,
@@ -2337,9 +2338,18 @@ export const App: React.FC = () => {
                   ).toLocaleString()} sounds`}
               </span>
               {hasIndexedFiles && (
-                <span className="sfx-statusbar-shortcuts">
-                  ↑↓ navigate · Space play · E edit · R reveal · F favorite · Enter inspector · / search · drag row to export
-                </span>
+                <KeyHints
+                  hints={[
+                    { keys: "↑ ↓", label: "Navigate" },
+                    { keys: "Space", label: "Play" },
+                    { keys: "E", label: "Edit" },
+                    { keys: "R", label: "Show in Explorer" },
+                    { keys: "F", label: "Favorite" },
+                    { keys: "Enter", label: "Inspector" },
+                    { keys: "/", label: "Search" },
+                    { keys: "Drag", label: "Export to DAW" },
+                  ]}
+                />
               )}
             </footer>
           )}
