@@ -48,6 +48,8 @@ node_modules/
 coverage/
 web/dist/
 web/build/
+web/test-results/
+web/playwright-report/
 *.tsbuildinfo
 
 # --- Project-specific (sfx-search) ---

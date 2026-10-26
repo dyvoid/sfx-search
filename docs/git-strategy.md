@@ -84,6 +84,7 @@ Before anything merges to `main`:
 
 - Linting, formatting, and type checks must pass (`ruff`, `black --check`, `mypy` for Python; `eslint`, `tsc --noEmit` for Web)
 - All existing `pytest` tests must pass (including window determinism, manifest diffing, and path normalization)
+- The web e2e suite (`npm run test:e2e`, Playwright against a mocked API) must pass; it encodes the [Keyboard Contract](testing/keyboard-contract.md)
 - New code must be covered by tests -- AI optimizes for code that *looks* correct, not code that *is* correct
 - Build must succeed
 

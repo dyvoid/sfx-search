@@ -78,8 +78,35 @@ ai-assisted: <model>
 - **Core stack:** TypeScript (strict), React, Vite, `dyvoided.2` CSS token/component design system (`web/src/design-system/`), `lucide-react`. Waveforms/scopes are custom canvas renderers (`EditorWaveform`, `MiniWaveform`, `SeamScope`, `SpectrumMeter`). Do not introduce another UI framework or styling system unprompted.
 - **Controls:** Prefer the kit's compound structures (`ds-*` classes) over re-skinning native inputs — e.g. sliders render `ds-slider-track/fill/knob` + transparent `<input type="range">` via `web/src/components/DsRange.tsx`, and selects go through `DsSelect.tsx`.
 - **Accent semantics (app-wide convention):** `--primary` = user intent (actions, selection, focus); `--accent-2` = live audio signal (waveforms, meters, playing state); `--accent-1` = processing (fades, pitch, EQ); `--accent-3` = machine-proposed (match regions, loop candidates, generated takes, analysis progress); `--success/--danger/--warning` = status & level only. Accents are assigned by category, never per-element or per-channel.
-- **Build & verification:** `npm run build` (`tsc -b && vite build`) inside `web/`.
-- **UX & accessibility constraints:** Keyboard-first auditioning (`Up`/`Down` arrows navigate results, `Space` plays/pauses, `R` reveals file in Explorer, `F` toggles favorite, `Enter` toggles inspector panel, `/` focuses search), single active audio stream at a time, dark theme by default, instant playback at best-chunk offset via HTTP Range requests, infinite scroll with viewport-lazy `MiniWaveform` rendering.
+- **Build & verification:** `npm run build` (`tsc -b && vite build`) inside `web/`. For any change to keyboard, focus or dialog behavior, also run `npm run test:e2e` (Playwright against a mocked API, no backend needed) and `npm run typecheck:e2e`.
+- **E2E harness:** `web/e2e/fixtures.ts` provides a typed mock of every `/api/*` route, a decodeable WAV, and helpers (`app`, `api`, `openStudio`, `keydownPrevented`, ...). Reuse and extend it for ad-hoc browser checks instead of writing new mocks; throwaway scripts can import it. If the preinstalled Playwright browser doesn't match the pinned `@playwright/test`, set `PW_CHROMIUM_PATH` or run `npx playwright install chromium`.
+- **UX & accessibility constraints:** Keyboard-first auditioning (`Up`/`Down` arrows navigate results, `Space` plays/pauses, `R` reveals file in Explorer, `F` toggles favorite, `Enter` toggles inspector panel, `/` focuses search), single active audio stream at a time, dark theme by default, instant playback at best-chunk offset via HTTP Range requests, infinite scroll with viewport-lazy `MiniWaveform` rendering. The full rule set is [Keyboard Contract](docs/testing/keyboard-contract.md); each rule has an e2e test referencing its ID.
+
+---
+
+## Review & Fix Workflow (multi-agent)
+
+The cost/quality split that worked for review-and-fix loops in this repo:
+
+- **Finding and verifying** (bug hunts, Playwright exploration, measurements) goes to cheaper
+  subagents (e.g. Sonnet). They are good at this: reproduce, mark each finding VERIFIED or
+  SUSPECTED, propose a fix plan, and **change nothing** until a fix is approved.
+- **The orchestrator approves, rejects or amends** each fix plan, then reviews every diff and
+  runs the checks before committing.
+- **Who writes the fix:** mechanical, local fixes (labels, regex anchors, config bounds, tests)
+  go back to the finding agent. Fixes in shared, interaction-heavy code (the Studio and library
+  keyboard handlers, the indexer's missing/offline logic, `save-edited`) are written by the
+  orchestrator: subagent fixes there were locally correct but repeatedly broke neighboring
+  behavior, costing extra review rounds.
+- **Before every round,** point agents at [Review Decisions](docs/review-decisions.md) (do not
+  re-report) and the [Keyboard Contract](docs/testing/keyboard-contract.md) (test against it),
+  and tell them to reuse `web/e2e/fixtures.ts`.
+- **Stop condition:** a round that reports no major issues. Then switch to a bounded
+  low-hanging-fruit pass (small, local, no new deps).
+- **Record outcomes:** every rejected finding or confirmed intended behavior goes into
+  `docs/review-decisions.md`; every new keyboard/focus rule goes into the contract with a test.
+- **Hygiene:** agents start dev servers on distinct ports and must stop the real `node .../vite`
+  process (not just the npm wrapper, and not with `pkill -f`, which can match the caller's shell).
 
 ---
 
@@ -93,3 +120,5 @@ ai-assisted: <model>
 | [Roadmap](docs/ROADMAP.md) | Milestones M1-M4, verification items, and status |
 | [Git Strategy](docs/git-strategy.md) | Branching, merging, commit rules, and CI expectations |
 | [PICKUP](PICKUP.md) | Where the last session left off (active work only, not the backlog) |
+| [Keyboard Contract](docs/testing/keyboard-contract.md) | Expected keyboard/focus behavior, rule IDs mirrored by `web/e2e/` tests |
+| [Review Decisions](docs/review-decisions.md) | Findings deliberately not fixed and confirmed intended behavior; read before reporting |
