@@ -219,6 +219,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const [saveDlg, setSaveDlg] = useState<boolean>(false);
   const [saveName, setSaveName] = useState<string>("");
   const [saveOverwrite, setSaveOverwrite] = useState<boolean>(false);
+  const saveDlgRef = useRef<HTMLDivElement | null>(null);
+  const saveOpenerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (saveDlg) {
+      return;
+    }
+    const opener = saveOpenerRef.current;
+    saveOpenerRef.current = null;
+    if (opener && opener.isConnected) {
+      opener.focus();
+    }
+  }, [saveDlg]);
 
   const fadeSamples = useMemo(
     () => Math.max(0, Math.round((fadeMs / 1000) * sampleRate)),
@@ -1006,6 +1018,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const def = loopEnabled ? ".loop" : ".edit";
     setSaveName(`${baseName}${saveSuffix.trim() || def}.wav`);
     setSaveOverwrite(false);
+    setErrMsg(null);
+    const a = document.activeElement;
+    saveOpenerRef.current = a instanceof HTMLElement ? a : null;
     setSaveDlg(true);
   }, [processedChannels, hit, loopEnabled, saveSuffix, baseName]);
 
@@ -1361,12 +1376,38 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
+      if (saveDlg && e.key === "Tab" && saveDlgRef.current) {
+        const f = Array.from(
+          saveDlgRef.current.querySelectorAll<HTMLElement>(
+            "input, button, [tabindex]:not([tabindex='-1'])"
+          )
+        ).filter((el) => !(el as HTMLButtonElement).disabled);
+        if (f.length > 0) {
+          const first = f[0];
+          const last = f[f.length - 1];
+          const active = document.activeElement;
+          if (!saveDlgRef.current.contains(active)) {
+            e.preventDefault();
+            first.focus();
+          } else if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+        return;
+      }
       if (
         tag === "input" ||
         tag === "textarea" ||
         tag === "select" ||
         target?.isContentEditable
       ) {
+        if (e.code === "KeyS" && (e.ctrlKey || e.metaKey)) {
+          e.preventDefault(); // block the browser's "Save page" dialog
+        }
         if (e.key === "Escape") {
           target?.blur();
         }
@@ -3509,6 +3550,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
           }}
         >
           <div
+            ref={saveDlgRef}
             className="ds-dialog"
             role="dialog"
             aria-modal="true"
