@@ -7,7 +7,7 @@
 // `api` is configured before navigation; use `test.use({ apiOptions: {...} })`
 // or mutate `api` and reload for per-test behavior. `api.calls` records every
 // request as "METHOD /path?query" for asserting side effects.
-import { test as base, expect, type Page, type Route } from "@playwright/test";
+import { test as base, expect, type Locator, type Page, type Route } from "@playwright/test";
 import type {
   FileDetail,
   IndexingProgress,
@@ -96,6 +96,10 @@ export interface ApiOptions {
   /** Status returned by save-edited; non-2xx returns {detail: saveErrorDetail}. */
   saveStatus: number;
   saveErrorDetail: string;
+  /** Delay (ms) before save-edited answers, to keep a save "in flight". */
+  saveDelayMs: number;
+  /** Length of the decodeable WAV served by /api/audio/*. */
+  audioSeconds: number;
 }
 
 export const DEFAULT_API_OPTIONS: ApiOptions = {
@@ -105,16 +109,19 @@ export const DEFAULT_API_OPTIONS: ApiOptions = {
   hangAudio: false,
   saveStatus: 200,
   saveErrorDetail: "Save failed",
+  saveDelayMs: 0,
+  audioSeconds: 10,
 };
 
 export class MockApi {
   readonly calls: string[] = [];
   readonly favorites = new Set<string>();
-  readonly wav = makeWav();
+  readonly wav: Buffer;
   opts: ApiOptions;
 
   constructor(opts: Partial<ApiOptions> = {}) {
     this.opts = { ...DEFAULT_API_OPTIONS, ...opts };
+    this.wav = makeWav(this.opts.audioSeconds);
   }
 
   /** Requests whose "METHOD /path" starts with the given prefix. */
@@ -187,7 +194,7 @@ export class MockApi {
     }
     if (p.startsWith("/api/similar/")) {
       const results = Array.from({ length: 10 }, (_, i) => this.hit(i + 1));
-      return json(results);
+      return json({ results });
     }
     if (p === "/api/library" && m === "GET") return json(library());
     if (p === "/api/library/roots") return json(library());
@@ -250,6 +257,9 @@ export class MockApi {
         : json({ ok: true });
     }
     if (p.endsWith("/save-edited")) {
+      if (this.opts.saveDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, this.opts.saveDelayMs));
+      }
       if (this.opts.saveStatus >= 300) {
         return json({ detail: this.opts.saveErrorDetail }, this.opts.saveStatus);
       }
@@ -363,4 +373,80 @@ export async function keydownPrevented(page: Page, init: KeyInit): Promise<boole
     target.dispatchEvent(ev);
     return ev.defaultPrevented;
   }, init);
+}
+
+// ---------------------------------------------------------------------------
+// Keyboard-contract helpers (see docs/testing/keyboard-contract.md)
+// ---------------------------------------------------------------------------
+
+/** The footer status bar (library and Studio both render one). */
+export const statusbar = (page: Page) => page.locator(".sfx-statusbar");
+
+/** The inspector drawer of the library view. */
+export const inspector = (page: Page) => page.locator(".sfx-inspector");
+
+/** The Studio's hero play/pause button; `.playing` while audio runs. */
+export const studioPlayButton = (page: Page) => page.locator(".sfx-tp-play-btn");
+
+/** The Studio's "Save to library" dialog. */
+export const saveDialog = (page: Page) => page.getByRole("dialog", { name: "Save to library" });
+
+/** The Library folders modal. */
+export const foldersModal = (page: Page) => page.getByRole("dialog", { name: "Library folders" });
+
+/** Save requests recorded so far (all `save-edited` posts). */
+export function saveCalls(api: MockApi): string[] {
+  return api.calls.filter((c) => c.startsWith("POST /api/files/") && c.includes("/save-edited"));
+}
+
+/**
+ * Round-trip one request through the mock so every earlier request has been
+ * recorded; makes "nothing was sent" assertions deterministic without sleeping.
+ */
+export async function flushApi(page: Page): Promise<void> {
+  await page.evaluate(() => fetch("/api/stats").then((r) => r.json()));
+}
+
+/**
+ * Press Tab (or Shift+Tab) until `target` has focus, using real keyboard
+ * navigation. Throws if it is not reached within `max` presses.
+ */
+export async function tabTo(
+  page: Page,
+  target: Locator,
+  { shift = false, max = 80 }: { shift?: boolean; max?: number } = {}
+): Promise<void> {
+  const handle = await target.elementHandle();
+  if (!handle) throw new Error("tabTo: target not found");
+  for (let i = 0; i < max; i++) {
+    const hit = await handle.evaluate((el) => el === document.activeElement);
+    if (hit) return;
+    await page.keyboard.press(shift ? "Shift+Tab" : "Tab");
+  }
+  if (!(await handle.evaluate((el) => el === document.activeElement))) {
+    throw new Error(`tabTo: did not reach target in ${max} Tab presses`);
+  }
+}
+
+/**
+ * Hold a key down for `repeats` keydowns (the 2nd and later have
+ * `repeat: true`, like OS auto-repeat), then release it.
+ */
+export async function holdKey(page: Page, key: string, repeats: number): Promise<void> {
+  for (let i = 0; i < repeats; i++) await page.keyboard.down(key);
+  await page.keyboard.up(key);
+}
+
+/** Accessible name of the focused element ("" if none), for focus-order asserts. */
+export async function focusedName(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (!el || el === document.body) return "";
+    return (
+      el.getAttribute("aria-label") ||
+      (el instanceof HTMLInputElement && el.id) ||
+      (el.textContent ?? "").trim() ||
+      el.tagName.toLowerCase()
+    );
+  });
 }

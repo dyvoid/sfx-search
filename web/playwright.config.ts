@@ -6,6 +6,9 @@ const PORT = Number(process.env.E2E_PORT ?? 5175);
 
 export default defineConfig({
   testDir: "./e2e",
+  // Concurrent runs (e.g. several agents) must not share an output dir: each
+  // run wipes it at start, which breaks the other run's traces with ENOENT.
+  outputDir: process.env.E2E_OUTPUT_DIR ?? "test-results",
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
