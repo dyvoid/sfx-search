@@ -8,7 +8,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 DEFAULT_EXTENSIONS: list[str] = [
     ".wav",
@@ -42,6 +42,12 @@ class EmbeddingConfig(BaseModel):
     hop_s: float = Field(default=5.0, gt=0)
     max_chunks_per_file: int = Field(default=120, ge=1)
     batch_size: int = 32
+
+    @model_validator(mode="after")
+    def _hop_not_larger_than_window(self) -> EmbeddingConfig:
+        if self.hop_s > self.window_s:
+            raise ValueError("embedding.hop_s must be <= embedding.window_s (gaps otherwise)")
+        return self
 
 
 class IndexingConfig(BaseModel):

@@ -159,6 +159,11 @@ def cmd_index(
         f"{stats.audio_hours_per_min:.3f} audio-hours/min ({stats.audio_hours_per_hour:.1f} audio-hours/hour)\n"
         f"  Peak GPU VRAM: {stats.gpu_memory_mb:.1f} MB"
     )
+    if stats.offline_roots:
+        console.print(
+            "[yellow]Skipped offline/unreadable roots (files not marked missing): "
+            f"{', '.join(stats.offline_roots)}[/yellow]"
+        )
 
 
 @app.command("search")

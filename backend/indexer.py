@@ -10,7 +10,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -64,6 +64,7 @@ class IndexStats:
     audio_hours_per_min: float = 0.0
     audio_hours_per_hour: float = 0.0
     gpu_memory_mb: float = 0.0
+    offline_roots: list[str] = field(default_factory=list)
 
 
 def _decode_worker_fn(
@@ -257,6 +258,10 @@ def index_single_file(
     return f_rec
 
 
+def _is_under(path_low: str, root_low: str) -> bool:
+    return path_low == root_low or path_low.startswith(root_low + "/")
+
+
 def run_indexer(
     config: Config,
     store: SfxStore,
@@ -279,13 +284,14 @@ def run_indexer(
     # share) must not have its indexed files marked missing and their chunks
     # deleted; skip it from the manifest diff entirely.
     live_roots = [r for r in target_roots if os.path.isdir(to_os_path(r))]
-    for offline in (r for r in target_roots if r not in live_roots):
-        logger.warning("Skipping offline library root (not marking files missing): %s", offline)
+    offline_roots = [r for r in target_roots if r not in live_roots]
 
+    walk_errors: list[str] = []
     scanned_files = walk_roots(
         roots=target_roots,
         extensions=config.library.extensions,
         limit=limit,
+        errors=walk_errors,
     )
     if limit is not None:
         existing_manifest = store.load_manifest(roots=None)
@@ -293,6 +299,30 @@ def run_indexer(
         existing_manifest = store.load_manifest(roots=live_roots)
     else:
         existing_manifest = {}  # load_manifest treats an empty roots list as "all"
+
+    # A root that exists but looks unreadable or empty (unmounted mount point,
+    # dropped network share) is treated as offline too.
+    # Trade-off: deliberately deleting every file in a root will not mark them
+    # missing; remove the root from the library instead.
+    suspect_roots: list[str] = []
+    errors_low = [normalize_path(e).lower() for e in walk_errors]
+    if limit is None:
+        scanned_low = [f.path.lower() for f in scanned_files]
+        ok_low = [m.path.lower() for m in existing_manifest.values() if m.status == "ok"]
+        for root in live_roots:
+            rl = root.lower().rstrip("/")
+            scanned_none = not any(_is_under(p, rl) for p in scanned_low)
+            if scanned_none and any(_is_under(p, rl) for p in ok_low):
+                suspect_roots.append(root)
+    offline_roots.extend(suspect_roots)
+    for offline in offline_roots:
+        logger.warning("Skipping offline library root (not marking files missing): %s", offline)
+    # Only the unreadable subtree is protected, not its whole root: a drive
+    # root always errors on e.g. "System Volume Information".
+    for err_dir in walk_errors:
+        logger.warning("Unreadable directory (not marking files missing): %s", err_dir)
+    protected = [r.lower().rstrip("/") for r in offline_roots] + [e.rstrip("/") for e in errors_low]
+
     diff = diff_manifest(
         scanned=scanned_files,
         existing=existing_manifest,
@@ -300,14 +330,20 @@ def run_indexer(
         mark_missing=(limit is None),
     )
 
-    if diff.missing_ids:
-        store.mark_missing(diff.missing_ids)
+    missing_ids = [
+        fid
+        for fid in diff.missing_ids
+        if not any(_is_under(existing_manifest[fid].path.lower(), rl) for rl in protected)
+    ]
+    if missing_ids:
+        store.mark_missing(missing_ids)
 
     stats = IndexStats(
         scanned_count=len(scanned_files),
         skipped_unchanged=len(diff.unchanged_ids),
         to_index_count=len(diff.to_index),
-        marked_missing=len(diff.missing_ids),
+        marked_missing=len(missing_ids),
+        offline_roots=offline_roots,
     )
 
     if not diff.to_index:

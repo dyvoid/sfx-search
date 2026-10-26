@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import struct
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from pathlib import Path
@@ -46,6 +47,31 @@ _CAMEL_RE = re.compile(
 )
 _SPLIT_RE = re.compile(r"[\W_]+")
 
+
+def _split_words(text: str) -> list[str]:
+    """Split on non-word chars, but keep combining marks (Mn/Mc) inside words."""
+    parts: list[str] = []
+    cur: list[str] = []
+    for ch in text:
+        if ch != "_" and (
+            _SPLIT_RE.fullmatch(ch) is None or unicodedata.category(ch) in ("Mn", "Mc")
+        ):
+            cur.append(ch)
+        elif cur:
+            parts.append("".join(cur))
+            cur = []
+    if cur:
+        parts.append("".join(cur))
+    return parts
+
+
+def _fold_accents(token: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", token)
+    return unicodedata.normalize(
+        "NFC", "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+    )
+
+
 _IXML_INTEREST_TAGS: set[str] = {
     "category",
     "subcategory",
@@ -72,7 +98,7 @@ _IXML_INTEREST_TAGS: set[str] = {
 def tokenize_identifier(text: str) -> list[str]:
     if not text:
         return []
-    raw_parts = _SPLIT_RE.split(text)
+    raw_parts = _split_words(unicodedata.normalize("NFC", text))
     tokens: list[str] = []
     for part in raw_parts:
         if not part:
@@ -83,6 +109,9 @@ def tokenize_identifier(text: str) -> list[str]:
             if not low or low.isdigit() or len(low) < 2 or low in NOISE_TOKENS:
                 continue
             tokens.append(low)
+            folded = _fold_accents(low)
+            if folded != low and len(folded) >= 2:
+                tokens.append(folded)
     return tokens
 
 
