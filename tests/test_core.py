@@ -642,3 +642,32 @@ def test_is_protected_prefix_walk() -> None:
     assert _is_protected("/mnt/x/a/b.wav", prefixes)
     assert not _is_protected("/mnt/y/a.wav", prefixes)
     assert _is_protected("/anything/a.wav", {""})  # posix root "/"
+
+
+def test_arch_supported_matches_cubin_and_ptx_rules() -> None:
+    from sfxsearch.embed import _arch_supported
+
+    cu130 = ["sm_75", "sm_80", "sm_86", "sm_90", "sm_100", "sm_120"]
+    assert not _arch_supported((6, 1), cu130)  # GTX 10xx (Pascal)
+    assert _arch_supported((7, 5), cu130)  # RTX 20xx
+    assert _arch_supported((8, 9), cu130)  # RTX 40xx runs sm_86 cubins
+    assert _arch_supported((12, 0), cu130)  # RTX 50xx
+    assert _arch_supported((6, 1), ["sm_75", "compute_60"])  # PTX JIT for newer GPUs
+    assert not _arch_supported((6, 1), ["compute_75"])
+
+
+def test_resolve_device_falls_back_to_cpu_when_cuda_cannot_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import torch
+    from sfxsearch import embed
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda _i=0: (6, 1))
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda _i=0: "GeForce GTX 1070")
+    monkeypatch.setattr(torch.cuda, "get_arch_list", lambda: ["sm_75", "sm_120"])
+    assert embed.resolve_device() == "cpu"
+    assert embed.resolve_device("cuda") == "cuda"  # an explicit request is honored
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert embed.resolve_device() == "cpu"

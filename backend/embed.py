@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import threading
 from collections import OrderedDict
@@ -13,6 +14,8 @@ import numpy as np
 import numpy.typing as npt
 import torch
 from transformers import ClapModel, ClapProcessor
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -146,6 +149,58 @@ def _extract_embedding_tensor(output: Any) -> torch.Tensor:
     raise TypeError(f"Unsupported model output type: {type(output)}")
 
 
+def _arch_supported(capability: tuple[int, int], arch_list: Sequence[str]) -> bool:
+    """Whether a torch build with `arch_list` has kernels for a GPU of `capability`.
+
+    A cubin for sm_XY runs on the same major version with an equal or higher minor;
+    PTX (compute_XY) is JIT-compiled for any equal or newer GPU.
+    """
+    major, minor = capability
+    for arch in arch_list:
+        kind, _, num = arch.partition("_")
+        if not num.isdigit() or len(num) < 2:
+            continue
+        a_major, a_minor = int(num[:-1]), int(num[-1])
+        if kind == "sm" and a_major == major and a_minor <= minor:
+            return True
+        if kind == "compute" and (a_major, a_minor) <= (major, minor):
+            return True
+    return False
+
+
+def _cuda_unusable_reason() -> str | None:
+    """Why CUDA can't run CLAP on this machine, or None when it can."""
+    try:
+        capability = torch.cuda.get_device_capability(0)
+        name = torch.cuda.get_device_name(0)
+    except Exception as exc:  # noqa: BLE001 - any driver/runtime failure means "not usable"
+        return f"CUDA device query failed: {exc}"
+    arch_list = torch.cuda.get_arch_list()
+    if arch_list and not _arch_supported(capability, arch_list):
+        return (
+            f"{name} (sm_{capability[0]}{capability[1]}) is not supported by this PyTorch "
+            f"build ({torch.__version__}, kernels for {', '.join(arch_list)})"
+        )
+    try:
+        (torch.ones(1, device="cuda") + 1).item()
+    except Exception as exc:  # noqa: BLE001
+        return f"CUDA smoke test failed on {name}: {str(exc).splitlines()[0]}"
+    return None
+
+
+def resolve_device(requested: str | None = None) -> str:
+    """Pick the device for CLAP: the requested one, else CUDA when it can actually run, else CPU."""
+    if requested:
+        return requested
+    if not torch.cuda.is_available():
+        return "cpu"
+    reason = _cuda_unusable_reason()
+    if reason is not None:
+        logger.warning("Running CLAP on the CPU (slower): %s", reason)
+        return "cpu"
+    return "cuda"
+
+
 class ClapEmbedder:
     """CLAP model wrapper enforcing deterministic 48 kHz window preprocessing."""
 
@@ -166,7 +221,7 @@ class ClapEmbedder:
         self.hop_s = hop_s
         self.max_chunks_per_file = max_chunks_per_file
         self.batch_size = max(1, batch_size)
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = resolve_device(device)
         self.dtype = (
             torch.float16
             if (precision == "fp16" and self.device.startswith("cuda"))
