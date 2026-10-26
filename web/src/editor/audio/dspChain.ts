@@ -42,7 +42,6 @@ export const DEFAULT_SHAPER_SPEC: ShaperSpec = {
 };
 
 export interface EqSpec {
-  enabled: boolean;
   /** High-pass cutoff Hz (20 = off, up to 2000 Hz). */
   highpassHz: number;
   /** Low shelf @ 120 Hz in dB (-18 to +18). */
@@ -60,7 +59,6 @@ export interface EqSpec {
 }
 
 export const DEFAULT_EQ_SPEC: EqSpec = {
-  enabled: false,
   highpassHz: 20,
   lowGainDb: 0,
   midGainDb: 0,
@@ -200,10 +198,11 @@ export function evaluateEqResponseDb(
   return 10 * Math.log10(Math.max(1e-6, totalMagSq));
 }
 
+/**
+ * Each band is bypassed at its neutral setting (high-pass at its minimum,
+ * low-pass at its maximum, zero gain), so default settings yield no stages.
+ */
 function buildEqStages(spec: EqSpec, sampleRate: number): BiquadCoeffs[] {
-  if (!spec.enabled) {
-    return [];
-  }
   const stages: BiquadCoeffs[] = [];
   if (spec.highpassHz > 22) {
     stages.push(makeHighpass(spec.highpassHz, sampleRate));

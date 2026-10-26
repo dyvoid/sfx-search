@@ -86,7 +86,7 @@ test("D2 Tab and Shift+Tab stay inside the dialog and wrap", async ({ app }) => 
   await filename(app).focus();
   await app.keyboard.press("Shift+Tab");
   await app.keyboard.press("Shift+Tab");
-  await expect(dlg.getByRole("button", { name: "Save & index" })).toBeFocused();
+  await expect(dlg.getByRole("button", { name: "Save", exact: true })).toBeFocused();
   await app.keyboard.press("Tab");
   await expect(dlg.getByRole("button", { name: "Close dialog" })).toBeFocused();
 });
@@ -108,7 +108,7 @@ test("D2 focus that is outside the dialog is pulled back in by Tab and Shift+Tab
   await app.getByRole("button", { name: "Open file" }).focus();
   await app.keyboard.press("Shift+Tab");
   expect(await inside()).toBe(true);
-  await expect(dlg.getByRole("button", { name: "Save & index" })).toBeFocused();
+  await expect(dlg.getByRole("button", { name: "Save", exact: true })).toBeFocused();
 });
 
 test("D3 Escape closes only the dialog and returns focus to the opener", async ({ app }) => {

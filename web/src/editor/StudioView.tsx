@@ -1791,7 +1791,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
           >
             <Repeat size={14} />
             <span>Seamless Loop</span>
-            {loopEnabled && <span className="sfx-module-dot on" />}
           </button>
 
           <button
@@ -1841,11 +1840,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               onClick={() => revealInExplorer(hit.file_id).catch(() => {})}
-              className="sfx-icon-btn"
+              className="ds-btn ds-btn-ghost ds-btn-sm"
               title="Reveal source file in Explorer"
-              aria-label="Reveal source file in Explorer"
             >
-              <FolderOpen size={14} />
+              <FolderOpen size={13} />
+              Show in Explorer
             </button>
           )}
 
@@ -2020,41 +2019,35 @@ export const StudioView: React.FC<StudioViewProps> = ({
       {/* Studio Transport Deck */}
       <div className="sfx-editor-transport-bar">
         <div className="sfx-editor-transport-left">
-          <span className="sfx-rack-hint ds-tnum">
-            {activeModule === "shaper"
-              ? "Module 1 · Trim & Gain"
-              : activeModule === "eq"
-              ? "Module 2 · Tone & EQ"
-              : activeModule === "loop"
-              ? "Module 3 · Seamless Loop"
-              : "Module 4 · Variations"}
-          </span>
-          {loopEnabled && (
-            <div
-              className="sfx-pill-group"
-              role="group"
-              aria-label="Audition source"
-            >
-              <button
-                type="button"
-                onClick={() => setAuditionMode("loop")}
-                className={`sfx-choice-pill ${
-                  auditionMode === "loop" ? "active" : ""
-                }`}
+          {loopEnabled && activeModule === "loop" && (
+            <>
+              <span className="sfx-rack-hint">Preview</span>
+              <div
+                className="sfx-pill-group"
+                role="group"
+                aria-label="Audition source"
               >
-                Loop
-              </button>
-              <button
-                type="button"
-                onClick={() => setAuditionMode("file")}
-                className={`sfx-choice-pill ${
-                  auditionMode === "file" ? "active" : ""
-                }`}
-                title="Preview the full processed file instead of just the loop region"
-              >
-                File
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() => setAuditionMode("loop")}
+                  className={`sfx-choice-pill ${
+                    auditionMode === "loop" ? "active" : ""
+                  }`}
+                >
+                  Loop
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAuditionMode("file")}
+                  className={`sfx-choice-pill ${
+                    auditionMode === "file" ? "active" : ""
+                  }`}
+                  title="Preview the full processed file instead of just the loop region"
+                >
+                  File
+                </button>
+              </div>
+            </>
           )}
         </div>
 
@@ -2178,8 +2171,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   >
                     <div className="ds-switch-thumb" />
                   </div>
-                  <span style={{ color: "var(--text-secondary)" }}>
-                    Bake Loop
+                  <span
+                    style={{ color: "var(--text-secondary)" }}
+                    title="Loop the preview and bake the crossfade into the exported file"
+                  >
+                    Export as loop
                   </span>
                 </label>
               </div>
@@ -2436,10 +2432,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
                 <span className="ds-panel-title">Seam Continuity Scope</span>
-                <span className="sfx-rack-hint ds-tnum">
-                  Step Δ {seamMetrics.stepDelta.toFixed(4)} · Energy{" "}
-                  {Math.round(seamMetrics.energyMatch * 100)}%
-                </span>
               </div>
               <SeamScope
                 bakedChannels={bakedChannels}
@@ -2581,13 +2573,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                   </div>
                 </div>
 
-                <div className="sfx-rack-row">
-                  <span className="sfx-rack-label">Cropped Length</span>
-                  <span className="sfx-val-readout ds-tnum" style={{ minWidth: 160 }}>
-                    {totalDurationS.toFixed(3)}s (of{" "}
-                    {(rawTotalSamples / sampleRate).toFixed(3)}s)
-                  </span>
-                </div>
               </div>
             </section>
 
@@ -2845,18 +2830,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
             <section className="sfx-rack-card">
               <div className="sfx-rack-card-head">
                 <span className="ds-panel-title">High / Low Cut Filters</span>
-                <label
-                  className="ds-switch-item"
-                  style={{ fontSize: "var(--font-size-xs)" }}
-                >
-                  <div
-                    className={`ds-switch-track ${eq.enabled ? "on" : ""}`}
-                    onClick={() => setEq((s) => ({ ...s, enabled: !s.enabled }))}
-                  >
-                    <div className="ds-switch-thumb" />
-                  </div>
-                  <span style={{ color: "var(--text-secondary)" }}>Enable</span>
-                </label>
               </div>
               <div className="sfx-rack-fields">
                 <div className="sfx-rack-row">
@@ -2870,7 +2843,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       onChange={(e) =>
                         setEq((s) => ({
                           ...s,
-                          enabled: true,
                           highpassHz: Number(e.target.value),
                         }))
                       }
@@ -2892,7 +2864,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       onChange={(e) =>
                         setEq((s) => ({
                           ...s,
-                          enabled: true,
                           lowpassHz: Number(e.target.value),
                         }))
                       }
@@ -2920,7 +2891,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       onClick={() =>
                         setEq({
                           ...DEFAULT_EQ_SPEC,
-                          enabled: true,
                           highpassHz: 110,
                           lowGainDb: -3,
                         })
@@ -2934,7 +2904,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       onClick={() =>
                         setEq({
                           ...DEFAULT_EQ_SPEC,
-                          enabled: true,
                           highpassHz: 60,
                           lowpassHz: 2400,
                           highGainDb: -6,
@@ -2949,7 +2918,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       onClick={() =>
                         setEq({
                           ...DEFAULT_EQ_SPEC,
-                          enabled: true,
                           highpassHz: 420,
                           lowpassHz: 3400,
                           midGainDb: 6,
@@ -2989,7 +2957,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       onChange={(e) =>
                         setEq((s) => ({
                           ...s,
-                          enabled: true,
                           lowGainDb: Number(e.target.value),
                         }))
                       }
@@ -3016,7 +2983,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       onChange={(e) =>
                         setEq((s) => ({
                           ...s,
-                          enabled: true,
                           midGainDb: Number(e.target.value),
                         }))
                       }
@@ -3041,7 +3007,6 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       onChange={(e) =>
                         setEq((s) => ({
                           ...s,
-                          enabled: true,
                           highGainDb: Number(e.target.value),
                         }))
                       }
@@ -3485,12 +3450,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
 
               {variations.length === 0 ? (
                 <div className="sfx-candidate-empty">
-                  Dial in your variation amounts on the left (hover any{" "}
-                  <strong>?</strong> icon for details) and click{" "}
-                  <strong>Generate {varSpec.count} Takes</strong>. Then use{" "}
-                  <strong>Test Sequence</strong> to hear them fire back-to-back,
-                  heart your favorites, drag takes into your DAW, or save them
-                  to your library.
+                  Set the variation amounts, then generate takes.
                 </div>
               ) : (
                 <div className="sfx-var-takes-grid">
@@ -3735,7 +3695,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                 disabled={!saveName.trim() || savingToLibrary}
                 onClick={() => void confirmSave()}
               >
-                {savingToLibrary ? "Saving…" : "Save & index"}
+                {savingToLibrary ? "Saving…" : "Save"}
               </button>
             </div>
           </div>

@@ -465,10 +465,10 @@ export function synthesizeVariation(
     highDb -= comp * 0.85;
   }
 
+  const eqNeeded =
+    Math.abs(lowDb) > 0.1 || Math.abs(midDb) > 0.1 || Math.abs(highDb) > 0.1;
   const eqSpec: EqSpec = {
     ...DEFAULT_EQ_SPEC,
-    enabled:
-      Math.abs(lowDb) > 0.1 || Math.abs(midDb) > 0.1 || Math.abs(highDb) > 0.1,
     lowGainDb: lowDb,
     midGainDb: midDb,
     midFreqHz: midFreq,
@@ -476,7 +476,7 @@ export function synthesizeVariation(
     highGainDb: highDb,
   };
 
-  if (eqSpec.enabled) {
+  if (eqNeeded) {
     outChannels = applyDspChain(
       outChannels,
       sampleRate,

@@ -1401,7 +1401,8 @@ body.sfx-resizing-x {
 
 .sfx-editor-stage-hud-left {
   position: absolute;
-  top: var(--space-3);
+  /* Clear the marker flags and active-marker label the waveform draws in its top ~20px. */
+  top: 26px;
   left: var(--space-4);
   display: flex;
   align-items: center;
@@ -1445,7 +1446,7 @@ body.sfx-resizing-x {
 
 .sfx-editor-stage-hud-right {
   position: absolute;
-  top: var(--space-3);
+  top: 26px;
   right: var(--space-4);
   display: flex;
   align-items: center;
