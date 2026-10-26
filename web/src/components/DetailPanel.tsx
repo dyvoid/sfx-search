@@ -222,6 +222,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             >
               <PanelRightClose size={16} />
             </button>
+            <div className="sfx-inspector-file">
+              <div className="sfx-inspector-filename" title={hit.filename}>
+                {hit.filename}
+              </div>
+              <div className="sfx-inspector-filepath" title={hit.path}>
+                {hit.folder}
+              </div>
+            </div>
           </div>
           <div className="sfx-inspector-head-actions">
             <button
@@ -242,14 +250,6 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
-          </div>
-        </div>
-        <div className="sfx-inspector-file">
-          <div className="sfx-inspector-filename" title={hit.filename}>
-            {hit.filename}
-          </div>
-          <div className="sfx-inspector-filepath" title={hit.path}>
-            {hit.folder}
           </div>
         </div>
       </div>
@@ -298,10 +298,10 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
               type="button"
               onClick={onOpenEditor}
               className="ds-btn ds-btn-primary"
-              title="Open in Audio Editor (E)"
+              title="Edit in Studio (E)"
             >
               <Sliders size={14} />
-              <span className="sfx-btn-label">Edit Audio (E)</span>
+              <span className="sfx-btn-label">Edit in Studio</span>
             </button>
             <button
               type="button"

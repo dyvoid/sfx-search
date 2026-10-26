@@ -48,3 +48,13 @@ Format: what, decision, why. Newest last within each section.
   pre-existing, possibly intended (keeps typing context).
 - **MCP `batch_search` over-limit error text is hidden by FastMCP** ("Error executing tool
   batch_search"). Accepted: the call still fails loudly instead of truncating silently.
+- **The manual "enter a path" field has no placeholder.** Rejected (user decision): a hint
+  inside that field confused more than it helped; it has an accessible name ("Folder path"),
+  autofocuses, and sits next to Add/Cancel right after "or enter a path" was clicked.
+- **Compact density keeps the kit's smaller controls (22–26px).** Intended: compact is an
+  explicit opt-in for power users; the 28px floor in DESIGN.md applies to the default density.
+- **Folder-tree chevrons and checkboxes are 15px.** Accepted: the whole tree row is clickable
+  and the tree is a dense secondary navigator.
+- **The library footer sits inside the results panel.** Intended: it reports on the results
+  (count, status) and its hints are about that list.
+- **Footer key hints are hidden below 960px.** Intended: the status message takes the room.

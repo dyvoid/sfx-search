@@ -38,11 +38,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
       <div className="ds-microlabel">Active folders</div>
       <div className="sfx-setup-folder-list">
         {roots.map((r) => (
-          <span
-            key={r}
-            className="ds-badge ds-badge-neutral"
-            style={{ textTransform: "none", letterSpacing: 0 }}
-          >
+          <span key={r} className="sfx-setup-folder">
             {r}
           </span>
         ))}

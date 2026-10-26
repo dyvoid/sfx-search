@@ -101,7 +101,6 @@ body,
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  flex-wrap: wrap;
 }
 
 .sfx-brand {
@@ -146,6 +145,13 @@ body,
   justify-content: flex-start;
   margin-left: var(--space-4);
   min-width: 0;
+  overflow: hidden;
+}
+
+/* Items keep their shape; the strip clips from the end (meter first) when narrow. */
+.sfx-transport-strip > * {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .sfx-workspace-tools {
@@ -924,8 +930,21 @@ body.sfx-resizing-x {
 
 .sfx-setup-folder-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.sfx-setup-folder {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* First run: the setup stands on the background; an empty panel frame adds nothing. */
+.sfx-main.sfx-main-setup {
+  background: transparent;
+  border-color: transparent;
 }
 
 .sfx-status-err {
@@ -972,7 +991,6 @@ body.sfx-resizing-x {
 .sfx-inspector-head {
   flex-direction: column;
   align-items: stretch;
-  gap: var(--space-3);
 }
 
 .sfx-inspector-head-row {
@@ -985,7 +1003,7 @@ body.sfx-resizing-x {
 .sfx-inspector-head-lead {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-3);
   min-width: 0;
 }
 
@@ -1510,7 +1528,7 @@ body.sfx-resizing-x {
 .sfx-editor-stage {
   position: relative;
   flex: 1 1 240px;
-  min-height: 200px;
+  min-height: 140px;
   margin: var(--space-4) var(--space-4) 0;
   border: var(--border-width) solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -1565,10 +1583,15 @@ body.sfx-resizing-x {
   border-radius: var(--radius-xs);
   background: oklch(from var(--surface-panel) l c h / 0.86);
   border: 1px solid var(--border-subtle);
-  font-family: var(--font-mono);
-  font-size: var(--font-size-2xs);
+  font-size: var(--font-size-xs);
   font-feature-settings: var(--tnum);
   color: var(--text-secondary);
+}
+
+.sfx-hud-pill b {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
 .sfx-hud-pill .dot {
@@ -1603,8 +1626,8 @@ body.sfx-resizing-x {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 26px;
-  padding: 0 9px;
+  height: 28px;
+  padding: 0 10px;
   border-radius: var(--radius-xs);
   background: oklch(from var(--surface-panel) l c h / 0.88);
   border: 1px solid var(--border-subtle);
@@ -1649,13 +1672,12 @@ body.sfx-resizing-x {
 
 /* Studio Transport Bar */
 .sfx-editor-transport-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-4);
   padding: var(--space-3) var(--space-5);
   flex-shrink: 0;
-  flex-wrap: wrap;
 }
 
 .sfx-editor-transport-left,
@@ -1663,11 +1685,32 @@ body.sfx-resizing-x {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  min-width: 240px;
+  min-width: 0;
+}
+
+/* Reserved so the level readouts don't move when the meter appears. */
+.sfx-meter-slot {
+  display: flex;
+  align-items: center;
+  width: 92px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 1000px) {
+  .sfx-meter-slot,
+  .sfx-signal-meters .rms {
+    display: none;
+  }
+
+  /* Module tabs fall back to icons (they keep aria-label and title). */
+  .sfx-module-tab > span:not(.sfx-module-dot) {
+    display: none;
+  }
 }
 
 .sfx-editor-transport-right {
   justify-content: flex-end;
+  overflow: hidden;
 }
 
 .sfx-find-loops-btn:not(:disabled) {
@@ -1778,12 +1821,13 @@ body.sfx-resizing-x {
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  font-family: var(--font-mono);
   font-size: var(--font-size-sm);
   color: var(--text-tertiary);
+  white-space: nowrap;
 }
 
 .sfx-signal-meters strong {
+  font-family: var(--font-mono);
   font-weight: 600;
   color: var(--text-primary);
 }
@@ -1791,7 +1835,8 @@ body.sfx-resizing-x {
 /* Lower Module Rack */
 .sfx-editor-rack {
   padding: 0 var(--space-4) var(--space-4);
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-height: 0;
   max-height: 50vh;
   overflow-y: auto;
 }
@@ -1820,6 +1865,11 @@ body.sfx-resizing-x {
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-3);
   min-height: 28px;
+}
+
+.sfx-rack-card-head > * {
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .sfx-rack-card-head .ds-btn {
@@ -2029,7 +2079,7 @@ body.sfx-resizing-x {
 
 .sfx-var-takes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: var(--space-2);
   max-height: 232px;
   overflow-y: auto;
@@ -2098,13 +2148,13 @@ body.sfx-resizing-x {
 .sfx-var-take-actions {
   display: flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   margin-left: auto;
 }
 
 .sfx-var-mini-btn {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: var(--radius-xs);
   border: 1px solid transparent;
   background: transparent;
@@ -2147,8 +2197,8 @@ body.sfx-resizing-x {
   position: absolute;
   right: 2px;
   bottom: 2px;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-xs);
   border: 1px solid oklch(from var(--accent-2-400) l c h / 0.45);
   background: oklch(from var(--gray-950) l c h / 0.88);

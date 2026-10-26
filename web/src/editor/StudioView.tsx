@@ -1746,6 +1746,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
               type="button"
               role="tab"
               aria-selected={activeModule === "shaper"}
+              aria-label="Trim & Gain"
+              title="Trim & Gain"
               onClick={() => setActiveModule("shaper")}
               className={`sfx-module-tab ${
                 activeModule === "shaper" ? "active" : ""
@@ -1760,6 +1762,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
               type="button"
               role="tab"
               aria-selected={activeModule === "eq"}
+              aria-label="Tone & EQ"
+              title="Tone & EQ"
               onClick={() => setActiveModule("eq")}
               className={`sfx-module-tab ${
                 activeModule === "eq" ? "active" : ""
@@ -1774,6 +1778,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
               type="button"
               role="tab"
               aria-selected={activeModule === "loop"}
+              aria-label="Seamless Loop"
+              title="Seamless Loop"
               onClick={() => setActiveModule("loop")}
               className={`sfx-module-tab ${
                 activeModule === "loop" ? "active" : ""
@@ -1787,6 +1793,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
               type="button"
               role="tab"
               aria-selected={activeModule === "variations"}
+              aria-label="Variations"
+              title="Variations"
               onClick={() => setActiveModule("variations")}
               className={`sfx-module-tab ${
                 activeModule === "variations" ? "active" : ""
@@ -1913,32 +1921,32 @@ export const StudioView: React.FC<StudioViewProps> = ({
           <div className="sfx-editor-stage-hud-left">
             <span className="sfx-hud-pill start">
               <span className="dot" />
-              IN {(cropStartSamples / sampleRate).toFixed(3)}s
+              IN <b>{(cropStartSamples / sampleRate).toFixed(3)}s</b>
             </span>
             <span className="sfx-hud-pill end">
               <span className="dot" />
-              OUT {(cropEndSamples / sampleRate).toFixed(3)}s
+              OUT <b>{(cropEndSamples / sampleRate).toFixed(3)}s</b>
             </span>
             <span className="sfx-hud-pill">
-              Cropped {totalDurationS.toFixed(3)}s /{" "}
-              {(rawTotalSamples / sampleRate).toFixed(3)}s
+              Length <b>{totalDurationS.toFixed(3)}s</b> of{" "}
+              <b>{(rawTotalSamples / sampleRate).toFixed(3)}s</b>
             </span>
           </div>
         ) : (
           activeModule === "loop" && (
             <div className="sfx-editor-stage-hud-left">
               <span className="sfx-hud-pill start">
-                <span className="dot" />S {(loopStart / sampleRate).toFixed(3)}s
+                <span className="dot" />S <b>{(loopStart / sampleRate).toFixed(3)}s</b>
               </span>
               <span className="sfx-hud-pill end">
-                <span className="dot" />E {(loopEnd / sampleRate).toFixed(3)}s
+                <span className="dot" />E <b>{(loopEnd / sampleRate).toFixed(3)}s</b>
               </span>
               <span className="sfx-hud-pill">
-                Len {loopDurationS.toFixed(3)}s
+                Length <b>{loopDurationS.toFixed(3)}s</b>
               </span>
               {loopEnabled && fadeMs > 0 && (
                 <span className="sfx-hud-pill fade">
-                  X-Fade {Math.round(fadeMs)}ms · {resolvedModeLabel}
+                  Crossfade <b>{Math.round(fadeMs)} ms</b> · {resolvedModeLabel}
                 </span>
               )}
             </div>
@@ -2099,12 +2107,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
         </div>
 
         <div className="sfx-editor-transport-right">
-          {(isPlaying || playingVarIdx !== null) && (
-            <SpectrumMeter
-              analyserNode={transportRef.current?.analyser ?? null}
-              isPlaying
-            />
-          )}
+          <div
+            className="sfx-meter-slot"
+            aria-hidden={!(isPlaying || playingVarIdx !== null)}
+          >
+            {(isPlaying || playingVarIdx !== null) && (
+              <SpectrumMeter
+                analyserNode={transportRef.current?.analyser ?? null}
+                isPlaying
+              />
+            )}
+          </div>
           <div className="sfx-signal-meters ds-tnum">
             <span title="Peak amplitude of the output">
               Peak{" "}
@@ -2121,7 +2134,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   : "—"}
               </strong>
             </span>
-            <span title="RMS level of the output">
+            <span className="rms" title="RMS level of the output">
               RMS{" "}
               <strong>
                 {signalStats.rmsDbfs > -119
@@ -2354,7 +2367,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                 <div className="sfx-rack-row">
                   <LabelWithTip
                     label="Min loop length (s)"
-                    tip="Rejects candidates shorter than this. Window sets how far the scanner searches around each promising point." />
+                    tip="Rejects candidates shorter than this." />
                   <div className="sfx-rack-control-inline">
                     <input
                       aria-label="Min loop length (s)"
@@ -2370,9 +2383,14 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                       }
                       className="sfx-num-input ds-tnum"
                     />
-                    <span className="sfx-rack-label" style={{ marginLeft: 8 }}>
-                      Window (ms)
-                    </span>
+                  </div>
+                </div>
+
+                <div className="sfx-rack-row">
+                  <LabelWithTip
+                    label="Search window (ms)"
+                    tip="How far the scanner searches around each promising point." />
+                  <div className="sfx-rack-control-inline">
                     <input
                       aria-label="Window (ms)"
                       type="number"
@@ -3214,7 +3232,7 @@ role="checkbox" aria-checked={varSpec.linkPitchAndVolume} tabIndex={0}
                       }))
                     }
                     className="sfx-num-input ds-tnum"
-                    style={{ width: 52, height: 22 }}
+                    style={{ width: 56 }}
                   />
                 </div>
               </div>

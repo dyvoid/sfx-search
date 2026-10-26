@@ -181,9 +181,11 @@ because of space and layering, not fonts. These apply to every screen.
    HUD buttons use Hanken Grotesk as written (no uppercase, no letter-spacing). Mono is for
    numbers, times, levels, paths and key caps.
 3. **Readable floor.** No text below 12px; control labels 13px; section titles 14px semibold.
-   Controls in panels are at least 28px high; rows at least 32px apart.
+   Controls in panels are at least 28px high (a small icon button laid over a canvas may be
+   24px); rows at least 32px apart.
 4. **Controls get the space they need.** In the Studio the rack takes its natural height and
-   the waveform takes what is left (with a sensible minimum), not the other way around.
+   the waveform takes what is left (with a sensible minimum), not the other way around. On a
+   short window the rack scrolls inside itself; the footer never leaves the screen.
 5. **Key hints are keys.** Shortcuts render as a key cap plus a plain word
    (`[Space] Preview`), never as one run-on mono string.
 6. **Group by job.** A toolbar splits into "work on this sound" (left) and "save / export"

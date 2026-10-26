@@ -2116,7 +2116,7 @@ export const App: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setLibraryModalOpen(true)}
-                className="ds-btn ds-btn-ghost ds-btn-sm"
+                className="ds-btn ds-btn-secondary ds-btn-sm"
               >
                 Folders
               </button>
@@ -2133,7 +2133,7 @@ export const App: React.FC = () => {
           <button
             type="button"
             onClick={() => void handleRescan(false)}
-            className="ds-btn ds-btn-ghost ds-btn-sm"
+            className="ds-btn ds-btn-secondary ds-btn-sm"
           >
             Try again
           </button>
@@ -2155,7 +2155,7 @@ export const App: React.FC = () => {
           <button
             type="button"
             onClick={() => void handleRescan(false)}
-            className="ds-btn ds-btn-ghost ds-btn-sm"
+            className="ds-btn ds-btn-secondary ds-btn-sm"
           >
             Scan for changes
           </button>
@@ -2245,7 +2245,7 @@ export const App: React.FC = () => {
             <span className="sfx-pane-tab-label">Folders</span>
           </button>
         )}
-        <main className="sfx-main">
+        <main className={`sfx-main${hasIndexedFiles ? "" : " sfx-main-setup"}`}>
           {/* Content: Onboarding Empty State vs Results List */}
           <div
             ref={resultsListRef}
