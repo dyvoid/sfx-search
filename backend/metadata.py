@@ -44,7 +44,7 @@ NOISE_TOKENS: set[str] = {
 _CAMEL_RE = re.compile(
     r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])"
 )
-_SPLIT_RE = re.compile(r"[^a-zA-Z0-9]+")
+_SPLIT_RE = re.compile(r"[\W_]+")
 
 _IXML_INTEREST_TAGS: set[str] = {
     "category",

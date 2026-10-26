@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import queue
 import threading
 import time
@@ -29,6 +31,8 @@ from .scan import (
     walk_roots,
 )
 from .store import ChunkRecord, FileRecord, SfxStore
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -271,12 +275,24 @@ def run_indexer(
         reset=False,
     )
 
+    # A configured root that is absent on disk (unplugged drive, unmounted
+    # share) must not have its indexed files marked missing and their chunks
+    # deleted; skip it from the manifest diff entirely.
+    live_roots = [r for r in target_roots if os.path.isdir(to_os_path(r))]
+    for offline in (r for r in target_roots if r not in live_roots):
+        logger.warning("Skipping offline library root (not marking files missing): %s", offline)
+
     scanned_files = walk_roots(
         roots=target_roots,
         extensions=config.library.extensions,
         limit=limit,
     )
-    existing_manifest = store.load_manifest(roots=target_roots if limit is None else None)
+    if limit is not None:
+        existing_manifest = store.load_manifest(roots=None)
+    elif live_roots:
+        existing_manifest = store.load_manifest(roots=live_roots)
+    else:
+        existing_manifest = {}  # load_manifest treats an empty roots list as "all"
     diff = diff_manifest(
         scanned=scanned_files,
         existing=existing_manifest,

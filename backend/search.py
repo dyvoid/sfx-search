@@ -20,6 +20,9 @@ from .embed import EmbedderProtocol
 from .scan import to_os_path
 from .store import ModelMismatchError, SearchFilters, SfxStore, UserDataRecord
 
+# Upper bound for k everywhere (matches the HTTP API's le=500).
+MAX_K = 500
+
 SearchMode = Literal["hybrid", "audio_only", "keyword_only"]
 SortMode = Literal[
     "relevance",
@@ -31,7 +34,9 @@ SortMode = Literal[
     "lufs_asc",
 ]
 
-_INLINE_DUR_RE = re.compile(r"\bdur:(?:(\d+(?:\.\d+)?))?-(?:(\d+(?:\.\d+)?))?\b", re.IGNORECASE)
+_INLINE_DUR_RE = re.compile(
+    r"\bdur:(?:(\d+(?:\.\d+)?))?-(?:(\d+(?:\.\d+)?))?(?=\s|$)", re.IGNORECASE
+)
 _INLINE_DUR_CMP_RE = re.compile(r"\bdur:([<>]=?)(\d+(?:\.\d+)?)\b", re.IGNORECASE)
 _INLINE_LOOP_RE = re.compile(r"\bloop:(true|false|\d+(?:\.\d+)?)\b", re.IGNORECASE)
 _INLINE_FMT_RE = re.compile(r"\b(?:fmt|format):([a-zA-Z0-9_.-]+)\b", re.IGNORECASE)
@@ -269,7 +274,7 @@ class SearchEngine:
         filters: SearchFilters | None = None,
     ) -> tuple[list[SearchHit], int]:
         self._ensure_model_compatible()
-        top_k = k if k is not None else self.config.search.default_k
+        top_k = max(1, min(k if k is not None else self.config.search.default_k, MAX_K))
         safe_offset = max(0, offset)
         parsed = parse_query(query, base_filters=filters)
         eff_filters = parsed.filters
@@ -445,7 +450,7 @@ class SearchEngine:
         exclude_self: bool = True,
     ) -> list[SearchHit]:
         self._ensure_model_compatible()
-        top_k = k if k is not None else self.config.search.default_k
+        top_k = max(1, min(k if k is not None else self.config.search.default_k, MAX_K))
         ref_row = self.store.get_file_by_id_or_path(file_id_or_path, include_vec=True)
 
         if ref_row is not None:
@@ -491,7 +496,7 @@ class SearchEngine:
         filters: SearchFilters | None = None,
     ) -> list[SearchHit]:
         self._ensure_model_compatible()
-        top_k = k if k is not None else self.config.search.default_k
+        top_k = max(1, min(k if k is not None else self.config.search.default_k, MAX_K))
         decoded = decode_file(
             audio_path,
             ffmpeg_bin=self.config.paths.ffmpeg,
