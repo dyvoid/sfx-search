@@ -273,13 +273,20 @@ def test_save_edited_custom_name(tmp_path: Path) -> None:
     assert _post_edit(client, wid, tmp_path, name="///").status_code == 400
 
 
-@pytest.mark.parametrize("bad", ["CON", "nul", "COM1", "lpt9", "con.take", "Aux "])
+@pytest.mark.parametrize("bad", ["CON", "nul", "COM1", "lpt9", "con.take", "Aux ", "COM\u00b9"])
 def test_save_edited_windows_reserved_names(tmp_path: Path, bad: str) -> None:
     client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
     r = _post_edit(client, wid, tmp_path, name=bad)
     assert r.status_code == 200
     stem = Path(r.json()["hit"]["filename"]).stem
-    assert stem.split(".")[0].strip().upper() not in {"CON", "NUL", "COM1", "LPT9", "AUX"}
+    assert stem.split(".")[0].strip().upper() not in {
+        "CON",
+        "NUL",
+        "COM1",
+        "LPT9",
+        "AUX",
+        "COM\u00b9",
+    }
 
 
 def test_save_edited_overwrite_never_writes_wav_into_non_wav_source(tmp_path: Path) -> None:
@@ -292,6 +299,32 @@ def test_save_edited_overwrite_never_writes_wav_into_non_wav_source(tmp_path: Pa
     r = _post_edit(client, aid, tmp_path, overwrite="true", name="door_edit")
     assert r.status_code == 200
     assert aiff.read_bytes() == before
+
+
+def test_save_edited_rejects_non_wav_payload(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    before = wav.read_bytes()
+    junk = {"file": ("x.wav", b"garbage" * 50, "audio/wav")}
+    url = f"/api/files/{wid}/save-edited"
+    r = client.post(url, params={"overwrite": "true"}, files=junk)
+    assert r.status_code == 400
+    assert wav.read_bytes() == before
+    r = client.post(url, params={"name": "junk"}, files=junk)
+    assert r.status_code == 400
+    assert not (wav.parent / "junk.wav").exists()
+    assert not list(wav.parent.glob("*.tmp"))
+
+
+def test_save_edited_overwrite_keeps_target_user_data(tmp_path: Path) -> None:
+    client, _wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    oid = _post_edit(client, wid, tmp_path, name="other").json()["hit"]["file_id"]
+    body = {"favorite": True, "user_tags": ["keep"], "note": "mine"}
+    assert client.put(f"/api/files/{oid}/user", json=body).status_code == 200
+    hit = _post_edit(client, wid, tmp_path, name="other", overwrite="true").json()["hit"]
+    assert hit["file_id"] == oid
+    assert hit["favorite"] is True
+    assert hit["note"] == "mine"
+    assert hit["user_tags"] == ["keep", "loop"]
 
 
 def test_save_edited_long_name_is_bounded(tmp_path: Path) -> None:
