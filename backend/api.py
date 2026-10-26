@@ -26,7 +26,7 @@ from .decode import decode_audio_pcm
 from .embed import EmbedderProtocol
 from .features import compute_waveform_peaks
 from .indexer import IndexStats, index_single_file, run_indexer
-from .scan import normalize_path, to_os_path
+from .scan import compute_file_id, normalize_path, to_os_path
 from .search import SearchEngine, SearchMode, SortMode
 from .store import ModelMismatchError, SearchFilters, SfxStore, UserDataRecord
 
@@ -369,6 +369,7 @@ _WINDOWS_RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
     | {f"COM{i}" for i in range(10)}
     | {f"LPT{i}" for i in range(10)}
+    | {f"{p}{d}" for p in ("COM", "LPT") for d in "\u00b9\u00b2\u00b3"}
 )
 
 
@@ -927,6 +928,8 @@ def create_app(
                 counter += 1
             target_norm = normalize_path(candidate)
 
+        target_fid = compute_file_id(target_norm)
+        u_map = st.get_user_data_map([source_fid, target_fid])
         max_bytes = 256 * 1024 * 1024
         os_target = to_os_path(target_norm)
         os_tmp = f"{os_target}.{os.getpid()}_{threading.get_ident()}.tmp"
@@ -943,6 +946,10 @@ def create_app(
                     out_f.write(chunk)
             if written < 44:
                 raise HTTPException(status_code=400, detail="Edited audio payload is empty")
+            with open(os_tmp, "rb") as chk_f:
+                header = chk_f.read(12)
+            if header[0:4] != b"RIFF" or header[8:12] != b"WAVE":
+                raise HTTPException(status_code=400, detail="Edited audio is not a WAV file")
             os.replace(os_tmp, os_target)
         except HTTPException:
             try:
@@ -971,13 +978,19 @@ def create_app(
                 embedder=engine.embedder,
             )
         except Exception as exc:
+            if not overwrite:
+                try:
+                    os.unlink(os_target)
+                except OSError:
+                    pass
             raise HTTPException(
                 status_code=500, detail=f"Saved file but indexing failed: {exc}"
             ) from exc
 
-        u_map = st.get_user_data_map([source_fid])
         src_u = u_map.get(source_fid, UserDataRecord(file_id=source_fid))
         if copy_user_data:
+            if target_fid != source_fid and target_fid in u_map:
+                src_u = u_map[target_fid]
             next_tags = list(src_u.user_tags)
             if "loop" not in [t.lower() for t in next_tags]:
                 next_tags.append("loop")
