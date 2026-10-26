@@ -1388,7 +1388,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           const active = document.activeElement;
           if (!saveDlgRef.current.contains(active)) {
             e.preventDefault();
-            first.focus();
+            (e.shiftKey ? last : first).focus();
           } else if (e.shiftKey && active === first) {
             e.preventDefault();
             last.focus();
@@ -1404,7 +1404,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
       const nonTextInput = ["range", "checkbox", "radio"].includes(
         inputType
       );
-      const isSaveChord = e.code === "KeyS" && (e.ctrlKey || e.metaKey);
+      const isSaveChord =
+        (e.ctrlKey || e.metaKey) &&
+        !e.shiftKey &&
+        !e.altKey &&
+        e.key.toLowerCase() === "s";
       const runSave = () => {
         if (saveDlg || !processedChannels || e.repeat) {
           return;
@@ -1453,6 +1457,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
         return;
       }
 
+      if (isSaveChord) {
+        e.preventDefault(); // block the browser's "Save page" dialog
+      }
       if (!processedChannels) {
         return;
       }
@@ -1524,14 +1531,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
           }
           break;
         case "KeyS":
-          if (e.ctrlKey || e.metaKey) {
+          if (isSaveChord) {
             e.preventDefault();
             if (hit) {
               openSaveDialog();
             } else {
               handleExportDownload();
             }
-          } else {
+          } else if (!e.ctrlKey && !e.metaKey) {
             e.preventDefault();
             auditionSeam();
           }
@@ -3680,7 +3687,9 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === " " || e.key === "Enter") {
                     e.preventDefault();
-                    e.currentTarget.click();
+                    if (!e.repeat) {
+                      e.currentTarget.click();
+                    }
                   }
                 }}
                 onClick={() => setSaveOverwrite((v) => !v)}
