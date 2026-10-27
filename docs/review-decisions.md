@@ -55,8 +55,8 @@ Format: what, decision, why. Newest last within each section.
   explicit opt-in for power users; the 28px floor in DESIGN.md applies to the default density.
 - **Folder-tree chevrons and checkboxes are 15px.** Accepted: the whole tree row is clickable
   and the tree is a dense secondary navigator.
-- **The library footer sits inside the results panel.** Intended: it reports on the results
-  (count, status) and its hints are about that list.
+- **The library footer is a full-width bar.** Superseded the earlier "footer inside the
+  results panel" decision: bars frame every screen (DESIGN.md Readability Rule 1).
 - **Footer key hints are hidden below 960px.** Intended: the status message takes the room.
 - **No visible cue on the Studio rack when it scrolls internally** (short windows). Deferred:
   the scrollbar and cut-off card edge show it; revisit if users miss controls.

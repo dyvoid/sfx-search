@@ -120,7 +120,7 @@ One neutral family plus four identity hues with assigned meaning; functional hue
 
 ### Hierarchy
 - **Display** (Familjen 600, negative tracking): file titles, hero numbers
-- **Section title** (Hanken 600, `--font-size-base`, `--text-primary`, as written): panel and card titles (`ds-panel-title`), filenames
+- **Section title** (kit `ds-panel-title`: mono 500, `--text-xs`, uppercase, wide tracking, `--text-secondary`): panel and card titles. Filenames are Hanken 600.
 - **Label** (Hanken 400–500, `--font-size-sm`, `--text-secondary`): control labels, rack row labels, filter labels (`ds-microlabel`)
 - **Key** (Hanken 400, `--font-size-xs`, `--text-tertiary`): data keys above or beside a value (`sfx-param-label`, `sfx-kv-key`)
 - **Body** (Hanken 400, `--font-size-sm`/`--font-size-base`, 1.5): descriptions, buttons
@@ -132,7 +132,7 @@ Two shells: **library** (toolbar + hero search + folder pane / results list / in
 
 ## Elevation & Depth
 
-Three layers, always distinguishable: the **background** (`--surface-app`) carries bars and gutters; **panels** (`--surface-panel`, subtle border, `--radius-md`) hold content and sit on the background with a gutter around them; **controls** sit inside panels (sunken inputs, raised buttons). A panel never sits on a panel of the same tone.
+Three layers, always distinguishable: the **background** (`--surface-app`) shows in the gutters; **bars** (`--surface-panel`, full width, hairline-separated) frame the page; **panels** (`--surface-panel`, subtle border, `--radius-md`) hold content and sit on the background with a gutter around them; **controls** sit inside panels (sunken inputs, raised buttons). A panel never sits on a panel of the same tone.
 
 
 Tonal layering driven by a single `--presence` knob (0.45 default): surfaces get gradient faces, `--inset-rail` recesses tracks/inputs, `--inset-highlight` adds a specular top edge, and layered `--shadow-sm/md/lg` float overlays. Panels carry the signature top-edge line. At presence 0 the system is near-flat; the tokens do the work either way — never write bespoke shadows.
@@ -174,13 +174,16 @@ Sharp **2px** corners on all controls and panels; **full pill** only for switche
 Learned from comparing the Studio against a redesign mock: the mock read better at every size
 because of space and layering, not fonts. These apply to every screen.
 
-1. **Panels on a background.** Content regions (results, folder tree, inspector, waveform
-   stage, each Studio rack card, dialogs) are panels separated by a gutter, not one sheet
-   split by hairlines. Bars (header, toolbar, transport, footer) sit on the background.
-2. **Words in the body font, values in mono.** Section titles, labels, buttons, hints and
-   HUD buttons use Hanken Grotesk as written (no uppercase, no letter-spacing). Mono is for
-   numbers, times, levels, paths and key caps.
-3. **Readable floor.** No text below 12px; control labels 13px; section titles 14px semibold.
+1. **Bars frame the page, panels hold the content.** Bars (top bar, search/tool row, the
+   waveform's readout strip, transport, footer) span the full width on `--surface-panel`
+   with hairlines between them, one job per bar, so the page reads top to bottom. Content
+   regions (results, folder tree, inspector, waveform, each Studio rack card) are panels on
+   the background with a gutter. Dialogs follow the same order: header bar, body, action bar.
+2. **Words in the body font, values in mono.** Labels, buttons, hints and HUD buttons use
+   Hanken Grotesk as written. Section titles (`ds-panel-title`) are the one exception: the
+   kit's uppercase mono marks the section level. Mono is otherwise for numbers, times,
+   levels, paths and key caps.
+3. **Readable floor.** No text below 12px; control labels 13px; section titles 12px uppercase mono.
    Controls in panels are at least 28px high (a small icon button laid over a canvas may be
    24px); rows at least 32px apart.
 4. **Controls get the space they need.** In the Studio the rack takes its natural height and

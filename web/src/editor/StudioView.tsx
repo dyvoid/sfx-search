@@ -1890,134 +1890,137 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
       {/* Main Waveform Stage */}
       <div className="sfx-editor-stage">
-        {decoding ? (
-          <div className="sfx-editor-stage-overlay">
-            <span className="ds-spinner" />
-            <span>Decoding audio into float32 studio buffers…</span>
-          </div>
-        ) : decodeError ? (
-          <div className="sfx-editor-stage-overlay">
-            <div className="ds-empty-title">Could not load audio</div>
-            <div className="ds-empty-desc">{decodeError}</div>
-          </div>
-        ) : null}
-
-        <EditorWaveform
-          ref={waveRef}
-          channels={
-            activeModule === "shaper" ? uncroppedChannels : processedChannels
-          }
-          sampleRate={sampleRate}
-          loop={loopMarkers}
-          activeMarker={activeMarker}
-          onLoopChange={(s, e) => {
-            if (activeModule === "shaper") {
-              updateCropPoints(s, e);
-            } else {
-              updateLoopPoints(s, e, snapZero);
-            }
-          }}
-          onSeek={seekToSample}
-          onSelectMarker={setActiveMarker}
-        />
-
-        {/* Stage Overlay HUD: Legend + Zoom Controls */}
-        {activeModule === "shaper" ? (
-          <div className="sfx-editor-stage-hud-left">
-            <span className="sfx-hud-pill start">
-              <span className="dot" />
-              IN <b>{(cropStartSamples / sampleRate).toFixed(3)}s</b>
-            </span>
-            <span className="sfx-hud-pill end">
-              <span className="dot" />
-              OUT <b>{(cropEndSamples / sampleRate).toFixed(3)}s</b>
-            </span>
-            <span className="sfx-hud-pill">
-              Length <b>{totalDurationS.toFixed(3)}s</b> of{" "}
-              <b>{(rawTotalSamples / sampleRate).toFixed(3)}s</b>
-            </span>
-          </div>
-        ) : (
-          activeModule === "loop" && (
+        {/* Header strip: marker readouts + zoom, off the canvas */}
+        <div className="sfx-editor-stage-bar">
+          {activeModule === "shaper" ? (
             <div className="sfx-editor-stage-hud-left">
               <span className="sfx-hud-pill start">
-                <span className="dot" />S <b>{(loopStart / sampleRate).toFixed(3)}s</b>
+                <span className="dot" />
+                IN <b>{(cropStartSamples / sampleRate).toFixed(3)}s</b>
               </span>
               <span className="sfx-hud-pill end">
-                <span className="dot" />E <b>{(loopEnd / sampleRate).toFixed(3)}s</b>
+                <span className="dot" />
+                OUT <b>{(cropEndSamples / sampleRate).toFixed(3)}s</b>
               </span>
               <span className="sfx-hud-pill">
-                Length <b>{loopDurationS.toFixed(3)}s</b>
+                Length <b>{totalDurationS.toFixed(3)}s</b> of{" "}
+                <b>{(rawTotalSamples / sampleRate).toFixed(3)}s</b>
               </span>
-              {loopEnabled && fadeMs > 0 && (
-                <span className="sfx-hud-pill fade">
-                  Crossfade <b>{Math.round(fadeMs)} ms</b> · {resolvedModeLabel}
-                </span>
-              )}
             </div>
-          )
-        )}
-
-        <div className="sfx-editor-stage-hud-right">
-          <button
-            type="button"
-            onClick={() => waveRef.current?.zoomByFactor(0.6)}
-            className="sfx-hud-btn"
-            title="Zoom in (Scroll wheel up)"
-          >
-            <ZoomIn size={13} />
-          </button>
-          <button
-            type="button"
-            onClick={() => waveRef.current?.zoomByFactor(1.6)}
-            className="sfx-hud-btn"
-            title="Zoom out (Scroll wheel down)"
-          >
-            <ZoomOut size={13} />
-          </button>
-          {activeModule === "loop" && (
-            <>
-              <button
-                type="button"
-                onClick={() => waveRef.current?.zoomToLoop()}
-                className="sfx-hud-btn"
-                title="Zoom to active loop region"
-              >
-                Loop
-              </button>
-              <button
-                type="button"
-                onClick={() => waveRef.current?.zoomToSeam()}
-                className="sfx-hud-btn"
-                title="Zoom into the crossfade seam"
-              >
-                Seam
-              </button>
-            </>
+          ) : (
+            activeModule === "loop" && (
+              <div className="sfx-editor-stage-hud-left">
+                <span className="sfx-hud-pill start">
+                  <span className="dot" />S <b>{(loopStart / sampleRate).toFixed(3)}s</b>
+                </span>
+                <span className="sfx-hud-pill end">
+                  <span className="dot" />E <b>{(loopEnd / sampleRate).toFixed(3)}s</b>
+                </span>
+                <span className="sfx-hud-pill">
+                  Length <b>{loopDurationS.toFixed(3)}s</b>
+                </span>
+                {loopEnabled && fadeMs > 0 && (
+                  <span className="sfx-hud-pill fade">
+                    Crossfade <b>{Math.round(fadeMs)} ms</b> · {resolvedModeLabel}
+                  </span>
+                )}
+              </div>
+            )
           )}
-          <button
-            type="button"
-            onClick={() => waveRef.current?.resetView()}
-            className="sfx-hud-btn"
-            title="Fit entire file in view (Double-click waveform)"
-          >
-            <Maximize2 size={12} />
-            Fit
-          </button>
-        </div>
 
-        {searching && (
-          <div
-            className="sfx-editor-search-progress"
-            role="progressbar"
-            aria-valuenow={Math.round(searchProgress * 100)}
-          >
-            <div
-              className="sfx-editor-search-progress-fill"
-              style={{ transform: `scaleX(${searchProgress})` }}
-            />
+          <div className="sfx-editor-stage-hud-right">
+            <button
+              type="button"
+              onClick={() => waveRef.current?.zoomByFactor(0.6)}
+              className="sfx-hud-btn"
+              title="Zoom in (Scroll wheel up)"
+            >
+              <ZoomIn size={13} />
+            </button>
+            <button
+              type="button"
+              onClick={() => waveRef.current?.zoomByFactor(1.6)}
+              className="sfx-hud-btn"
+              title="Zoom out (Scroll wheel down)"
+            >
+              <ZoomOut size={13} />
+            </button>
+            {activeModule === "loop" && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => waveRef.current?.zoomToLoop()}
+                  className="sfx-hud-btn"
+                  title="Zoom to active loop region"
+                >
+                  Loop
+                </button>
+                <button
+                  type="button"
+                  onClick={() => waveRef.current?.zoomToSeam()}
+                  className="sfx-hud-btn"
+                  title="Zoom into the crossfade seam"
+                >
+                  Seam
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => waveRef.current?.resetView()}
+              className="sfx-hud-btn"
+              title="Fit entire file in view (Double-click waveform)"
+            >
+              <Maximize2 size={12} />
+              Fit
+            </button>
           </div>
-        )}
+        </div>
+        <div className="sfx-editor-stage-view">
+          {decoding ? (
+            <div className="sfx-editor-stage-overlay">
+              <span className="ds-spinner" />
+              <span>Decoding audio into float32 studio buffers…</span>
+            </div>
+          ) : decodeError ? (
+            <div className="sfx-editor-stage-overlay">
+              <div className="ds-empty-title">Could not load audio</div>
+              <div className="ds-empty-desc">{decodeError}</div>
+            </div>
+          ) : null}
+
+          <EditorWaveform
+            ref={waveRef}
+            channels={
+              activeModule === "shaper" ? uncroppedChannels : processedChannels
+            }
+            sampleRate={sampleRate}
+            loop={loopMarkers}
+            activeMarker={activeMarker}
+            onLoopChange={(s, e) => {
+              if (activeModule === "shaper") {
+                updateCropPoints(s, e);
+              } else {
+                updateLoopPoints(s, e, snapZero);
+              }
+            }}
+            onSeek={seekToSample}
+            onSelectMarker={setActiveMarker}
+          />
+
+          {searching && (
+            <div
+              className="sfx-editor-search-progress"
+              role="progressbar"
+              aria-valuenow={Math.round(searchProgress * 100)}
+            >
+              <div
+                className="sfx-editor-search-progress-fill"
+                style={{ transform: `scaleX(${searchProgress})` }}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Studio Transport Deck */}

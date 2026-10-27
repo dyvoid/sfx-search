@@ -2327,31 +2327,6 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          {/* Bottom footer status bar: only when it has something true to say */}
-          {(hasIndexedFiles || statusLabel) && (
-            <footer className="sfx-statusbar">
-              <span className="ds-tnum">
-                {statusLabel ||
-                  `Showing ${results.length.toLocaleString()} of ${(
-                    totalResults || results.length
-                  ).toLocaleString()} sounds`}
-              </span>
-              {hasIndexedFiles && (
-                <KeyHints
-                  hints={[
-                    { keys: "↑ ↓", label: "Navigate" },
-                    { keys: "Space", label: "Play" },
-                    { keys: "E", label: "Edit in Studio" },
-                    { keys: "R", label: "Show in Explorer" },
-                    { keys: "F", label: "Favorite" },
-                    { keys: "Enter", label: "Inspector" },
-                    { keys: "/", label: "Search" },
-                    { keys: "Drag", label: "Export to DAW" },
-                  ]}
-                />
-              )}
-            </footer>
-          )}
         </main>
 
         {detailOpen && selectedHit && (
@@ -2404,6 +2379,32 @@ export const App: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Bottom footer status bar: only when it has something true to say */}
+      {(hasIndexedFiles || statusLabel) && (
+        <footer className="sfx-statusbar">
+          <span className="ds-tnum">
+            {statusLabel ||
+              `Showing ${results.length.toLocaleString()} of ${(
+                totalResults || results.length
+              ).toLocaleString()} sounds`}
+          </span>
+          {hasIndexedFiles && (
+            <KeyHints
+              hints={[
+                { keys: "↑ ↓", label: "Navigate" },
+                { keys: "Space", label: "Play" },
+                { keys: "E", label: "Edit in Studio" },
+                { keys: "R", label: "Show in Explorer" },
+                { keys: "F", label: "Favorite" },
+                { keys: "Enter", label: "Inspector" },
+                { keys: "/", label: "Search" },
+                { keys: "Drag", label: "Export to DAW" },
+              ]}
+            />
+          )}
+        </footer>
+      )}
       </>
       )}
     </div>
