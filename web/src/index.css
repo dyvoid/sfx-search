@@ -1544,7 +1544,9 @@ body.sfx-resizing-x {
   flex-direction: column;
   flex: 1 1 240px;
   min-height: 180px;
-  margin: var(--space-4);
+  /* Vertical gaps are tighter than horizontal: the bars above and below
+     already separate the stage, and height is the scarce axis here. */
+  margin: var(--space-2) var(--space-4);
   border: var(--border-width) solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: radial-gradient(
@@ -1704,7 +1706,7 @@ body.sfx-resizing-x {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-2) var(--space-5);
   flex-shrink: 0;
   background: var(--surface-panel);
   border-top: var(--border-width) solid var(--border-subtle);
@@ -1871,7 +1873,7 @@ body.sfx-resizing-x {
 
 /* Lower Module Rack */
 .sfx-editor-rack {
-  padding: var(--space-4);
+  padding: var(--space-2) var(--space-4);
   flex: 0 1 auto;
   min-height: 0;
   max-height: 50vh;
@@ -2120,10 +2122,19 @@ body.sfx-resizing-x {
 }
 
 .sfx-var-takes-grid {
+  /* Fixed row height so exactly two rows fit without scrolling; the card's
+     content is 28px top row + 40px wave + 16px meta. Three columns (six
+     takes visible), dropping to two when a card would be narrower than its
+     title + action buttons need (160px). */
+  --sfx-take-h: 114px;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(max(160px, calc((100% - 2 * var(--space-2)) / 3)), 1fr)
+  );
+  grid-auto-rows: var(--sfx-take-h);
   gap: var(--space-2);
-  max-height: 232px;
+  max-height: calc(2 * var(--sfx-take-h) + var(--space-2));
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -2177,6 +2188,7 @@ body.sfx-resizing-x {
 .sfx-var-take-meta {
   display: flex;
   justify-content: space-between;
+  line-height: 16px;
   gap: 6px;
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
