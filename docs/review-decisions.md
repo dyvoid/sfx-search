@@ -64,3 +64,5 @@ Format: what, decision, why. Newest last within each section.
   again"; the header's Folders button covers changing folders.
 - **"Play from best match" switch and "or enter a path" link are under 28px.** Accepted: text
   toggles in a bar, with label-sized hit areas; both are keyboard reachable (L18, L20).
+- **The waveform readout strip stays in modules without markers (Tone & EQ, Variations).**
+  Intended: hiding it would make the waveform jump in height when switching modules.
