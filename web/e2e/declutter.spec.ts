@@ -1,7 +1,7 @@
 // UX rules (DESIGN.md "UX Rules"): first-run screen shows the true state, and
 // the library screen carries only controls that work in the current state.
 import type { Page } from "@playwright/test";
-import { expect, flushApi, row, statusbar, test } from "./fixtures";
+import { expect, flushApi, foldersModal, row, statusbar, test } from "./fixtures";
 
 const searchBox = (page: Page) => page.getByLabel("Search sounds");
 const heading = (page: Page, name: string) => page.getByRole("heading", { name });
@@ -305,4 +305,11 @@ test.describe("startup: backend down", () => {
       timeout: 10_000,
     });
   });
+});
+
+test("the folder panel opens the same Folders dialog as the top bar", async ({ app }) => {
+  const manage = app.locator(".sfx-folder-pane").getByRole("button", { name: "Manage folders" });
+  await expect(manage).toBeVisible();
+  await manage.click();
+  await expect(foldersModal(app)).toBeVisible();
 });

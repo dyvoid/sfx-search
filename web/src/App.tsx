@@ -2239,6 +2239,17 @@ export const App: React.FC = () => {
                 onToggle={toggleFolderFilter}
               />
             </div>
+            <div className="sfx-folder-foot">
+              <button
+                type="button"
+                onClick={() => setLibraryModalOpen(true)}
+                className="ds-btn ds-btn-ghost ds-btn-sm"
+                title="Add, remove or rescan your library folders"
+              >
+                <FolderOpen size={14} />
+                Manage folders
+              </button>
+            </div>
           </aside>
         )}
         {hasIndexedFiles && folderPaneOpen && (
