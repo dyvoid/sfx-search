@@ -857,8 +857,33 @@ export const StudioView: React.FC<StudioViewProps> = ({
         return;
       }
       setCandIndex(index);
-      updateLoopPoints(c.start, c.end, snapZero);
-      seekToSample(c.start);
+      const pts = updateLoopPoints(c.start, c.end, snapZero);
+      if (!pts) {
+        return;
+      }
+      // Seek against the new region: the loop state hasn't updated yet, so
+      // seekToSample would test against the old one and drop to file playback.
+      const [s, e] = pts;
+      cursorRef.current = s;
+      cursorVisibleRef.current = true;
+      const tp = transportRef.current;
+      if (tp?.playing) {
+        if (auditionMode === "loop") {
+          performBake(
+            processedChannels,
+            sampleRate,
+            s,
+            e,
+            fadeSamples,
+            fadeCurve,
+            bakeMode,
+            true
+          );
+          tp.playLoop(0);
+        } else {
+          tp.playFile(s);
+        }
+      }
       const pct = Math.round(c.score * 100);
       const durS = ((c.end - c.start) / sampleRate).toFixed(2);
       setStatusMsg(
@@ -867,7 +892,18 @@ export const StudioView: React.FC<StudioViewProps> = ({
         } (${pct}% match · ${durS}s)`
       );
     },
-    [candidates, processedChannels, updateLoopPoints, snapZero, seekToSample, sampleRate]
+    [
+      candidates,
+      processedChannels,
+      updateLoopPoints,
+      snapZero,
+      sampleRate,
+      auditionMode,
+      performBake,
+      fadeSamples,
+      fadeCurve,
+      bakeMode,
+    ]
   );
 
   const runLoopSearch = useCallback(() => {
