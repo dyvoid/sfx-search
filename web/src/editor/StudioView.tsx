@@ -2811,7 +2811,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                     <DsRange aria-label="Fade-In (ms)"
                       min={0}
                       max={Math.min(
-                        5000,
+                        10000,
                         Math.max(100, Math.floor(totalDurationS * 500))
                       )}
                       step={5}
@@ -2852,7 +2852,7 @@ role="checkbox" aria-checked={snapZero} tabIndex={0}
                     <DsRange aria-label="Fade-Out (ms)"
                       min={0}
                       max={Math.min(
-                        5000,
+                        10000,
                         Math.max(100, Math.floor(totalDurationS * 500))
                       )}
                       step={5}
