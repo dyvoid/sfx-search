@@ -1817,6 +1817,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         fadeInSamples: fiSamples,
         fadeOutSamples: foSamples,
         curve: shaper.fadeCurve,
+        silenceOutside: shaper.enabled,
       };
     }
     if (processedChannels && (loopEnabled || activeModule === "loop")) {

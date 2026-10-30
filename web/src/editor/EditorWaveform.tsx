@@ -23,6 +23,8 @@ export interface LoopMarkers {
   curve?: FadeCurve;
   /** Crossfade placement as baked; lets the waveform show the mixed seam. */
   mode?: ResolvedMode;
+  /** Draw outside start..end as silence, the original kept as a ghost (Trim & Gain). */
+  silenceOutside?: boolean;
 }
 
 export interface CandidateBand {
@@ -247,6 +249,23 @@ function fadedPeaks(
       outMax[b] = maxs[b] * k;
     }
   };
+
+  if (loop.silenceOutside) {
+    const silence = (b0: number, b1: number) => {
+      for (let b = b0; b <= b1; b++) {
+        if (mins[b] === 0 && maxs[b] === 0) {
+          continue;
+        }
+        outMin ??= mins.slice();
+        outMax ??= maxs.slice();
+        outMin[b] = 0;
+        outMax[b] = 0;
+      }
+    };
+    // A bucket is silent when its centre falls outside the region.
+    silence(0, Math.min(buckets - 1, Math.ceil((loop.start - from) / span - 0.5) - 1));
+    silence(Math.max(0, Math.ceil((loop.end - from) / span - 0.5)), buckets - 1);
+  }
 
   const regionLen = loop.end - loop.start;
   scale(
