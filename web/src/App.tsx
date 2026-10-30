@@ -554,6 +554,8 @@ export const App: React.FC = () => {
   const [roots, setRoots] = useState<string[]>([]);
   const [missingRoots, setMissingRoots] = useState<string[]>([]);
   const [stats, setStats] = useState<LibraryStats | null>(null);
+  /** Failed /api/library calls in a row (backend still starting, or down). */
+  const [libraryFailures, setLibraryFailures] = useState<number>(0);
   const [indexing, setIndexing] = useState<IndexingProgress | null>(null);
   const [availFilters, setAvailFilters] = useState<AvailableFilters | null>(null);
   const [folderIndex, setFolderIndex] = useState<FolderEntry[]>([]);
@@ -834,6 +836,7 @@ export const App: React.FC = () => {
   const refreshLibraryState = useCallback(async () => {
     try {
       const lib = await fetchLibraryState();
+      setLibraryFailures(0);
       setRoots(lib.roots);
       setMissingRoots(lib.missing_roots ?? []);
       setStats(lib.stats);
@@ -866,7 +869,9 @@ export const App: React.FC = () => {
         setTotalResults(0);
       }
     } catch {
-      // ignore transient poll errors
+      // Transient poll errors are ignored; before the first answer they
+      // keep the startup retry going.
+      setLibraryFailures((n) => n + 1);
     }
   }, [runSearch, isSimilarityView, loading]);
 
@@ -880,6 +885,21 @@ export const App: React.FC = () => {
   useEffect(() => {
     refreshRef.current = refreshLibraryState;
   });
+
+  // Until the backend has answered once (it may still be loading the model),
+  // keep asking; otherwise the page would wait on a spinner forever.
+  const awaitingBackend = stats === null;
+  useEffect(() => {
+    if (!awaitingBackend) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshRef.current();
+      fetchAvailableFilters().then(setAvailFilters).catch(() => {});
+      fetchFolders().then(setFolderIndex).catch(() => {});
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [awaitingBackend]);
 
   useEffect(() => {
     // Keyed only on indexing state so typing in the search box doesn't
@@ -2254,8 +2274,22 @@ export const App: React.FC = () => {
           >
             {!hasIndexedFiles ? (
               stats === null ? (
-                <div className="sfx-setup" aria-busy="true">
-                  <span className="ds-spinner" />
+                <div className="sfx-setup" aria-busy="true" role="status">
+                  <div className="sfx-setup-head">
+                    <span className="ds-spinner" />
+                    <h2 className="ds-empty-title">
+                      {libraryFailures >= 5
+                        ? "Waiting for the search backend"
+                        : "Starting up"}
+                    </h2>
+                  </div>
+                  {libraryFailures >= 5 && (
+                    <p className="sfx-setup-text">
+                      The backend isn't answering yet. It loads the audio
+                      model on startup, which can take a moment. If this
+                      stays, check that it's running.
+                    </p>
+                  )}
                 </div>
               ) : (
                 <SetupPanel

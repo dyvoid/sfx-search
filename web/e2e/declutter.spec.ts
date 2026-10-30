@@ -276,3 +276,33 @@ test.describe("library: scan failed with sounds indexed", () => {
     await expect.poll(() => api.callsTo("POST /api/library/rescan").length).toBe(1);
   });
 });
+
+test.describe("startup: backend not answering yet", () => {
+  test.use({ apiOptions: { libraryFailures: 3 } });
+
+  test("keeps asking, says it is starting, and shows the library once it answers", async ({
+    page,
+    api,
+    pageErrors,
+  }) => {
+    void api;
+    void pageErrors;
+    await page.goto("/");
+    await expect(page.getByRole("status").getByText("Starting up")).toBeVisible();
+    await expect(row(page, 0)).toBeVisible({ timeout: 8_000 });
+    await expect(page.getByText("Starting up")).toHaveCount(0);
+  });
+});
+
+test.describe("startup: backend down", () => {
+  test.use({ apiOptions: { libraryFailures: 1000 } });
+
+  test("explains the wait after a few failed attempts", async ({ page, api, pageErrors }) => {
+    void api;
+    void pageErrors;
+    await page.goto("/");
+    await expect(page.getByText("Waiting for the search backend")).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+});
