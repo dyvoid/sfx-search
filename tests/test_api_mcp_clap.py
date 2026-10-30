@@ -9,6 +9,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+import soundfile as sf
 import torch
 from fastapi.testclient import TestClient
 from sfxsearch.api import create_app
@@ -487,3 +488,69 @@ def test_real_clap_determinism_and_fp16_vs_fp32_agreement() -> None:
     text_cos = float(np.dot(q1, q_fp32))
     assert audio_cos > 0.999, f"fp16 vs fp32 audio cosine similarity too low: {audio_cos}"
     assert text_cos > 0.999, f"fp16 vs fp32 text cosine similarity too low: {text_cos}"
+
+
+@pytest.mark.parametrize(
+    ("params", "ext", "sf_format"),
+    [
+        ({"format": "flac", "bit_depth": "24"}, ".flac", "FLAC"),
+        ({"format": "mp3", "bitrate": "192"}, ".mp3", "MP3"),
+        ({"format": "ogg", "bitrate": "128"}, ".ogg", "OGG"),
+        ({"format": "wav", "bit_depth": "16"}, ".wav", "WAV"),
+    ],
+)
+def test_save_edited_encodes_requested_format(
+    tmp_path: Path, params: dict[str, str], ext: str, sf_format: str
+) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    r = _post_edit(client, wid, tmp_path, name="take.wav", **params)
+    assert r.status_code == 200, r.text
+    hit = r.json()["hit"]
+    assert hit["filename"] == f"take{ext}"
+    out = wav.parent / f"take{ext}"
+    info = sf.info(str(out))
+    assert info.format == sf_format
+    if params.get("bit_depth") == "16":
+        assert info.subtype == "PCM_16"
+    assert not list(wav.parent.glob("*.tmp"))
+
+
+def test_save_edited_rejects_unknown_format_options(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    assert _post_edit(client, wid, tmp_path, name="x", format="aac").status_code == 400
+    assert (
+        _post_edit(client, wid, tmp_path, name="x", format="flac", bit_depth="32").status_code
+        == 400
+    )
+    assert (
+        _post_edit(client, wid, tmp_path, name="x", format="mp3", bitrate="999").status_code == 400
+    )
+    assert not (wav.parent / "x.wav").exists()
+
+
+def test_save_edited_overwrite_needs_matching_extension(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    before = wav.read_bytes()
+    r = _post_edit(client, wid, tmp_path, overwrite="true", format="flac")
+    assert r.status_code == 400
+    assert wav.read_bytes() == before
+
+
+def test_transcode_endpoint_returns_encoded_audio(tmp_path: Path) -> None:
+    client, _wav, _aiff, _wid, _aid = _save_edited_client(tmp_path)
+    payload = write_sine_wav(tmp_path / "p.wav", freq_hz=440.0, duration_s=0.5)
+    with payload.open("rb") as f:
+        r = client.post(
+            "/api/transcode",
+            params={"format": "flac", "bit_depth": "16"},
+            files={"file": ("x.wav", f, "audio/wav")},
+        )
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "audio/flac"
+    assert r.content[:4] == b"fLaC"
+    junk = client.post(
+        "/api/transcode",
+        params={"format": "mp3"},
+        files={"file": ("x.wav", b"garbage" * 50, "audio/wav")},
+    )
+    assert junk.status_code == 400

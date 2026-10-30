@@ -51,7 +51,7 @@ Global principles:
 | S2 | Studio | Digit1–4 | Switch module (Trim & Gain, Tone & EQ, Seamless Loop, Variations). |
 | S3 | Studio, Trim & Gain or Seamless Loop | `[` / `]` | Select the start / end marker (crop handle in Trim & Gain). Not handled in other modules. |
 | S4 | Studio, Trim & Gain or Seamless Loop | ArrowLeft / ArrowRight | Nudge the active marker 1 ms; Shift = 10 ms; auto-repeat keeps nudging. Not handled in other modules. |
-| S5 | Studio | Ctrl/Cmd+S | With a library file: open the save dialog. Without one (local file): download. Never the browser's Save Page dialog, including while audio is still decoding and on auto-repeat. Ctrl+Shift+S and Ctrl+Alt+S are not the save chord. Matched on the typed key, not the physical key. |
+| S5 | Studio | Ctrl/Cmd+S | With a library file: open the save dialog. Without one (local file): open the Download dialog. Never the browser's Save Page dialog, including while audio is still decoding and on auto-repeat. Ctrl+Shift+S and Ctrl+Alt+S are not the save chord. Matched on the typed key, not the physical key. |
 | S6 | Studio | S / F / Home | Audition the loop seam / run loop search (both Seamless Loop only; elsewhere not handled, and the Test Seam button is hidden) / restart playback. |
 | S7 | slider (range input) focused | ArrowLeft/Right/Up/Down, Home, End, PageUp/Down | Move the slider natively; no marker nudge. |
 | S8 | slider focused | Space, Digit1–4, Ctrl/Cmd+S | Studio shortcuts still work. |

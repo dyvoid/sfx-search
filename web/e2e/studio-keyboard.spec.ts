@@ -2,6 +2,8 @@
 // Spec: docs/testing/keyboard-contract.md
 import type { Page } from "@playwright/test";
 import {
+  downloadButton,
+  downloadDialog,
   expect,
   holdKey,
   keydownPrevented,
@@ -324,7 +326,7 @@ test.describe("Studio, save chord (S5)", () => {
       api,
     }) => {
       await openStudio(app, { waitDecoded: false });
-      await expect(app.getByRole("button", { name: "Export WAV" })).toBeDisabled();
+      await expect(downloadButton(app)).toBeDisabled();
       expect(await keydownPrevented(app, { key: "s", code: "KeyS", ctrlKey: true })).toBe(true);
       expect(await keydownPrevented(app, { key: "s", code: "KeyS", metaKey: true })).toBe(true);
       expect(
@@ -368,19 +370,22 @@ test.describe("Studio, save chord (S5)", () => {
     await expect(studioShell(app)).toHaveCount(0);
   });
 
-  test("S5 without a library file (local file) Ctrl+S downloads instead of opening the dialog", async ({
+  test("S5 without a library file (local file) Ctrl+S opens the Download dialog instead", async ({
     app,
   }) => {
     await dropFile(app, "Edit in Studio", "local.wav");
     await expect(studioShell(app)).toBeVisible();
     await expect(app.getByRole("button", { name: "Save to Library" })).toHaveCount(0);
-    await expect(app.getByRole("button", { name: "Export WAV" })).toBeEnabled();
+    await expect(downloadButton(app)).toBeEnabled();
     await expect(app.locator(".sfx-editor-filename")).toHaveText("local.wav");
 
-    const download = app.waitForEvent("download");
     await app.keyboard.press("Control+s");
-    expect((await download).suggestedFilename()).toMatch(/^local.*\.wav$/);
+    await expect(downloadDialog(app)).toBeVisible();
     await expect(saveDialog(app)).toHaveCount(0);
+    const download = app.waitForEvent("download");
+    await app.keyboard.press("Enter");
+    expect((await download).suggestedFilename()).toMatch(/^local.*\.wav$/);
+    await expect(downloadDialog(app)).toHaveCount(0);
   });
 });
 

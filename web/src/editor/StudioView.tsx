@@ -73,6 +73,23 @@ import {
   synthesizeVariation,
   VariationSpec,
 } from "./audio/variations";
+import {
+  BIT_DEPTHS,
+  BITRATES,
+  describeSpec,
+  downloadBlob,
+  encodeForDownload,
+  extensionOf,
+  FORMAT_CHOICES,
+  loadOutputSpec,
+  normalizeSpec,
+  OutputSpec,
+  specParams,
+  storeOutputSpec,
+  stripExtension,
+  uploadWav,
+  withExtension,
+} from "./audio/outputFormat";
 import { encodeWav, WavFormat } from "./audio/wav";
 import { EditorWaveform, EditorWaveformHandle } from "./EditorWaveform";
 import {
@@ -208,8 +225,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const cursorRef = useRef<number>(0);
   const cursorVisibleRef = useRef<boolean>(false);
 
-  // Export & Library save state (24-bit studio WAV standard)
+  // Drag-out stays 24-bit WAV (what DAWs expect); Save and Export use outputSpec.
   const exportFormat: WavFormat = "int24";
+  const [outputSpec, setOutputSpecState] = useState<OutputSpec>(loadOutputSpec);
+  const setOutputSpec = useCallback((next: OutputSpec) => {
+    const spec = normalizeSpec(next);
+    setOutputSpecState(spec);
+    storeOutputSpec(spec);
+    setSaveName((name) => (name ? withExtension(name, spec) : name));
+  }, []);
   const [saveSuffix, setSaveSuffix] = useState<string>(".edit");
   const [savingToLibrary, setSavingToLibrary] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
@@ -218,7 +242,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setErrMsg(msg);
     setStatusMsg(msg);
   }, []);
-  const [saveDlg, setSaveDlg] = useState<boolean>(false);
+  /** Which output dialog is open: one sound or the takes, to library or download. */
+  const [saveDlg, setSaveDlg] = useState<
+    "save" | "download" | "save-takes" | "download-takes" | null
+  >(null);
   const [saveName, setSaveName] = useState<string>("");
   const [saveOverwrite, setSaveOverwrite] = useState<boolean>(false);
   const saveDlgRef = useRef<HTMLDivElement | null>(null);
@@ -296,7 +323,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setDecoding(true);
     setDecodeError("");
     setErrMsg(null);
-    setSaveDlg(false);
+    setSaveDlg(null);
     setStatusMsg(`Loading ${hit.filename}…`);
     transportRef.current?.stop();
     setIsPlaying(false);
@@ -356,7 +383,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setDecoding(true);
     setDecodeError("");
     setErrMsg(null);
-    setSaveDlg(false);
+    setSaveDlg(null);
     setStatusMsg(`Decoding ${file.name}…`);
     transportRef.current?.stop();
     setIsPlaying(false);
@@ -1007,39 +1034,52 @@ export const StudioView: React.FC<StudioViewProps> = ({
     baseName,
   ]);
 
-  const handleExportDownload = useCallback(() => {
-    const res = buildCurrentWav();
-    if (!res) {
-      return;
-    }
-    const blob = new Blob([res.wav], { type: "audio/wav" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = res.filename;
-    a.click();
-    URL.revokeObjectURL(url);
-    setStatusMsg(
-      `Exported ${res.filename} (${(res.wav.byteLength / 1024 / 1024).toFixed(
-        2
-      )} MB)`
-    );
-  }, [buildCurrentWav]);
+  const outputChannels = bakedChannels ?? processedChannels;
+  const outputStem = useMemo(() => {
+    const defaultSuf = loopEnabled ? ".loop" : ".edit";
+    const cleanSuffix = (saveSuffix.trim() || defaultSuf).replace(/^\.?/, ".");
+    return `${baseName}${cleanSuffix}`;
+  }, [loopEnabled, saveSuffix, baseName]);
+
+  const downloadOutput = useCallback(
+    async (filename: string): Promise<boolean> => {
+      if (!outputChannels || outputChannels.length === 0) {
+        return false;
+      }
+      setStatusMsg(`Encoding ${filename}…`);
+      try {
+        const blob = await encodeForDownload(
+          outputChannels,
+          sampleRate,
+          outputSpec
+        );
+        downloadBlob(blob, filename);
+        setStatusMsg(
+          `Downloaded ${filename} (${(blob.size / 1024 / 1024).toFixed(2)} MB)`
+        );
+        return true;
+      } catch (err) {
+        reportError(
+          `Download failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return false;
+      }
+    },
+    [outputChannels, sampleRate, outputSpec, reportError]
+  );
 
   const handleSaveToLibrary = useCallback(
     async (opts?: {
       name?: string;
       overwrite?: boolean;
     }): Promise<boolean> => {
-      if (!hit) {
+      if (!hit || !outputChannels || outputChannels.length === 0) {
         return false;
       }
-      const res = buildCurrentWav();
-      if (!res) {
-        return false;
-      }
+      const wav = uploadWav(outputChannels, sampleRate, outputSpec);
+      const ext = extensionOf(outputSpec);
       const overwrite = opts?.overwrite ?? false;
-      const targetLabel = opts?.name ? `${opts.name}.wav` : res.filename;
+      const targetLabel = `${opts?.name ?? outputStem}${ext}`;
       setSavingToLibrary(true);
       setErrMsg(null);
       setStatusMsg(
@@ -1050,13 +1090,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
       try {
         const savedHit = await saveEditedFileToLibrary(
           hit.file_id,
-          res.wav,
-          res.filename,
+          wav,
+          `${outputStem}.wav`,
           {
             suffix: saveSuffix.trim() || ".loop",
             name: opts?.name,
             overwrite,
             copyUserData: true,
+            encode: specParams(outputSpec),
           }
         );
         onSavedToLibrary(savedHit);
@@ -1075,35 +1116,44 @@ export const StudioView: React.FC<StudioViewProps> = ({
         setSavingToLibrary(false);
       }
     },
-    [hit, buildCurrentWav, saveSuffix, onSavedToLibrary, reportError]
+    [
+      hit,
+      outputChannels,
+      sampleRate,
+      outputSpec,
+      outputStem,
+      saveSuffix,
+      onSavedToLibrary,
+      reportError,
+    ]
   );
 
-  const openSaveDialog = useCallback(() => {
-    if (!processedChannels || !hit) {
-      return;
-    }
-    const def = loopEnabled ? ".loop" : ".edit";
-    setSaveName(`${baseName}${saveSuffix.trim() || def}.wav`);
-    setSaveOverwrite(false);
-    setErrMsg(null);
-    const a = document.activeElement;
-    saveOpenerRef.current = a instanceof HTMLElement ? a : null;
-    setSaveDlg(true);
-  }, [processedChannels, hit, loopEnabled, saveSuffix, baseName]);
-
-  const confirmSave = useCallback(async () => {
-    const stem = saveName.trim().replace(/\.wav$/i, "");
-    if (!stem || savingToLibrary) {
-      return;
-    }
-    const ok = await handleSaveToLibrary({
-      name: stem,
-      overwrite: saveOverwrite,
-    });
-    if (ok) {
-      setSaveDlg(false);
-    }
-  }, [saveName, saveOverwrite, savingToLibrary, handleSaveToLibrary]);
+  const openOutputDialog = useCallback(
+    (kind: "save" | "download" | "save-takes" | "download-takes") => {
+      const toLibrary = kind === "save" || kind === "save-takes";
+      if (toLibrary && !hit) {
+        return;
+      }
+      if (kind === "save" || kind === "download") {
+        if (!processedChannels) {
+          return;
+        }
+        setSaveName(`${outputStem}${extensionOf(outputSpec)}`);
+      } else if (variations.length === 0) {
+        return;
+      }
+      setSaveOverwrite(false);
+      setErrMsg(null);
+      const a = document.activeElement;
+      saveOpenerRef.current = a instanceof HTMLElement ? a : null;
+      setSaveDlg(kind);
+    },
+    [processedChannels, hit, outputStem, outputSpec, variations.length]
+  );
+  const openSaveDialog = useCallback(
+    () => openOutputDialog("save"),
+    [openOutputDialog]
+  );
 
   const handleDragEditedStart = (e: React.DragEvent) => {
     const res = buildCurrentWav();
@@ -1266,19 +1316,38 @@ export const StudioView: React.FC<StudioViewProps> = ({
     );
   }, []);
 
-  const handleDownloadVariation = useCallback(
-    (v: GeneratedVariation) => {
-      const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
-      const blob = new Blob([wav], { type: "audio/wav" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${v.name}.wav`;
-      a.click();
-      URL.revokeObjectURL(url);
-      setStatusMsg(`Exported ${v.name}.wav`);
+  /** Download one take in the current output format; throws on encode failure. */
+  const downloadVariation = useCallback(
+    async (v: GeneratedVariation): Promise<string> => {
+      const filename = `${v.name}${extensionOf(outputSpec)}`;
+      const blob = await encodeForDownload(v.channels, v.sampleRate, outputSpec);
+      downloadBlob(blob, filename);
+      return filename;
     },
-    [exportFormat]
+    [outputSpec]
+  );
+
+  /** Save one take to the library in the current output format. */
+  const saveVariation = useCallback(
+    async (v: GeneratedVariation): Promise<SearchHit> => {
+      if (!hit) {
+        throw new Error("No library file to save next to");
+      }
+      const savedHit = await saveEditedFileToLibrary(
+        hit.file_id,
+        uploadWav(v.channels, v.sampleRate, outputSpec),
+        `${v.name}.wav`,
+        {
+          suffix: `_var_${String(v.index + 1).padStart(2, "0")}`,
+          overwrite: false,
+          copyUserData: true,
+          encode: specParams(outputSpec),
+        }
+      );
+      onSavedToLibrary(savedHit);
+      return savedHit;
+    },
+    [hit, outputSpec, onSavedToLibrary]
   );
 
   const handleSaveVariationToLibrary = useCallback(
@@ -1286,22 +1355,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
       if (!hit) {
         return;
       }
-      const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
-      const suffix = `_var_${String(v.index + 1).padStart(2, "0")}`;
       setSavingBatch(true);
-      setStatusMsg(`Saving ${v.name}.wav to library…`);
+      setStatusMsg(`Saving ${v.name}${extensionOf(outputSpec)} to library…`);
       try {
-        const savedHit = await saveEditedFileToLibrary(
-          hit.file_id,
-          wav,
-          `${v.name}.wav`,
-          {
-            suffix,
-            overwrite: false,
-            copyUserData: true,
-          }
-        );
-        onSavedToLibrary(savedHit);
+        const savedHit = await saveVariation(v);
         setStatusMsg(`Saved & indexed variation: ${savedHit.filename}`);
       } catch (err) {
         reportError(
@@ -1313,38 +1370,28 @@ export const StudioView: React.FC<StudioViewProps> = ({
         setSavingBatch(false);
       }
     },
-    [hit, exportFormat, onSavedToLibrary]
+    [hit, outputSpec, saveVariation, reportError]
   );
 
-  const handleSaveLikedVariationsToLibrary = useCallback(async () => {
+  const handleSaveLikedVariationsToLibrary = useCallback(async (): Promise<boolean> => {
     if (!hit) {
-      return;
+      return false;
     }
     const targets = variations.filter((v) => v.liked);
     const list = targets.length > 0 ? targets : variations;
     if (list.length === 0) {
-      return;
+      return false;
     }
     setSavingBatch(true);
     let savedCount = 0;
     try {
       for (const v of list) {
         setStatusMsg(
-          `Saving variation ${savedCount + 1}/${list.length} (${v.name}.wav)…`
+          `Saving variation ${savedCount + 1}/${list.length} (${v.name}${extensionOf(
+            outputSpec
+          )})…`
         );
-        const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
-        const suffix = `_var_${String(v.index + 1).padStart(2, "0")}`;
-        const savedHit = await saveEditedFileToLibrary(
-          hit.file_id,
-          wav,
-          `${v.name}.wav`,
-          {
-            suffix,
-            overwrite: false,
-            copyUserData: true,
-          }
-        );
-        onSavedToLibrary(savedHit);
+        await saveVariation(v);
         savedCount++;
       }
       setStatusMsg(
@@ -1352,6 +1399,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           savedCount === 1 ? "" : "s"
         } to library`
       );
+      return true;
     } catch (err) {
       reportError(
         `Batch save failed after ${savedCount} files: ${
@@ -1361,16 +1409,77 @@ export const StudioView: React.FC<StudioViewProps> = ({
     } finally {
       setSavingBatch(false);
     }
-  }, [hit, variations, exportFormat, onSavedToLibrary]);
+    return false;
+  }, [hit, variations, outputSpec, saveVariation, reportError]);
 
-  const handleDownloadLikedVariations = useCallback(() => {
+  const handleDownloadLikedVariations = useCallback(async (): Promise<boolean> => {
     const targets = variations.filter((v) => v.liked);
     const list = targets.length > 0 ? targets : variations;
-    for (const v of list) {
-      handleDownloadVariation(v);
+    if (list.length === 0) {
+      return false;
     }
-    setStatusMsg(`Exported ${list.length} WAV variation files`);
-  }, [variations, handleDownloadVariation]);
+    setSavingBatch(true);
+    let done = 0;
+    try {
+      for (const v of list) {
+        setStatusMsg(`Downloading variation ${done + 1}/${list.length}…`);
+        await downloadVariation(v);
+        done++;
+      }
+      setStatusMsg(
+        `Downloaded ${done} variation file${done === 1 ? "" : "s"} (${describeSpec(
+          outputSpec
+        )})`
+      );
+      return true;
+    } catch (err) {
+      reportError(
+        `Download failed after ${done} files: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      return false;
+    } finally {
+      setSavingBatch(false);
+    }
+  }, [variations, downloadVariation, outputSpec, reportError]);
+
+  const confirmSave = useCallback(async () => {
+    const kind = saveDlg;
+    if (!kind || savingToLibrary || savingBatch) {
+      return;
+    }
+    let ok = false;
+    if (kind === "save" || kind === "download") {
+      const stem = stripExtension(saveName.trim());
+      if (!stem) {
+        return;
+      }
+      ok =
+        kind === "save"
+          ? await handleSaveToLibrary({ name: stem, overwrite: saveOverwrite })
+          : await downloadOutput(`${stem}${extensionOf(outputSpec)}`);
+    } else {
+      ok =
+        kind === "save-takes"
+          ? await handleSaveLikedVariationsToLibrary()
+          : await handleDownloadLikedVariations();
+    }
+    if (ok) {
+      setSaveDlg(null);
+    }
+  }, [
+    saveDlg,
+    saveName,
+    saveOverwrite,
+    savingToLibrary,
+    savingBatch,
+    outputSpec,
+    handleSaveToLibrary,
+    downloadOutput,
+    handleSaveLikedVariationsToLibrary,
+    handleDownloadLikedVariations,
+  ]);
 
   const handleVariationDragStart = (
     e: React.DragEvent,
@@ -1434,7 +1543,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         if (hit) {
           openSaveDialog();
         } else {
-          handleExportDownload();
+          openOutputDialog("download");
         }
       };
       if (
@@ -1470,7 +1579,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         }
         if (e.key === "Escape") {
           e.preventDefault();
-          setSaveDlg(false);
+          setSaveDlg(null);
         }
         return;
       }
@@ -1651,11 +1760,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
     hit,
     handleSaveToLibrary,
     openSaveDialog,
+    openOutputDialog,
     saveDlg,
-    handleExportDownload,
   ]);
 
   const totalSamples = processedChannels?.[0]?.length ?? 0;
+  const dialogToLibrary = saveDlg === "save" || saveDlg === "save-takes";
+  const qualityChoices: { kind: "depth" | "bitrate"; values: number[] } =
+    BIT_DEPTHS[outputSpec.format]
+      ? { kind: "depth", values: BIT_DEPTHS[outputSpec.format] ?? [] }
+      : { kind: "bitrate", values: BITRATES[outputSpec.format] ?? [] };
+  const likedTakes = variations.filter((v) => v.liked).length;
+  const takesCount = likedTakes > 0 ? likedTakes : variations.length;
+  const takesSummary = `${takesCount} ${likedTakes > 0 ? "liked " : ""}take${
+    takesCount === 1 ? "" : "s"
+  } as ${describeSpec(outputSpec)}.`;
   const loopDurationS = Math.max(0, (loopEnd - loopStart) / sampleRate);
   const totalDurationS = Math.max(0, totalSamples / sampleRate);
 
@@ -1913,7 +2032,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 disabled={!processedChannels || savingToLibrary}
                 onClick={openSaveDialog}
                 className="ds-btn ds-btn-secondary"
-                title="Save as a new WAV in the library folder and index it immediately (Ctrl+S)"
+                title="Save into the library folder and index it immediately (Ctrl+S)"
               >
                 <Save size={14} />
                 {savingToLibrary ? "Saving…" : "Save to Library"}
@@ -1923,12 +2042,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <button
               type="button"
               disabled={!processedChannels}
-              onClick={handleExportDownload}
+              onClick={() => openOutputDialog("download")}
               className="ds-btn ds-btn-primary"
-              title="Download baked WAV file"
+              title="Download the edited sound, choosing name and format"
             >
               <Download size={14} />
-              Export WAV
+              Download
             </button>
           </div>
         </div>
@@ -3460,7 +3579,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                     <button
                       type="button"
                       disabled={savingBatch}
-                      onClick={handleSaveLikedVariationsToLibrary}
+                      onClick={() => openOutputDialog("save-takes")}
                       className="ds-btn ds-btn-secondary ds-btn-sm"
                       title="Save liked variations (or all if none starred) into the library folder and index immediately"
                     >
@@ -3478,12 +3597,13 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                   {variations.length > 0 && (
                     <button
                       type="button"
-                      onClick={handleDownloadLikedVariations}
+                      onClick={() => openOutputDialog("download-takes")}
+                      disabled={savingBatch}
                       className="ds-btn ds-btn-ghost ds-btn-sm"
-                      title="Download liked variations (or all if none starred) as WAV files"
+                      title="Download liked variations (or all if none starred), choosing the format"
                     >
                       <Download size={13} />
-                      Export
+                      Download
                     </button>
                   )}
                 </div>
@@ -3619,13 +3739,13 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
         )}
       </div>
 
-      {/* Save-to-library dialog */}
+      {/* Save / Download dialog: one sound or the takes, with output format */}
       {saveDlg && (
         <div
           className="ds-scrim"
           onClick={(e) => {
             if (e.target === e.currentTarget) {
-              setSaveDlg(false);
+              setSaveDlg(null);
             }
           }}
         >
@@ -3635,7 +3755,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
             role="dialog"
             aria-modal="true"
             aria-labelledby="save-dialog-title"
-            style={{ maxWidth: 360 }}
+            style={{ maxWidth: 380 }}
           >
             <div
               className="ds-dialog-head"
@@ -3645,10 +3765,18 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                 justifyContent: "space-between",
               }}
             >
-              <span id="save-dialog-title">Save to library</span>
+              <span id="save-dialog-title">
+                {saveDlg === "save"
+                  ? "Save to library"
+                  : saveDlg === "download"
+                  ? "Download"
+                  : saveDlg === "save-takes"
+                  ? "Save takes to library"
+                  : "Download takes"}
+              </span>
               <button
                 type="button"
-                onClick={() => setSaveDlg(false)}
+                onClick={() => setSaveDlg(null)}
                 className="sfx-icon-btn"
                 aria-label="Close dialog"
               >
@@ -3663,61 +3791,134 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                 gap: "var(--space-3)",
               }}
             >
-              <label className="ds-input-label" htmlFor="save-filename">
-                Filename
-              </label>
-              <div className="ds-input-box">
-                <input
-                  id="save-filename"
-                  type="text"
-                  autoFocus
-                  className="ds-input"
-                  style={{ fontFamily: "var(--font-mono)" }}
-                  value={saveName}
-                  onChange={(e) => setSaveName(e.target.value)}
-                  onFocus={(e) => e.currentTarget.select()}
+              {saveDlg === "save" || saveDlg === "download" ? (
+                <>
+                  <label className="ds-input-label" htmlFor="save-filename">
+                    Filename
+                  </label>
+                  <div className="ds-input-box">
+                    <input
+                      id="save-filename"
+                      type="text"
+                      autoFocus
+                      className="ds-input"
+                      style={{ fontFamily: "var(--font-mono)" }}
+                      value={saveName}
+                      onChange={(e) => setSaveName(e.target.value)}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          if (!e.repeat) {
+                            // a held Enter that opened the dialog must not also save
+                            void confirmSave();
+                          }
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          setSaveDlg(null);
+                        }
+                      }}
+                      spellCheck={false}
+                    />
+                  </div>
+                </>
+              ) : (
+                <span className="sfx-rack-hint">{takesSummary}</span>
+              )}
+
+              <span className="ds-input-label">Format</span>
+              <div className="sfx-pill-group" role="group" aria-label="Format">
+                {FORMAT_CHOICES.map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={outputSpec.format === value}
+                    autoFocus={
+                      saveDlg !== "save" &&
+                      saveDlg !== "download" &&
+                      outputSpec.format === value
+                    }
+                    onClick={() => setOutputSpec({ ...outputSpec, format: value })}
+                    className={`sfx-choice-pill ${
+                      outputSpec.format === value ? "active" : ""
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {qualityChoices.kind === "depth" ? (
+                <>
+                  <span className="ds-input-label">Bit depth</span>
+                  <div className="sfx-pill-group" role="group" aria-label="Bit depth">
+                    {qualityChoices.values.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        aria-pressed={outputSpec.bitDepth === d}
+                        onClick={() => setOutputSpec({ ...outputSpec, bitDepth: d })}
+                        className={`sfx-choice-pill ds-tnum ${
+                          outputSpec.bitDepth === d ? "active" : ""
+                        }`}
+                      >
+                        {d === 32 ? "32 float" : `${d}-bit`}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span className="ds-input-label">Bitrate (kbps)</span>
+                  <div className="sfx-pill-group" role="group" aria-label="Bitrate">
+                    {qualityChoices.values.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        aria-pressed={outputSpec.bitrate === r}
+                        onClick={() => setOutputSpec({ ...outputSpec, bitrate: r })}
+                        className={`sfx-choice-pill ds-tnum ${
+                          outputSpec.bitrate === r ? "active" : ""
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {saveDlg === "save" && (
+                <label
+                  role="checkbox"
+                  aria-checked={saveOverwrite}
+                  tabIndex={0}
+                  className="ds-check"
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
+                    if (e.key === " " || e.key === "Enter") {
                       e.preventDefault();
                       if (!e.repeat) {
-                        // a held Enter that opened the dialog must not also save
-                        void confirmSave();
+                        e.currentTarget.click();
                       }
-                    } else if (e.key === "Escape") {
-                      e.preventDefault();
-                      setSaveDlg(false);
                     }
                   }}
-                  spellCheck={false}
-                />
-              </div>
-              <label
-                role="checkbox"
-                aria-checked={saveOverwrite}
-                tabIndex={0}
-                className="ds-check"
-                onKeyDown={(e) => {
-                  if (e.key === " " || e.key === "Enter") {
-                    e.preventDefault();
-                    if (!e.repeat) {
-                      e.currentTarget.click();
-                    }
-                  }
-                }}
-                onClick={() => setSaveOverwrite((v) => !v)}
-              >
-                <div className={`ds-checkbox ${saveOverwrite ? "on" : ""}`}>
-                  {saveOverwrite && <div className="ds-checkbox-inner" />}
-                </div>
-                <span
-                  className="ds-check-label"
-                  style={{ fontSize: "var(--font-size-xs)" }}
+                  onClick={() => setSaveOverwrite((v) => !v)}
                 >
-                  Replace file if it already exists
-                </span>
-              </label>
+                  <div className={`ds-checkbox ${saveOverwrite ? "on" : ""}`}>
+                    {saveOverwrite && <div className="ds-checkbox-inner" />}
+                  </div>
+                  <span
+                    className="ds-check-label"
+                    style={{ fontSize: "var(--font-size-xs)" }}
+                  >
+                    Replace file if it already exists
+                  </span>
+                </label>
+              )}
               <span className="sfx-rack-hint">
-                Saved to the source folder and indexed immediately.
+                {dialogToLibrary
+                  ? "Saved to the source folder and indexed immediately."
+                  : "Saved to your browser's downloads folder."}
               </span>
               {errMsg && (
                 <span className="sfx-status-err" role="alert">
@@ -3729,17 +3930,28 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
               <button
                 type="button"
                 className="ds-btn ds-btn-ghost ds-btn-sm"
-                onClick={() => setSaveDlg(false)}
+                onClick={() => setSaveDlg(null)}
               >
                 Cancel
               </button>
               <button
                 type="button"
                 className="ds-btn ds-btn-primary ds-btn-sm"
-                disabled={!saveName.trim() || savingToLibrary}
+                disabled={
+                  ((saveDlg === "save" || saveDlg === "download") &&
+                    !stripExtension(saveName.trim())) ||
+                  savingToLibrary ||
+                  savingBatch
+                }
                 onClick={() => void confirmSave()}
               >
-                {savingToLibrary ? "Saving…" : "Save"}
+                {savingToLibrary || savingBatch
+                  ? dialogToLibrary
+                    ? "Saving…"
+                    : "Downloading…"
+                  : dialogToLibrary
+                  ? "Save"
+                  : "Download"}
               </button>
             </div>
           </div>

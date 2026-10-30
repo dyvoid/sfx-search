@@ -1733,6 +1733,11 @@ body.sfx-resizing-x {
   flex-wrap: nowrap;
 }
 
+/* In a dialog the pills sit under their label, not at the end of a row. */
+.ds-dialog .sfx-pill-group {
+  justify-content: flex-start;
+}
+
 /* Reserved so the level readouts don't move when the meter appears. */
 .sfx-meter-slot {
   display: flex;

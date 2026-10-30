@@ -228,9 +228,11 @@ export async function saveEditedFileToLibrary(
     name?: string;
     overwrite?: boolean;
     copyUserData?: boolean;
+    /** Output format query params (format, bit_depth / bitrate); default 24-bit WAV. */
+    encode?: Record<string, string>;
   } = {}
 ): Promise<SearchHit> {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams(options.encode ?? {});
   if (options.suffix !== undefined) {
     params.set("suffix", options.suffix);
   }

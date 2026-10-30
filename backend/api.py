@@ -30,6 +30,7 @@ from .indexer import IndexStats, index_single_file, run_indexer
 from .scan import compute_file_id, normalize_path, to_os_path
 from .search import SearchEngine, SearchMode, SortMode
 from .store import ModelMismatchError, SearchFilters, SfxStore, UserDataRecord
+from .transcode import EXTENSIONS, TranscodeError, parse_spec, transcode_file
 
 NATIVE_BROWSER_EXTS: set[str] = {".mp3", ".ogg", ".opus", ".m4a", ".aac", ".flac"}
 
@@ -372,6 +373,33 @@ _WINDOWS_RESERVED_NAMES = frozenset(
     | {f"LPT{i}" for i in range(10)}
     | {f"{p}{d}" for p in ("COM", "LPT") for d in "\u00b9\u00b2\u00b3"}
 )
+
+_MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+
+
+async def _receive_wav(file: UploadFile, os_dest: str, max_bytes: int) -> None:
+    """Stream an uploaded WAV to `os_dest` and check it really is one."""
+    written = 0
+    with open(os_dest, "wb") as out_f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > max_bytes:
+                raise HTTPException(status_code=413, detail="Edited audio file too large")
+            out_f.write(chunk)
+    if written < 44:
+        raise HTTPException(status_code=400, detail="Edited audio payload is empty")
+    try:
+        wav_info = sf.info(os_dest)
+        wav_ok = (
+            wav_info.format in ("WAV", "WAVEX") and wav_info.frames > 0 and wav_info.samplerate > 0
+        )
+    except Exception:
+        wav_ok = False
+    if not wav_ok:
+        raise HTTPException(status_code=400, detail="Edited audio is not a valid WAV file")
 
 
 def create_app(
@@ -855,6 +883,32 @@ def create_app(
         subprocess.Popen(["explorer.exe", "/select,", win_path])
         return {"revealed": True, "path": raw_path}
 
+    @app.post("/api/transcode")
+    async def api_transcode(
+        file: UploadFile = File(...),
+        format: str = Query("wav"),
+        bit_depth: int | None = Query(None),
+        bitrate: int | None = Query(None),
+    ) -> Response:
+        """Encode Studio output for Download; nothing is kept on disk."""
+        from starlette.concurrency import run_in_threadpool
+
+        try:
+            spec = parse_spec(format, bit_depth, bitrate)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        with tempfile.TemporaryDirectory(prefix="sfx-transcode-") as tmp:
+            src = os.path.join(tmp, "in.wav")
+            dst = os.path.join(tmp, f"out{spec.extension}")
+            await _receive_wav(file, src, _MAX_UPLOAD_BYTES)
+            try:
+                await run_in_threadpool(transcode_file, src, dst, spec, cfg.paths.ffmpeg)
+            except TranscodeError as exc:
+                raise HTTPException(status_code=500, detail=f"Encoding failed: {exc}") from exc
+            with open(dst, "rb") as f:
+                data = f.read()
+        return Response(content=data, media_type=spec.media_type)
+
     @app.post("/api/files/{file_id}/save-edited")
     async def api_save_edited_file(
         file_id: str,
@@ -863,12 +917,20 @@ def create_app(
         name: str | None = Query(None),
         overwrite: bool = Query(False),
         copy_user_data: bool = Query(True),
+        format: str = Query("wav"),
+        bit_depth: int | None = Query(None),
+        bitrate: int | None = Query(None),
     ) -> dict[str, Any]:
         from starlette.concurrency import run_in_threadpool
 
         f_row = st.get_file_by_id_or_path(file_id)
         if f_row is None:
             raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
+        try:
+            spec = parse_spec(format, bit_depth, bitrate)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        ext = spec.extension
 
         source_fid = str(f_row["file_id"])
         source_path = str(f_row["path"])
@@ -882,8 +944,10 @@ def create_app(
             )
 
         custom_name = (name or "").strip()
-        if custom_name.lower().endswith(".wav"):
-            custom_name = custom_name[:-4]
+        for known in EXTENSIONS.values():
+            if custom_name.lower().endswith(known):
+                custom_name = custom_name[: -len(known)]
+                break
 
         if custom_name:
             safe_stem = "".join(
@@ -893,18 +957,18 @@ def create_app(
                 raise HTTPException(status_code=400, detail="Invalid filename")
             if safe_stem.split(".")[0].strip().upper() in _WINDOWS_RESERVED_NAMES:
                 safe_stem = f"_{safe_stem}"
-            candidate = parent_dir / f"{safe_stem}.wav"
+            candidate = parent_dir / f"{safe_stem}{ext}"
             if not overwrite:
                 counter = 2
                 while os.path.exists(to_os_path(candidate)):
-                    candidate = parent_dir / f"{safe_stem}_{counter}.wav"
+                    candidate = parent_dir / f"{safe_stem}_{counter}{ext}"
                     counter += 1
             target_norm = normalize_path(candidate)
         elif overwrite:
-            if src_p.suffix.lower() != ".wav":
+            if src_p.suffix.lower() != ext:
                 raise HTTPException(
                     status_code=400,
-                    detail="Overwrite without a name is only supported for .wav sources",
+                    detail=f"Overwrite without a name needs a {ext} source",
                 )
             target_norm = normalize_path(src_p)
         else:
@@ -922,61 +986,41 @@ def create_app(
             else:
                 base_stem = f"{stem}{safe_suffix}"
 
-            candidate = parent_dir / f"{base_stem}.wav"
+            candidate = parent_dir / f"{base_stem}{ext}"
             counter = 2
             while os.path.exists(to_os_path(candidate)):
-                candidate = parent_dir / f"{base_stem}_{counter}.wav"
+                candidate = parent_dir / f"{base_stem}_{counter}{ext}"
                 counter += 1
             target_norm = normalize_path(candidate)
 
         target_fid = compute_file_id(target_norm)
         u_map = st.get_user_data_map([source_fid, target_fid])
-        max_bytes = 256 * 1024 * 1024
+        max_bytes = _MAX_UPLOAD_BYTES
         target_existed = False
         os_target = to_os_path(target_norm)
-        os_tmp = f"{os_target}.{os.getpid()}_{threading.get_ident()}.tmp"
+        tmp_tag = f"{os.getpid()}_{threading.get_ident()}"
+        os_tmp = f"{os_target}.{tmp_tag}.tmp"
+        os_tmp_out = f"{os_target}.{tmp_tag}.out.tmp"
         try:
-            written = 0
-            with open(os_tmp, "wb") as out_f:
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    written += len(chunk)
-                    if written > max_bytes:
-                        raise HTTPException(status_code=413, detail="Edited audio file too large")
-                    out_f.write(chunk)
-            if written < 44:
-                raise HTTPException(status_code=400, detail="Edited audio payload is empty")
-            try:
-                wav_info = sf.info(os_tmp)
-                wav_ok = (
-                    wav_info.format in ("WAV", "WAVEX")
-                    and wav_info.frames > 0
-                    and wav_info.samplerate > 0
-                )
-            except Exception:
-                wav_ok = False
-            if not wav_ok:
-                raise HTTPException(status_code=400, detail="Edited audio is not a valid WAV file")
+            await _receive_wav(file, os_tmp, max_bytes)
+            await run_in_threadpool(transcode_file, os_tmp, os_tmp_out, spec, cfg.paths.ffmpeg)
             target_existed = os.path.exists(os_target)
-            os.replace(os_tmp, os_target)
+            os.replace(os_tmp_out, os_target)
         except HTTPException:
-            try:
-                if os.path.exists(os_tmp):
-                    os.unlink(os_tmp)
-            except OSError:
-                pass
             raise
+        except TranscodeError as exc:
+            raise HTTPException(status_code=500, detail=f"Encoding failed: {exc}") from exc
         except Exception as exc:
-            try:
-                if os.path.exists(os_tmp):
-                    os.unlink(os_tmp)
-            except OSError:
-                pass
             raise HTTPException(
                 status_code=500, detail=f"Failed to write edited audio file: {exc}"
             ) from exc
+        finally:
+            for leftover in (os_tmp, os_tmp_out):
+                try:
+                    if os.path.exists(leftover):
+                        os.unlink(leftover)
+                except OSError:
+                    pass
 
         try:
             f_rec = await run_in_threadpool(

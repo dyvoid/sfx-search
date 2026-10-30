@@ -282,7 +282,11 @@ export class MockApi {
         return json({ detail: this.opts.saveErrorDetail }, this.opts.saveStatus);
       }
       const name = url.searchParams.get("name") ?? "saved";
-      return json({ hit: makeHit(999, { file_id: "f999", filename: `${name}.wav` }) });
+      const ext = url.searchParams.get("format") ?? "wav";
+      return json({ hit: makeHit(999, { file_id: "f999", filename: `${name}.${ext}` }) });
+    }
+    if (p === "/api/transcode") {
+      return route.fulfill({ status: 200, headers: { "Content-Type": "audio/flac" }, body: "fLaC" });
     }
     const fileMatch = /^\/api\/files\/([^/]+)$/.exec(p);
     if (fileMatch) {
@@ -356,7 +360,7 @@ export const studioShell = (page: Page) => page.locator(".sfx-editor-shell");
 
 /**
  * Open the Studio for the selected row (E) and wait until the audio has
- * decoded (Export WAV enables once processed channels exist). Pass
+ * decoded (Download enables once processed channels exist). Pass
  * `waitDecoded: false` when the audio fetch is deliberately hung.
  */
 export async function openStudio(
@@ -366,7 +370,7 @@ export async function openStudio(
   await page.keyboard.press("e");
   await studioShell(page).waitFor();
   if (waitDecoded) {
-    await expect(page.getByRole("button", { name: "Export WAV" })).toBeEnabled();
+    await expect(downloadButton(page)).toBeEnabled();
   }
 }
 
@@ -405,6 +409,12 @@ export const inspector = (page: Page) => page.locator(".sfx-inspector");
 
 /** The Studio's hero play/pause button; `.playing` while audio runs. */
 export const studioPlayButton = (page: Page) => page.locator(".sfx-tp-play-btn");
+
+/** The Studio toolbar's Download button (opens the Download dialog). */
+export const downloadButton = (page: Page) => page.getByRole("button", { name: "Download", exact: true });
+
+/** The Studio's "Download" dialog (name and format). */
+export const downloadDialog = (page: Page) => page.getByRole("dialog", { name: "Download", exact: true });
 
 /** The Studio's "Save to library" dialog. */
 export const saveDialog = (page: Page) => page.getByRole("dialog", { name: "Save to library" });

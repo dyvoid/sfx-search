@@ -70,15 +70,21 @@ test.describe("save fails", () => {
 test("D2 Tab and Shift+Tab stay inside the dialog and wrap", async ({ app }) => {
   await openDialog(app);
   const dlg = saveDialog(app);
+  const stops = await dlg.evaluate(
+    (el) =>
+      Array.from(
+        el.querySelectorAll<HTMLElement>("input, button, [tabindex]:not([tabindex='-1'])")
+      ).filter((e) => !(e as HTMLButtonElement).disabled).length
+  );
   const order: string[] = [];
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < stops * 2; i++) {
     await app.keyboard.press("Tab");
     expect(
       await app.evaluate(() => Boolean(document.activeElement?.closest("[role='dialog']")))
     ).toBe(true);
     order.push(await focusedName(app));
   }
-  expect(order.slice(0, 5)).toEqual(order.slice(5, 10)); // wrapped: a closed cycle
+  expect(order.slice(0, stops)).toEqual(order.slice(stops)); // wrapped: a closed cycle
   expect(new Set(order).size).toBeGreaterThanOrEqual(4);
   await expect(dlg).toBeVisible();
 
