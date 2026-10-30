@@ -3,8 +3,13 @@
 :root {
   --presence: 0.45;
   --sfx-row-cols: 34px minmax(200px, 1.25fr) minmax(240px, 1.55fr) 76px 64px 124px;
-  /* Gap between panels on the app background (DESIGN.md "Readability Rules"). */
-  --sfx-gutter: var(--space-3);
+  /* The one spacing value for layout: gap between panels, and between a panel and
+     the page edge or a bar, on the main page and in Studio alike
+     (DESIGN.md "Readability Rules"). */
+  --sfx-gutter: var(--space-2);
+  /* Horizontal content inset inside full-width bars (header, filters, banners,
+     transport, status). */
+  --sfx-bar-inset: var(--space-5);
 }
 
 /* Readable control floor: 28px small, 32px regular (compact density keeps the kit's sizes). */
@@ -94,7 +99,7 @@ body,
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--sfx-bar-inset);
 }
 
 .sfx-brand {
@@ -176,7 +181,7 @@ body,
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--sfx-bar-inset);
   border-top: var(--border-width) solid var(--border-subtle);
 }
 
@@ -264,7 +269,7 @@ body,
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
-  padding-top: var(--space-3);
+  padding: var(--space-3) var(--sfx-bar-inset);
   border-top: var(--border-width) solid var(--border-subtle);
   animation: sfx-drawer-in 260ms var(--ease-out) both;
 }
@@ -290,7 +295,7 @@ body,
   align-items: center;
   gap: var(--space-4);
   /* A bar under the search row, not a box in the gutter. */
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--sfx-bar-inset);
   background: var(--surface-panel);
   border-bottom: var(--border-width) solid var(--border-subtle);
   flex-shrink: 0;
@@ -301,7 +306,7 @@ body,
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--sfx-bar-inset);
   background: var(--warning-muted-bg);
   border-bottom: var(--border-width) solid var(--border-subtle);
   color: var(--warning-500);
@@ -316,7 +321,7 @@ body,
   flex: 1;
   gap: var(--sfx-gutter);
   min-height: 0;
-  padding: var(--sfx-gutter) var(--space-4);
+  padding: var(--sfx-gutter);
   overflow: hidden;
   position: relative;
 }
@@ -765,7 +770,7 @@ body.sfx-resizing-x {
   justify-content: space-between;
   gap: var(--space-3);
   min-height: 36px;
-  padding: 6px var(--space-5);
+  padding: 6px var(--sfx-bar-inset);
   padding-bottom: max(6px, env(safe-area-inset-bottom, 6px));
   border-top: var(--border-width) solid var(--border-subtle);
   background: var(--surface-panel);
@@ -1319,9 +1324,13 @@ body.sfx-resizing-x {
 }
 
 @media (max-width: 680px) {
+  :root {
+    --sfx-bar-inset: var(--space-3);
+  }
+
   .sfx-topbar,
   .sfx-command-row {
-    padding: var(--space-2) var(--space-3);
+    padding-block: var(--space-2);
   }
 
   .sfx-transport-strip {
@@ -1393,7 +1402,7 @@ body.sfx-resizing-x {
   justify-content: space-between;
   gap: var(--space-4);
   flex-wrap: wrap;
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--sfx-bar-inset);
 }
 
 .sfx-editor-topbar {
@@ -1544,9 +1553,7 @@ body.sfx-resizing-x {
   flex-direction: column;
   flex: 1 1 240px;
   min-height: 180px;
-  /* Vertical gaps are tighter than horizontal: the bars above and below
-     already separate the stage, and height is the scarce axis here. */
-  margin: var(--space-2) var(--space-4);
+  margin: var(--sfx-gutter);
   border: var(--border-width) solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: radial-gradient(
@@ -1706,7 +1713,7 @@ body.sfx-resizing-x {
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-4);
-  padding: var(--space-2) var(--space-5);
+  padding: var(--space-2) var(--sfx-bar-inset);
   flex-shrink: 0;
   background: var(--surface-panel);
   border-top: var(--border-width) solid var(--border-subtle);
@@ -1873,7 +1880,7 @@ body.sfx-resizing-x {
 
 /* Lower Module Rack */
 .sfx-editor-rack {
-  padding: var(--space-2) var(--space-4);
+  padding: var(--sfx-gutter);
   flex: 0 1 auto;
   min-height: 0;
   max-height: 50vh;
@@ -1883,7 +1890,7 @@ body.sfx-resizing-x {
 .sfx-rack-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
-  gap: var(--space-4);
+  gap: var(--sfx-gutter);
 }
 
 .sfx-rack-card {
