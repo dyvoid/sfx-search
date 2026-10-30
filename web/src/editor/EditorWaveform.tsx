@@ -55,6 +55,7 @@ const COLOR_VARS = {
   grid: "--border-subtle",
   start: "--success-500",
   end: "--danger-400",
+  clip: "--danger-500",
   fade: "--accent-1-muted-bg",
   fadeLabel: "--accent-1-400",
   outsideLoop: "--scrim",
@@ -75,6 +76,7 @@ const FALLBACKS: Palette = {
   grid: "rgba(255, 255, 255, 0.10)",
   start: "#45c486",
   end: "#eb6565",
+  clip: "#e04848",
   fade: "rgba(224, 178, 82, 0.20)",
   fadeLabel: "#e6b85c",
   outsideLoop: "rgba(8, 9, 14, 0.62)",
@@ -480,15 +482,27 @@ export const EditorWaveform = React.forwardRef<
             g.stroke();
           }
 
+          // Over full scale (gain past 0 dBFS) draws flat at the lane edge,
+          // as the file will clip, with the clipped columns marked.
           g.strokeStyle = COLORS.wave;
           g.beginPath();
           for (let x = 0; x < peaks.buckets; x++) {
-            const y0 = midY - maxs[x] * amp;
-            const y1 = midY - mins[x] * amp;
+            const y0 = midY - Math.min(1, maxs[x]) * amp;
+            const y1 = midY - Math.max(-1, mins[x]) * amp;
             g.moveTo(x + 0.5, y0);
             g.lineTo(x + 0.5, Math.max(y0 + 0.5, y1));
           }
           g.stroke();
+
+          g.fillStyle = COLORS.clip;
+          for (let x = 0; x < peaks.buckets; x++) {
+            if (maxs[x] > 1) {
+              g.fillRect(x, midY - amp - 2, 1, 3);
+            }
+            if (mins[x] < -1) {
+              g.fillRect(x, midY + amp - 1, 1, 3);
+            }
+          }
         }
 
         if (st.loop) {
