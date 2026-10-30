@@ -1,4 +1,10 @@
 import React, { useEffect, useImperativeHandle, useRef } from "react";
+import {
+  FadeCurve,
+  ResolvedMode,
+  fadeInGain,
+  fadeOutGain,
+} from "./audio/loopdsp";
 
 export interface LoopMarkers {
   start: number;
@@ -13,6 +19,10 @@ export interface LoopMarkers {
   /** Optional boundary fade-in / fade-out lengths in samples (for Trim & Gain visualization). */
   fadeInSamples?: number;
   fadeOutSamples?: number;
+  /** Curve of the fades and crossfade; drawn as the overlay and applied to the waveform. */
+  curve?: FadeCurve;
+  /** Crossfade placement as baked; lets the waveform show the mixed seam. */
+  mode?: ResolvedMode;
 }
 
 export interface CandidateBand {
@@ -176,6 +186,121 @@ function peaksFor(
   return { min, max };
 }
 
+/** Trace a gain curve (0 at the bottom, 1 at the top) from x0 to x1. */
+function traceCurve(
+  g: CanvasRenderingContext2D,
+  x0: number,
+  x1: number,
+  h: number,
+  gain: (t: number) => number
+): void {
+  const steps = Math.max(8, Math.min(512, Math.ceil(Math.abs(x1 - x0))));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const x = x0 + t * (x1 - x0);
+    const y = h - gain(t) * h;
+    if (i === 0) {
+      g.moveTo(x, y);
+    } else {
+      g.lineTo(x, y);
+    }
+  }
+}
+
+/**
+ * Peaks of one channel as the fades and crossfade will render them, or null
+ * when nothing visible changes. Fades scale each bucket by the gain at its
+ * centre; the crossfade is mixed per sample, the same way bakeLoop does.
+ */
+function fadedPeaks(
+  ch: Float32Array,
+  loop: LoopMarkers,
+  peaks: PeakCache,
+  ci: number
+): { mins: Float32Array; maxs: Float32Array } | null {
+  const { from, to, buckets } = peaks;
+  const mins = peaks.mins[ci];
+  const maxs = peaks.maxs[ci];
+  const span = (to - from) / buckets;
+  const curve = loop.curve ?? "linear";
+  let outMin: Float32Array | null = null;
+  let outMax: Float32Array | null = null;
+  const bucketRange = (s0: number, s1: number): [number, number] => [
+    Math.max(0, Math.floor((s0 - from) / span)),
+    Math.min(buckets - 1, Math.floor((s1 - 1 - from) / span)),
+  ];
+
+  const scale = (s0: number, n: number, gain: (t: number) => number) => {
+    if (n <= 1) {
+      return;
+    }
+    const [b0, b1] = bucketRange(s0, s0 + n);
+    for (let b = b0; b <= b1; b++) {
+      const t = (from + (b + 0.5) * span - s0) / n;
+      if (t < 0 || t > 1) {
+        continue;
+      }
+      outMin ??= mins.slice();
+      outMax ??= maxs.slice();
+      const k = gain(t);
+      outMin[b] = mins[b] * k;
+      outMax[b] = maxs[b] * k;
+    }
+  };
+
+  const regionLen = loop.end - loop.start;
+  scale(
+    loop.start,
+    Math.min(loop.fadeInSamples ?? 0, regionLen),
+    (t) => fadeInGain(curve, t)
+  );
+  const fo = Math.min(loop.fadeOutSamples ?? 0, regionLen);
+  scale(loop.end - fo, fo, (t) => fadeOutGain(curve, t));
+
+  const F = Math.max(0, Math.min(Math.floor(loop.fade), regionLen));
+  if (F > 0 && loop.mode) {
+    // Where the seam is shown, and which source runs fade out (a) / in (b).
+    const [shown, aBase, bBase] =
+      loop.mode === "pre"
+        ? [loop.end - F, loop.end - F, loop.start - F]
+        : loop.mode === "post"
+        ? [loop.start, loop.end, loop.start]
+        : [loop.end - F, loop.end - F, loop.start];
+    if (aBase >= 0 && bBase >= 0 && aBase + F <= ch.length && bBase + F <= ch.length) {
+      const [b0, b1] = bucketRange(shown, shown + F);
+      for (let b = b0; b <= b1; b++) {
+        const a = Math.max(0, Math.floor(from + b * span));
+        const c = Math.min(ch.length, Math.floor(from + (b + 1) * span));
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let i = a; i < c; i++) {
+          const q = i - shown;
+          const v =
+            q >= 0 && q < F
+              ? ch[aBase + q] * fadeOutGain(curve, (q + 0.5) / F) +
+                ch[bBase + q] * fadeInGain(curve, (q + 0.5) / F)
+              : ch[i];
+          if (v < lo) {
+            lo = v;
+          }
+          if (v > hi) {
+            hi = v;
+          }
+        }
+        if (lo === Infinity) {
+          continue;
+        }
+        outMin ??= mins.slice();
+        outMax ??= maxs.slice();
+        outMin[b] = lo;
+        outMax[b] = hi;
+      }
+    }
+  }
+
+  return outMin && outMax ? { mins: outMin, maxs: outMax } : null;
+}
+
 export const EditorWaveform = React.forwardRef<
   EditorWaveformHandle,
   EditorWaveformProps
@@ -331,6 +456,26 @@ export const EditorWaveform = React.forwardRef<
         return cache;
       };
 
+      // Recomputed only when the view or the markers change, not per playhead frame.
+      let fadedCache: {
+        peaks: PeakCache;
+        loop: LoopMarkers | null;
+        result: ({ mins: Float32Array; maxs: Float32Array } | null)[];
+      } | null = null;
+      const fadedFor = (peaks: PeakCache, ci: number) => {
+        if (!st.loop) {
+          return null;
+        }
+        if (!fadedCache || fadedCache.peaks !== peaks || fadedCache.loop !== st.loop) {
+          fadedCache = { peaks, loop: st.loop, result: [] };
+        }
+        if (fadedCache.result[ci] === undefined) {
+          const ch = st.channels[ci];
+          fadedCache.result[ci] = ch ? fadedPeaks(ch, st.loop, peaks, ci) : null;
+        }
+        return fadedCache.result[ci];
+      };
+
       const drawMarker = (
         g: CanvasRenderingContext2D,
         x: number,
@@ -463,8 +608,9 @@ export const EditorWaveform = React.forwardRef<
         for (let ci = 0; ci < nCh; ci++) {
           const midY = rowH * ci + rowH / 2;
           const amp = rowH / 2 - 4;
-          const mins = peaks.mins[ci];
-          const maxs = peaks.maxs[ci];
+          const faded = fadedFor(peaks, ci);
+          const mins = faded?.mins ?? peaks.mins[ci];
+          const maxs = faded?.maxs ?? peaks.maxs[ci];
 
           // Subtle center zero-line
           g.strokeStyle = COLORS.grid;
@@ -480,6 +626,27 @@ export const EditorWaveform = React.forwardRef<
             g.moveTo(0, rowH * ci);
             g.lineTo(w, rowH * ci);
             g.stroke();
+          }
+
+          // Where fades change the sound, the original stays as a faint ghost
+          if (faded) {
+            g.save();
+            g.globalAlpha = 0.22;
+            g.strokeStyle = COLORS.wave;
+            g.beginPath();
+            const oMins = peaks.mins[ci];
+            const oMaxs = peaks.maxs[ci];
+            for (let x = 0; x < peaks.buckets; x++) {
+              if (oMins[x] === mins[x] && oMaxs[x] === maxs[x]) {
+                continue;
+              }
+              const y0 = midY - Math.min(1, oMaxs[x]) * amp;
+              const y1 = midY - Math.max(-1, oMins[x]) * amp;
+              g.moveTo(x + 0.5, y0);
+              g.lineTo(x + 0.5, Math.max(y0 + 0.5, y1));
+            }
+            g.stroke();
+            g.restore();
           }
 
           // Over full scale (gain past 0 dBFS) draws flat at the lane edge,
@@ -532,16 +699,14 @@ export const EditorWaveform = React.forwardRef<
               g.fillStyle = COLORS.fade;
               g.fillRect(cfx0, 0, cfx1 - cfx0, wh);
 
-              // Draw subtle X crossfade envelope slopes
+              // The two crossfade gains, in the selected curve
+              const curve = st.loop.curve ?? "linear";
               g.save();
               g.strokeStyle = COLORS.fadeLabel;
-              g.globalAlpha = 0.45;
-              g.setLineDash([3, 3]);
+              g.globalAlpha = 0.65;
               g.beginPath();
-              g.moveTo(fx0, 0);
-              g.lineTo(fx1, wh);
-              g.moveTo(fx0, wh);
-              g.lineTo(fx1, 0);
+              traceCurve(g, fx0, fx1, wh, (t) => fadeOutGain(curve, t));
+              traceCurve(g, fx0, fx1, wh, (t) => fadeInGain(curve, t));
               g.stroke();
               g.restore();
 
@@ -571,8 +736,14 @@ export const EditorWaveform = React.forwardRef<
               g.strokeStyle = COLORS.fadeLabel;
               g.globalAlpha = 0.65;
               g.beginPath();
-              g.moveTo(sPx, wh);
-              g.lineTo(fiEndPx, 0);
+              const fiCurve = st.loop.curve ?? "linear";
+              traceCurve(
+                g,
+                sPx,
+                sampleToPx(Math.min(st.loop.end, st.loop.start + st.loop.fadeInSamples)),
+                wh,
+                (t) => fadeInGain(fiCurve, t)
+              );
               g.stroke();
               g.restore();
             }
@@ -595,8 +766,14 @@ export const EditorWaveform = React.forwardRef<
               g.strokeStyle = COLORS.fadeLabel;
               g.globalAlpha = 0.65;
               g.beginPath();
-              g.moveTo(foStartPx, 0);
-              g.lineTo(ePx, wh);
+              const foCurve = st.loop.curve ?? "linear";
+              traceCurve(
+                g,
+                sampleToPx(Math.max(st.loop.start, st.loop.end - st.loop.fadeOutSamples)),
+                ePx,
+                wh,
+                (t) => fadeOutGain(foCurve, t)
+              );
               g.stroke();
               g.restore();
             }

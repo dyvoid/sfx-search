@@ -1676,6 +1676,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         endLabel: "OUT",
         fadeInSamples: fiSamples,
         fadeOutSamples: foSamples,
+        curve: shaper.fadeCurve,
       };
     }
     if (processedChannels && (loopEnabled || activeModule === "loop")) {
@@ -1686,6 +1687,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         fadeAtHead,
         startLabel: "S",
         endLabel: "E",
+        curve: fadeCurve,
+        mode: resolvedMode,
       };
     }
     return null;
@@ -1695,6 +1698,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     shaper.enabled,
     shaper.fadeInMs,
     shaper.fadeOutMs,
+    shaper.fadeCurve,
     sampleRate,
     cropStartSamples,
     cropEndSamples,
@@ -1704,6 +1708,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     loopEnd,
     fadeSamples,
     fadeAtHead,
+    fadeCurve,
+    resolvedMode,
   ]);
 
   const resolvedModeLabel =
