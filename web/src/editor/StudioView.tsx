@@ -244,6 +244,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     if (!transportRef.current) {
       const t = new StudioTransport(editorAudioContext());
       t.onEnded = () => {
+        // Played through: park at the start, so the next play doesn't
+        // replay the last frame before the end.
+        cursorRef.current = 0;
+        cursorVisibleRef.current = false;
         setIsPlaying(false);
       };
       transportRef.current = t;

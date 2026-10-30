@@ -75,6 +75,20 @@ test.describe("Studio, nothing focused", () => {
     await expect(studioPlayButton(app)).toHaveClass(/playing/);
   });
 
+  test.describe("short clip", () => {
+    test.use({ apiOptions: { audioSeconds: 1 } });
+
+    test("S1 Space after playing through starts again from the top", async ({ app }) => {
+      await app.keyboard.press("Space");
+      await expect(studioPlayButton(app)).not.toHaveClass(/playing/, { timeout: 3000 });
+      await expect(timeNow(app)).toHaveText("0:00.00");
+      await app.keyboard.press("Space");
+      await app.waitForTimeout(300);
+      await expect(studioPlayButton(app)).toHaveClass(/playing/);
+      await expect(timeNow(app)).not.toHaveText("0:01.00");
+    });
+  });
+
   test("S2 Digit1-4 switch the module", async ({ app }) => {
     await expect(tab(app, "Trim & Gain")).toHaveAttribute("aria-selected", "true");
     await app.keyboard.press("Digit2");

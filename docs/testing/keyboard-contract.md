@@ -47,7 +47,7 @@ Global principles:
 
 | ID | Context | Key | Expected |
 |---|---|---|---|
-| S1 | Studio, nothing focused | Space | Play/pause. |
+| S1 | Studio, nothing focused | Space | Play/pause. After playing through to the end, the next play starts from the top. |
 | S2 | Studio | Digit1–4 | Switch module (Trim & Gain, Tone & EQ, Seamless Loop, Variations). |
 | S3 | Studio, Trim & Gain or Seamless Loop | `[` / `]` | Select the start / end marker (crop handle in Trim & Gain). Not handled in other modules. |
 | S4 | Studio, Trim & Gain or Seamless Loop | ArrowLeft / ArrowRight | Nudge the active marker 1 ms; Shift = 10 ms; auto-repeat keeps nudging. Not handled in other modules. |
