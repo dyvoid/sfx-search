@@ -2067,10 +2067,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <span className="dot" />
                 OUT <b>{(cropEndSamples / sampleRate).toFixed(3)}s</b>
               </span>
-              <span className="sfx-hud-pill">
-                Length <b>{totalDurationS.toFixed(3)}s</b> of{" "}
-                <b>{(rawTotalSamples / sampleRate).toFixed(3)}s</b>
-              </span>
+              {cropEndSamples - cropStartSamples < rawTotalSamples && (
+                <span className="sfx-hud-pill">
+                  Length <b>{totalDurationS.toFixed(3)}s</b> of{" "}
+                  <b>{(rawTotalSamples / sampleRate).toFixed(3)}s</b>
+                </span>
+              )}
             </div>
           ) : (
             activeModule === "loop" && (
