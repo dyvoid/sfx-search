@@ -100,7 +100,7 @@ export interface ApiOptions {
   /** Status returned by save-edited; non-2xx returns {detail: saveErrorDetail}. */
   saveStatus: number;
   saveErrorDetail: string;
-  /** Delay (ms) before save-edited answers, to keep a save "in flight". */
+  /** Delay (ms) before save-edited and /api/transcode answer, to keep a save "in flight". */
   saveDelayMs: number;
   /** Length of the decodeable WAV served by /api/audio/*. */
   audioSeconds: number;
@@ -108,6 +108,8 @@ export interface ApiOptions {
   roots: string[];
   /** Configured folders reported as not found on disk. */
   missingRoots: string[];
+  /** The first N GET /api/library calls fail (backend still starting). */
+  libraryFailures: number;
 }
 
 export const DEFAULT_API_OPTIONS: ApiOptions = {
@@ -123,6 +125,7 @@ export const DEFAULT_API_OPTIONS: ApiOptions = {
   audioSeconds: 10,
   roots: ["/lib"],
   missingRoots: [],
+  libraryFailures: 0,
 };
 
 export class MockApi {
@@ -213,7 +216,13 @@ export class MockApi {
       const results = Array.from({ length: 10 }, (_, i) => this.hit(i + 1));
       return json({ results });
     }
-    if (p === "/api/library" && m === "GET") return json(library());
+    if (p === "/api/library" && m === "GET") {
+      if (this.opts.libraryFailures > 0) {
+        this.opts.libraryFailures -= 1;
+        return json({ detail: "starting" }, 503);
+      }
+      return json(library());
+    }
     if (p === "/api/library/pick-folder") return json({ path: "D:/Picked" });
     if (p === "/api/library/roots") return json(library());
     if (p === "/api/library/rescan") return json(library());
@@ -286,6 +295,9 @@ export class MockApi {
       return json({ hit: makeHit(999, { file_id: "f999", filename: `${name}.${ext}` }) });
     }
     if (p === "/api/transcode") {
+      if (this.opts.saveDelayMs > 0) {
+        await new Promise((r) => setTimeout(r, this.opts.saveDelayMs));
+      }
       return route.fulfill({ status: 200, headers: { "Content-Type": "audio/flac" }, body: "fLaC" });
     }
     const fileMatch = /^\/api\/files\/([^/]+)$/.exec(p);

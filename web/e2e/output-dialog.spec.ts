@@ -70,3 +70,34 @@ test("the chosen format is remembered for the next dialog", async ({ app }) => {
   await expect(pill(saveDialog(app), "Format", "OGG")).toHaveAttribute("aria-pressed", "true");
   await expect(saveDialog(app).getByLabel("Filename")).toHaveValue(/\.ogg$/);
 });
+
+test.describe("slow encode", () => {
+  test.use({ apiOptions: { saveDelayMs: 1200 } });
+
+  test("the dialog locks at once and shows a spinner only after a delay", async ({ app, api }) => {
+    await clearStoredFormat(app);
+    await openStudio(app);
+    await downloadButton(app).click();
+    const dlg = downloadDialog(app);
+    await pill(dlg, "Format", "FLAC").click();
+    const download = app.waitForEvent("download");
+    await dlg.getByRole("button", { name: "Download", exact: true }).click();
+
+    // Locked immediately: no second request, no format change, no closing.
+    const confirm = dlg.locator(".ds-dialog-foot .ds-btn-primary");
+    await expect(confirm).toHaveAttribute("aria-disabled", "true");
+    await expect(pill(dlg, "Format", "MP3")).toBeDisabled();
+    await expect(dlg.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await expect(dlg.locator(".sfx-btn-spinner")).toHaveCount(0);
+    await confirm.click({ force: true });
+    await app.keyboard.press("Escape");
+    await expect(dlg).toBeVisible();
+
+    // A slow encode gets the spinner, then the dialog closes when it lands.
+    await expect(dlg.locator(".sfx-btn-spinner")).toBeVisible();
+    await expect(confirm).toHaveText("Encoding…");
+    await download;
+    await expect(dlg).toHaveCount(0);
+    expect(api.callsTo("POST /api/transcode")).toHaveLength(1);
+  });
+});

@@ -1738,6 +1738,39 @@ body.sfx-resizing-x {
   justify-content: flex-start;
 }
 
+/* The dialog body is a fieldset so one flag locks every control. */
+.sfx-dialog-fieldset {
+  border: 0;
+  margin: 0;
+  min-inline-size: 0;
+}
+
+.sfx-dialog-fieldset:disabled .sfx-choice-pill,
+.sfx-dialog-fieldset:disabled .ds-input-box,
+.sfx-dialog-fieldset:disabled .ds-check {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Busy spinner inside a small button, in the button's text color. */
+.ds-btn .sfx-btn-spinner {
+  width: 12px;
+  height: 12px;
+  border-width: 2px;
+  border-color: color-mix(in oklch, currentColor 30%, transparent);
+  border-top-color: currentColor;
+}
+
+/* Busy buttons stay focusable (aria-disabled) but look and act disabled. */
+.ds-btn[aria-disabled="true"] {
+  background: var(--surface-raised);
+  color: var(--text-disabled);
+  border-color: var(--border-subtle);
+  box-shadow: none;
+  transform: none;
+  pointer-events: none;
+}
+
 /* Reserved so the level readouts don't move when the meter appears. */
 .sfx-meter-slot {
   display: flex;

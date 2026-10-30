@@ -248,7 +248,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
   >(null);
   const [saveName, setSaveName] = useState<string>("");
   const [saveOverwrite, setSaveOverwrite] = useState<boolean>(false);
+  const [downloading, setDownloading] = useState<boolean>(false);
+  // Any save/download in flight: the dialog locks at once, the spinner waits.
+  const outputBusy = savingToLibrary || savingBatch || downloading;
+  const [showBusySpinner, setShowBusySpinner] = useState<boolean>(false);
+  useEffect(() => {
+    if (!outputBusy) {
+      setShowBusySpinner(false);
+      return;
+    }
+    // Quick jobs (a WAV download) finish before this and never flash a spinner.
+    const t = window.setTimeout(() => setShowBusySpinner(true), 400);
+    return () => window.clearTimeout(t);
+  }, [outputBusy]);
   const saveDlgRef = useRef<HTMLDivElement | null>(null);
+  const saveConfirmRef = useRef<HTMLButtonElement | null>(null);
   const saveOpenerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (saveDlg) {
@@ -1047,6 +1061,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         return false;
       }
       setStatusMsg(`Encoding ${filename}…`);
+      setDownloading(true);
       try {
         const blob = await encodeForDownload(
           outputChannels,
@@ -1063,6 +1078,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
           `Download failed: ${err instanceof Error ? err.message : String(err)}`
         );
         return false;
+      } finally {
+        setDownloading(false);
       }
     },
     [outputChannels, sampleRate, outputSpec, reportError]
@@ -1446,9 +1463,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   const confirmSave = useCallback(async () => {
     const kind = saveDlg;
-    if (!kind || savingToLibrary || savingBatch) {
+    if (!kind || outputBusy) {
       return;
     }
+    // Pressing Enter in the field: keep focus in the dialog once it locks.
+    saveConfirmRef.current?.focus();
     let ok = false;
     if (kind === "save" || kind === "download") {
       const stem = stripExtension(saveName.trim());
@@ -1472,8 +1491,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     saveDlg,
     saveName,
     saveOverwrite,
-    savingToLibrary,
-    savingBatch,
+    outputBusy,
     outputSpec,
     handleSaveToLibrary,
     downloadOutput,
@@ -1579,7 +1597,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
         }
         if (e.key === "Escape") {
           e.preventDefault();
-          setSaveDlg(null);
+          if (!outputBusy) {
+            setSaveDlg(null);
+          }
         }
         return;
       }
@@ -1762,6 +1782,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     openSaveDialog,
     openOutputDialog,
     saveDlg,
+    outputBusy,
   ]);
 
   const totalSamples = processedChannels?.[0]?.length ?? 0;
@@ -2029,7 +2050,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             {hit && (
               <button
                 type="button"
-                disabled={!processedChannels || savingToLibrary}
+                disabled={!processedChannels || outputBusy}
                 onClick={openSaveDialog}
                 className="ds-btn ds-btn-secondary"
                 title="Save into the library folder and index it immediately (Ctrl+S)"
@@ -2041,7 +2062,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
             <button
               type="button"
-              disabled={!processedChannels}
+              disabled={!processedChannels || outputBusy}
               onClick={() => openOutputDialog("download")}
               className="ds-btn ds-btn-primary"
               title="Download the edited sound, choosing name and format"
@@ -3746,13 +3767,14 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
         <div
           className="ds-scrim"
           onClick={(e) => {
-            if (e.target === e.currentTarget) {
+            if (e.target === e.currentTarget && !outputBusy) {
               setSaveDlg(null);
             }
           }}
         >
           <div
             ref={saveDlgRef}
+            aria-busy={outputBusy}
             className="ds-dialog"
             role="dialog"
             aria-modal="true"
@@ -3778,6 +3800,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
               </span>
               <button
                 type="button"
+                disabled={outputBusy}
                 onClick={() => setSaveDlg(null)}
                 className="sfx-icon-btn"
                 aria-label="Close dialog"
@@ -3785,8 +3808,9 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                 <X size={16} />
               </button>
             </div>
-            <div
-              className="ds-dialog-body"
+            <fieldset
+              disabled={outputBusy}
+              className="ds-dialog-body sfx-dialog-fieldset"
               style={{
                 display: "flex",
                 flexDirection: "column",
@@ -3817,7 +3841,9 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                           }
                         } else if (e.key === "Escape") {
                           e.preventDefault();
-                          setSaveDlg(null);
+                          if (!outputBusy) {
+                            setSaveDlg(null);
+                          }
                         }
                       }}
                       spellCheck={false}
@@ -3894,7 +3920,8 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                 <label
                   role="checkbox"
                   aria-checked={saveOverwrite}
-                  tabIndex={0}
+                  aria-disabled={outputBusy}
+                  tabIndex={outputBusy ? -1 : 0}
                   className="ds-check"
                   onKeyDown={(e) => {
                     if (e.key === " " || e.key === "Enter") {
@@ -3904,7 +3931,11 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                       }
                     }
                   }}
-                  onClick={() => setSaveOverwrite((v) => !v)}
+                  onClick={() => {
+                    if (!outputBusy) {
+                      setSaveOverwrite((v) => !v);
+                    }
+                  }}
                 >
                   <div className={`ds-checkbox ${saveOverwrite ? "on" : ""}`}>
                     {saveOverwrite && <div className="ds-checkbox-inner" />}
@@ -3927,30 +3958,35 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
                   {errMsg}
                 </span>
               )}
-            </div>
+            </fieldset>
             <div className="ds-dialog-foot">
               <button
                 type="button"
                 className="ds-btn ds-btn-ghost ds-btn-sm"
+                disabled={outputBusy}
                 onClick={() => setSaveDlg(null)}
               >
                 Cancel
               </button>
+              {/* aria-disabled, not disabled, while busy: it keeps focus in the dialog */}
               <button
+                ref={saveConfirmRef}
                 type="button"
                 className="ds-btn ds-btn-primary ds-btn-sm"
                 disabled={
-                  ((saveDlg === "save" || saveDlg === "download") &&
-                    !stripExtension(saveName.trim())) ||
-                  savingToLibrary ||
-                  savingBatch
+                  (saveDlg === "save" || saveDlg === "download") &&
+                  !stripExtension(saveName.trim())
                 }
+                aria-disabled={outputBusy}
                 onClick={() => void confirmSave()}
               >
-                {savingToLibrary || savingBatch
+                {showBusySpinner && (
+                  <span className="ds-spinner sfx-btn-spinner" aria-hidden="true" />
+                )}
+                {showBusySpinner
                   ? dialogToLibrary
                     ? "Saving…"
-                    : "Downloading…"
+                    : "Encoding…"
                   : dialogToLibrary
                   ? "Save"
                   : "Download"}
