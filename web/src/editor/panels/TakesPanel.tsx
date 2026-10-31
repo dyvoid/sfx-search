@@ -23,7 +23,11 @@ interface TakesPanelProps {
   gridRef: React.RefObject<HTMLDivElement>;
 }
 
-const signedSt = (st: number): string => (st >= 0 ? `+${st.toFixed(1)}` : st.toFixed(1));
+const signedSt = (st: number): string => {
+  const text = Math.abs(st).toFixed(1);
+  // Rounds to zero: no sign, so it never reads "-0.0".
+  return text === "0.0" ? text : `${st > 0 ? "+" : "-"}${text}`;
+};
 
 /** Variations page, full width: the generated round-robin takes. */
 export const TakesPanel: React.FC<TakesPanelProps> = (p) => {
@@ -129,9 +133,14 @@ export const TakesPanel: React.FC<TakesPanelProps> = (p) => {
                     </button>
                     <button
                       type="button"
+                      disabled={p.stale}
                       onClick={() => p.onReroll(idx)}
                       className="sfx-var-mini-btn"
-                      title="Re-roll this take"
+                      title={
+                        p.stale
+                          ? "The edit changed: regenerate all takes instead"
+                          : "Re-roll this take"
+                      }
                       aria-label={`Re-roll take ${idx + 1}`}
                     >
                       <Dices size={12} />
@@ -140,10 +149,11 @@ export const TakesPanel: React.FC<TakesPanelProps> = (p) => {
                       type="button"
                       onClick={() => p.onReplaceSource(v)}
                       className="ds-btn ds-btn-ghost ds-btn-sm sfx-replace-btn"
+                      aria-label={`Replace source with take ${idx + 1}`}
                       title="This take becomes the file you edit. Your current edits, loop settings and takes are cleared. You can undo for a few seconds."
                     >
                       <Replace size={12} />
-                      Replace source
+                      <span className="sfx-replace-label">Replace source</span>
                     </button>
                   </div>
                 </div>

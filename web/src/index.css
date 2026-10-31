@@ -1381,6 +1381,8 @@ body.sfx-resizing-x {
    ========================================================================== */
 
 .sfx-editor-shell {
+  /* No entry animation: its transform would trap the fixed dialog scrim
+     inside the Studio, and re-showing the tab would replay it. */
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -1388,7 +1390,6 @@ body.sfx-resizing-x {
   width: 100%;
   background: var(--surface-app);
   overflow: hidden;
-  animation: sfx-drawer-in 200ms var(--ease-out) both;
 }
 
 .sfx-editor-header {
@@ -2692,6 +2693,23 @@ button.ds-check:focus-visible {
 
 .sfx-var-take-top .sfx-var-take-meta {
   margin-left: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sfx-var-take-top,
+.sfx-var-take-top .sfx-var-take-meta,
+.sfx-var-take-top .sfx-var-take-title,
+.sfx-replace-btn {
+  white-space: nowrap;
+}
+
+/* Narrow windows: Replace source keeps its icon and tooltip. */
+@media (max-width: 1180px) {
+  .sfx-replace-btn .sfx-replace-label {
+    display: none;
+  }
 }
 
 .sfx-replace-btn {

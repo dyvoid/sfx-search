@@ -390,7 +390,7 @@ test.describe("Studio, save chord (S5)", () => {
     await expect(saveDialog(app)).toBeVisible();
     const save = saveDialog(app).getByRole("button", { name: "Save", exact: true });
     await expect(save).toBeDisabled();
-    await saveDialog(app).getByRole("button", { name: "Filter to /lib/a" }).click();
+    await saveDialog(app).getByRole("button", { name: "Save into /lib/a" }).click();
     await expect(save).toBeEnabled();
     await save.click();
     await expect(saveDialog(app)).toHaveCount(0);

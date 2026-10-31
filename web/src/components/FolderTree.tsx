@@ -16,6 +16,8 @@ interface FolderTreeProps {
   selected: string[];
   filterText: string;
   onToggle: (path: string) => void;
+  /** "filter": select folders (and their subfolders) to search. "pick": choose one folder. */
+  mode?: "filter" | "pick";
 }
 
 const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -152,6 +154,7 @@ interface NodeRowProps {
   isIncluded: (path: string) => boolean;
   isViaAncestor: (path: string) => boolean;
   onToggle: (path: string) => void;
+  mode: "filter" | "pick";
 }
 
 const NodeRow: React.FC<NodeRowProps> = ({
@@ -162,6 +165,7 @@ const NodeRow: React.FC<NodeRowProps> = ({
   isIncluded,
   isViaAncestor,
   onToggle,
+  mode,
 }) => {
   const key = normKey(node.path);
   const hasChildren = node.children.length > 0;
@@ -193,13 +197,15 @@ const NodeRow: React.FC<NodeRowProps> = ({
           onClick={() => onToggle(node.path)}
           disabled={viaAncestor}
           title={
-            viaAncestor
+            mode === "pick"
+              ? "Save into this folder"
+              : viaAncestor
               ? "Included via a selected parent folder"
               : checked
               ? "Stop filtering to this folder"
               : "Show only files in this folder (and subfolders)"
           }
-          aria-label={`Filter to ${node.path}`}
+          aria-label={mode === "pick" ? `Save into ${node.path}` : `Filter to ${node.path}`}
           aria-pressed={checked}
         >
           <span className={`ds-checkbox ${checked ? "on" : ""}`}>
@@ -226,6 +232,7 @@ const NodeRow: React.FC<NodeRowProps> = ({
             isIncluded={isIncluded}
             isViaAncestor={isViaAncestor}
             onToggle={onToggle}
+            mode={mode}
           />
         ))}
     </>
@@ -238,6 +245,7 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
   selected,
   filterText,
   onToggle,
+  mode = "filter",
 }) => {
   const tree = useMemo(() => buildTree(folders, roots), [folders, roots]);
   const [openSet, setOpenSet] = useState<Set<string>>(() => new Set());
@@ -339,15 +347,17 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
     });
   };
 
+  // A filter includes subfolders; a pick is exactly one folder.
   const isIncluded = (path: string) => {
     const lp = normKey(path);
     return selected.some(
-      (s) => lp === normKey(s) || lp.startsWith(normKey(s) + "/")
+      (s) =>
+        lp === normKey(s) || (mode === "filter" && lp.startsWith(normKey(s) + "/"))
     );
   };
   const isViaAncestor = (path: string) => {
     const lp = normKey(path);
-    return selected.some((s) => lp.startsWith(normKey(s) + "/"));
+    return mode === "filter" && selected.some((s) => lp.startsWith(normKey(s) + "/"));
   };
 
   const visible = filtered ?? tree;
@@ -366,6 +376,7 @@ export const FolderTree: React.FC<FolderTreeProps> = ({
           isIncluded={isIncluded}
           isViaAncestor={isViaAncestor}
           onToggle={onToggle}
+          mode={mode}
         />
       ))}
     </div>

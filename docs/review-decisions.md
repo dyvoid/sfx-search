@@ -79,3 +79,12 @@ Format: what, decision, why. Newest last within each section.
   than it is worth now.
 - **Download of several takes is one browser download per file**, not a ZIP. Browsers ask once per
   site to allow multiple downloads. Revisit if it gets in the way.
+- **No hint when Save or Download is disabled** (no takes selected, no folder chosen). Rejected
+  (user preference: no clutter): the button state, the "0 of 6 selected" count and the "Choose a
+  folder" placeholder already say why.
+- **The "edit changed" notice stays after the edit is changed back.** Accepted: conservative; the
+  takes were made from a different edit object, and Regenerate is one click.
+- **A second open before the first session reports its status gets no Undo.** Rejected: not
+  reachable by hand (status lands in the same frame).
+- **Hidden sessions keep their decoded audio and transport while Undo is offered.** Accepted:
+  bounded to one extra session for ~8 s; their playhead loop is stopped.

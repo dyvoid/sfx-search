@@ -1114,6 +1114,11 @@ def create_app(
         if custom_name:
             target = _free_target(parent_dir, _safe_stem(custom_name), ext, overwrite)
         elif overwrite:
+            if folder:
+                # Overwriting the source writes next to it; another folder needs a name.
+                raise HTTPException(
+                    status_code=400, detail="Overwrite into another folder needs a name"
+                )
             if src_p.suffix.lower() != ext:
                 raise HTTPException(
                     status_code=400,

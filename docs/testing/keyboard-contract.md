@@ -48,12 +48,12 @@ Global principles:
 
 | ID | Context | Key | Expected |
 |---|---|---|---|
-| T1 | anywhere, no dialog open | Alt+1 / Alt+2 | Switch to the Library / Studio tab. Each tab keeps its state: Library query, filters, folders, scroll and selection; Studio file, edits, loop and variations settings, takes and page. |
-| T2 | Studio tab, no file loaded | — | Empty state with Open file, Pick from Library (switches to the Library) and drag-and-drop. |
+| T1 | anywhere, no dialog open | Alt+1 / Alt+2, or a click on a tab | Switch to the Library / Studio tab. Each tab keeps its state: Library query, filters, folders, scroll and selection; Studio file, edits, loop and variations settings, takes and page. |
+| T2 | Studio tab, no file loaded | — | Empty state with Open file, Pick from Library (switches to the Library) and drag-and-drop. Ctrl/Cmd+S is blocked (no browser Save Page). |
 | T3 | something is playing | switch tabs | Playback stops; coming back leaves the tab stopped at its position. |
-| T4 | Edit in Studio / Open file / drop, Studio holds unsaved work | — | The new file replaces it at once; a toast "Studio now holds …" offers Undo for ~8 s, which restores the previous file with every edit, setting, take and its page. No toast when the Studio was empty or unedited. |
+| T4 | Edit in Studio / Open file / drop, Studio holds unsaved work | — | The new file replaces it at once; a toast "Studio now holds …" offers Undo for ~8 s, which restores the previous file with every edit, setting, take and its page. Work done meanwhile in the newer file is not dropped: Undo swaps, and the newer file is held with its own Undo. No toast when the Studio was empty or unedited; replacing unedited work keeps an Undo that is already offered. |
 | T5 | Edit in Studio on the library file already loaded | E | Switch to the Studio; its edits are kept. |
-| T6 | a dialog is open (Studio output dialog, Library modal) | Alt+1 / Alt+2 | Nothing: the dialog keeps the keyboard. |
+| T6 | a dialog is open (Studio output dialog, Library modal) | Alt+1 / Alt+2, click on a tab | Nothing: the dialog keeps the keyboard, and its scrim covers the tab bar (a click there is a backdrop click). |
 
 ## Studio
 
@@ -62,7 +62,7 @@ output: Loop and Variations.
 
 | ID | Context | Key | Expected |
 |---|---|---|---|
-| S1 | Studio, nothing focused | Space | Play/pause. After playing through to the end, the next play starts from the top. |
+| S1 | Studio, nothing focused | Space | Play/pause. After playing through to the end, the next play starts from the top. A mouse-clicked Studio button (outside dialogs) or app tab keeps no focus, so Space plays after it. |
 | S2 | Studio | Digit1–4 | 1 / 2: Trim & Gain / Tone & EQ on the edit page (from Loop or Variations: back to the edit page first). 3 / 4: open the Loop / Variations page. Changing page stops playback. |
 | S3 | Studio, Trim & Gain or Loop page | `[` / `]` | Select the start / end marker (crop handle in Trim & Gain). Not handled elsewhere. |
 | S4 | Studio, Trim & Gain or Loop page | ArrowLeft / ArrowRight | Nudge the active marker 1 ms; Shift = 10 ms; auto-repeat keeps nudging. Not handled in other modules. |

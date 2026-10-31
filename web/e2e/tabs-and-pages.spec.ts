@@ -18,7 +18,7 @@ import {
   test,
 } from "./fixtures";
 
-const trimStart = (page: Page) => page.getByLabel("Trim Start (ms) value");
+const trimStart = (page: Page) => studioShell(page).getByLabel("Trim Start (ms) value");
 const undoToast = (page: Page) => page.locator(".sfx-undo-toast");
 const takeCards = (page: Page) => page.locator(".sfx-var-take-card");
 const studioFilename = (page: Page) => studioShell(page).locator(".sfx-editor-filename");
@@ -106,13 +106,66 @@ test.describe("tabs", () => {
     await expect(undoToast(app)).toHaveCount(0);
   });
 
-  test("T6 Alt+1 does nothing while a dialog is open", async ({ app }) => {
+  test("T6 Alt+1 does nothing while a dialog is open, and the dialog covers the tabs", async ({
+    app,
+  }) => {
     await openStudio(app);
     await app.keyboard.press("Control+s");
     await expect(saveDialog(app)).toBeVisible();
     await app.keyboard.press("Alt+1");
     await expect(saveDialog(app)).toBeVisible();
     await expect(studioTab(app)).toHaveAttribute("aria-selected", "true");
+    // The scrim lies over the app bar: a click there lands on the backdrop (which
+    // closes the dialog), never on the Library tab.
+    await libraryTab(app).click({ force: true });
+    await expect(saveDialog(app)).toHaveCount(0);
+    await expect(studioTab(app)).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("T1 a mouse-clicked tab keeps no focus, so Space plays", async ({ app }) => {
+    await openStudio(app);
+    await libraryTab(app).click();
+    await app.keyboard.press("Space");
+    await expect.poll(() => playingIndex(app)).toBe(0);
+    await studioTab(app).click();
+    await app.keyboard.press("Space");
+    await expect(studioPlayButton(app)).toHaveClass(/playing/);
+  });
+
+  test("T2 Ctrl+S on the empty Studio does not reach the browser", async ({ app }) => {
+    await studioTab(app).click();
+    expect(
+      await keydownPrevented(app, { key: "s", code: "KeyS", ctrlKey: true })
+    ).toBe(true);
+  });
+
+  test("T4 Undo after editing the newer file swaps back and keeps both", async ({ app }) => {
+    await openEdited(app);
+    await app.keyboard.press("Alt+1");
+    await app.keyboard.press("ArrowDown");
+    await openStudio(app);
+    await trimStart(app).fill("200");
+    await undoToast(app).getByRole("button", { name: "Undo" }).click();
+    await expect(studioFilename(app)).toHaveText("snd0.wav");
+    await expect(trimStart(app)).toHaveValue("100");
+    // The newer file's work is held in turn, with its own Undo.
+    await undoToast(app).getByRole("button", { name: "Undo" }).click();
+    await expect(studioFilename(app)).toHaveText("snd1.wav");
+    await expect(trimStart(app)).toHaveValue("200");
+  });
+
+  test("T4 replacing clean work keeps the earlier Undo alive", async ({ app }) => {
+    await openEdited(app);
+    await app.keyboard.press("Alt+1");
+    await app.keyboard.press("ArrowDown");
+    await openStudio(app);
+    await app.keyboard.press("Alt+1");
+    await app.keyboard.press("ArrowDown");
+    await openStudio(app);
+    await expect(studioFilename(app)).toHaveText("snd2.wav");
+    await undoToast(app).getByRole("button", { name: "Undo" }).click();
+    await expect(studioFilename(app)).toHaveText("snd0.wav");
+    await expect(trimStart(app)).toHaveValue("100");
   });
 });
 
@@ -130,6 +183,14 @@ test.describe("Studio pages", () => {
     expect(calls[0]).toContain("loop=true");
     expect(calls[0]).toContain("folder=%2Flib%2Fa");
     expect(calls[0]).toContain("source_file_id=f0");
+  });
+
+  test("S1 after a mouse click on a Studio button, Space plays", async ({ app }) => {
+    await openStudio(app);
+    await app.getByRole("button", { name: "Reverse Audio" }).click();
+    await app.keyboard.press("Space");
+    await expect(studioPlayButton(app)).toHaveClass(/playing/);
+    await expect(app.getByRole("button", { name: "Reverse Audio" })).toHaveClass(/active/);
   });
 
   test("P2 the edit page saves the edit, not tagged as a loop", async ({ app, api }) => {

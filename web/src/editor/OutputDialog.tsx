@@ -203,6 +203,7 @@ export const OutputDialog: React.FC<OutputDialogProps> = (p) => {
                       selected={p.folder ? [p.folder] : []}
                       filterText={folderFilter}
                       onToggle={p.setFolder}
+                      mode="pick"
                     />
                   </div>
                 </div>

@@ -1062,6 +1062,16 @@ export const App: React.FC = () => {
     }
   }, [tab]);
 
+  /** Show the Undo toast and drop the held session when it runs out. */
+  const offerUndo = useCallback((message: string) => {
+    window.clearTimeout(undoTimerRef.current);
+    setStudioToast(message);
+    undoTimerRef.current = window.setTimeout(() => {
+      setStudio((s) => (s.undo ? { ...s, undo: null } : s));
+      setStudioToast(null);
+    }, UNDO_WINDOW_MS);
+  }, []);
+
   /**
    * Load a source into the Studio and switch to it. Unsaved work there is
    * replaced at once; a toast offers Undo for a few seconds.
@@ -1080,33 +1090,47 @@ export const App: React.FC = () => {
       const prevStatus = current ? studioStatusRef.current[current.id] : undefined;
       const keepForUndo = current !== null && prevStatus?.dirty === true;
       const session: StudioSession = { id: nextSessionIdRef.current++, source };
-      window.clearTimeout(undoTimerRef.current);
-      setStudio({ current: session, undo: keepForUndo ? current : null });
+      const name = sourceFilename(source);
       if (keepForUndo && prevStatus) {
-        const name = sourceFilename(source);
-        setStudioToast(
+        setStudio({ current: session, undo: current });
+        offerUndo(
           how === "replace"
             ? `Studio now holds ${name}. ${prevStatus.name} and its edits were replaced.`
             : `Studio now holds ${name}.`
         );
-        undoTimerRef.current = window.setTimeout(() => {
-          setStudio((s) => (s.undo ? { ...s, undo: null } : s));
-          setStudioToast(null);
-        }, UNDO_WINDOW_MS);
+      } else if (studioRef.current.undo) {
+        // Replacing clean work while Undo is offered: Undo still brings back
+        // the work that was replaced before, until the toast runs out.
+        setStudio((s) => ({ ...s, current: session }));
+        setStudioToast(`Studio now holds ${name}.`);
       } else {
+        window.clearTimeout(undoTimerRef.current);
+        setStudio({ current: session, undo: null });
         setStudioToast(null);
       }
       switchTab("studio");
     },
-    [switchTab]
+    [switchTab, offerUndo]
   );
 
+  /** Undo swaps back: work done meanwhile in the newer file is held in turn, not dropped. */
   const undoStudioReplace = useCallback(() => {
-    window.clearTimeout(undoTimerRef.current);
-    setStudio((s) => (s.undo ? { current: s.undo, undo: null } : s));
-    setStudioToast(null);
+    const { current, undo } = studioRef.current;
+    if (!undo) {
+      return;
+    }
+    const currentStatus = current ? studioStatusRef.current[current.id] : undefined;
+    const backName = studioStatusRef.current[undo.id]?.name ?? sourceFilename(undo.source);
+    if (current && currentStatus?.dirty) {
+      setStudio({ current: undo, undo: current });
+      offerUndo(`Studio holds ${backName} again.`);
+    } else {
+      window.clearTimeout(undoTimerRef.current);
+      setStudio({ current: undo, undo: null });
+      setStudioToast(null);
+    }
     switchTab("studio");
-  }, [switchTab]);
+  }, [switchTab, offerUndo]);
 
   useEffect(() => () => window.clearTimeout(undoTimerRef.current), []);
 
@@ -1177,6 +1201,20 @@ export const App: React.FC = () => {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [switchTab]);
+
+  // The empty Studio has no save target; Ctrl/Cmd+S still must not open Save Page.
+  useEffect(() => {
+    if (tab !== "studio" || studio.current) {
+      return;
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [tab, studio]);
 
   /** "Edit in Studio" for a result row. */
   const editInStudio = useCallback(
@@ -1780,7 +1818,12 @@ export const App: React.FC = () => {
             aria-controls="sfx-panel-library"
             className={`ds-tab ${tab === "library" ? "active" : ""}`}
             title="Library (Alt+1)"
-            onClick={() => switchTab("library")}
+            onClick={(e) => {
+              if (e.detail > 0) {
+                e.currentTarget.blur();
+              }
+              switchTab("library");
+            }}
           >
             Library
           </button>
@@ -1792,7 +1835,12 @@ export const App: React.FC = () => {
             aria-controls="sfx-panel-studio"
             className={`ds-tab ${tab === "studio" ? "active" : ""}`}
             title="Studio (Alt+2)"
-            onClick={() => switchTab("studio")}
+            onClick={(e) => {
+              if (e.detail > 0) {
+                e.currentTarget.blur();
+              }
+              switchTab("studio");
+            }}
           >
             Studio
             {currentStatus && (

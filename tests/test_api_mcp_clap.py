@@ -419,6 +419,11 @@ def test_save_edited_into_chosen_folder(tmp_path: Path) -> None:
     assert _post_edit(client, wid, tmp_path, name="x", folder=missing).status_code == 404
     escape = str(wav.parent / ".." / ".." / "outside")
     assert _post_edit(client, wid, tmp_path, name="x", folder=escape).status_code == 400
+    # Overwriting the source in place cannot also target another folder.
+    before = wav.read_bytes()
+    r = _post_edit(client, wid, tmp_path, folder=str(other), overwrite="true")
+    assert r.status_code == 400
+    assert wav.read_bytes() == before
 
 
 def _post_library_save(client: TestClient, tmp_path: Path, **params: str) -> Any:

@@ -643,8 +643,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
     [processedChannels, sourceChannels, snapZero, snapSample]
   );
 
-  // Playhead RAF loop
+  // Playhead RAF loop (only for the session in front)
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     let rafId = 0;
     const tick = () => {
       const tp = transportRef.current;
@@ -692,7 +695,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     };
     rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
-  }, [processedChannels, loopStart, sampleRate, showCrop, cropStartSamples]);
+  }, [active, processedChannels, loopStart, sampleRate, showCrop, cropStartSamples]);
 
   // Transport actions
   const togglePlay = useCallback(() => {
@@ -1023,7 +1026,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     [variations]
   );
   const outputChannels = onLoopPage ? bakedChannels : processedChannels;
-  const outputStem = `${baseName}${onLoopPage ? ".loop" : ".edit"}`;
+  // "x.loop" edited again saves as "x.edit", not "x.loop.edit"; looped again, "x.loop".
+  const outputStem = `${baseName.replace(/\.(loop|edit)$/i, "")}${
+    onLoopPage ? ".loop" : ".edit"
+  }`;
 
   /** Files a drag from the header carries: this page's output, as 24-bit WAV. */
   const dragFiles = useCallback((): File[] => {
@@ -1087,19 +1093,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
     );
   }, [processedChannels, sampleRate, exportFormat, baseName, onFindSimilarFromAudio]);
 
+  /** This page's single-file output, rendered now (the debounced bake may lag the markers). */
+  const currentOutput = useCallback(
+    (): Float32Array[] | null => (onLoopPage ? bakeLoopNow() : processedChannels),
+    [onLoopPage, bakeLoopNow, processedChannels]
+  );
+
   const downloadOutput = useCallback(
     async (filename: string): Promise<boolean> => {
-      if (!outputChannels || outputChannels.length === 0) {
+      const chs = currentOutput();
+      if (!chs || chs.length === 0) {
         return false;
       }
       setStatusMsg(`Encoding ${filename}…`);
       setDownloading(true);
       try {
-        const blob = await encodeForDownload(
-          outputChannels,
-          sampleRate,
-          outputSpec
-        );
+        const blob = await encodeForDownload(chs, sampleRate, outputSpec);
         downloadBlob(blob, filename);
         setStatusMsg(
           `Downloaded ${filename} (${(blob.size / 1024 / 1024).toFixed(2)} MB)`
@@ -1114,12 +1123,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
         setDownloading(false);
       }
     },
-    [outputChannels, sampleRate, outputSpec, reportError]
+    [currentOutput, sampleRate, outputSpec, reportError]
   );
 
   const saveOutputToLibrary = useCallback(
     async (name: string, overwrite: boolean): Promise<boolean> => {
-      if (!saveFolder || !outputChannels || outputChannels.length === 0) {
+      const chs = currentOutput();
+      if (!saveFolder || !chs || chs.length === 0) {
         return false;
       }
       const targetLabel = `${name}${extensionOf(outputSpec)}`;
@@ -1132,7 +1142,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       );
       try {
         const savedHit = await saveToLibraryFolder(
-          uploadWav(outputChannels, sampleRate, outputSpec),
+          uploadWav(chs, sampleRate, outputSpec),
           {
             folder: saveFolder,
             name,
@@ -1160,7 +1170,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     },
     [
       saveFolder,
-      outputChannels,
+      currentOutput,
       sampleRate,
       outputSpec,
       origin,
@@ -1170,6 +1180,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     ]
   );
 
+  /** Takes saved by this dialog so far: a retry after a failure skips them. */
+  const savedTakeIdsRef = useRef<Set<string>>(new Set());
   const saveTakesToLibrary = useCallback(async (): Promise<boolean> => {
     if (!saveFolder || selectedTakes.length === 0) {
       return false;
@@ -1179,6 +1191,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     let savedCount = 0;
     try {
       for (const v of selectedTakes) {
+        if (savedTakeIdsRef.current.has(v.id)) {
+          savedCount++;
+          continue;
+        }
         setStatusMsg(
           `Saving take ${savedCount + 1}/${selectedTakes.length} (${v.name}${extensionOf(
             outputSpec
@@ -1196,6 +1212,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           }
         );
         onSavedToLibrary(savedHit);
+        savedTakeIdsRef.current.add(v.id);
         savedCount++;
       }
       setStatusMsg(
@@ -1260,6 +1277,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
       setSaveOverwrite(false);
       setErrMsg(null);
+      savedTakeIdsRef.current = new Set();
       const a = document.activeElement;
       saveOpenerRef.current = a instanceof HTMLElement ? a : null;
       setSaveDlg(mode);
@@ -2370,6 +2388,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
     <div
       className="sfx-editor-shell"
       data-page={page}
+      onClick={(e) => {
+        // A mouse-clicked button keeps no focus, so Space goes back to playing.
+        // Not in a dialog: it restores focus to its opener and traps Tab.
+        const btn = e.target instanceof Element ? e.target.closest("button") : null;
+        if (e.detail > 0 && btn instanceof HTMLElement && !btn.closest("[role='dialog']")) {
+          btn.blur();
+        }
+      }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
