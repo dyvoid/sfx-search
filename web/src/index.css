@@ -153,13 +153,6 @@ body,
   white-space: nowrap;
 }
 
-.sfx-workspace-tools {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  flex-shrink: 0;
-}
-
 .sfx-readout-val {
   font-family: var(--font-mono);
   font-size: var(--font-size-xs);
@@ -1406,7 +1399,6 @@ body.sfx-resizing-x {
   flex-shrink: 0;
 }
 
-.sfx-editor-topbar,
 .sfx-editor-toolbar {
   display: flex;
   align-items: center;
@@ -1416,29 +1408,11 @@ body.sfx-resizing-x {
   padding: var(--space-2) var(--sfx-bar-inset);
 }
 
-.sfx-editor-topbar {
-  border-bottom: var(--border-width) solid var(--border-subtle);
-}
-
 .sfx-editor-toolbar-group {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-wrap: wrap;
-}
-
-.sfx-editor-topbar-left {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-width: 0;
-}
-
-.sfx-editor-file-nav {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
 }
 
 .sfx-editor-file-meta {
@@ -2161,38 +2135,18 @@ body.sfx-resizing-x {
   line-height: 1.45;
 }
 
-/* Variations & Round-Robin Generator */
-.sfx-rack-grid-variations {
-  grid-template-columns: minmax(270px, 0.9fr) minmax(280px, 0.95fr) minmax(360px, 1.4fr);
-}
-
-@media (max-width: 1120px) {
-  .sfx-rack-grid-variations {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  /* The takes card gets its own full row instead of half a row. */
-  .sfx-rack-grid-variations .sfx-rack-card-wide {
-    grid-column: 1 / -1;
-  }
-}
-
+/* Variations page: round-robin takes */
 .sfx-var-takes-grid {
-  /* Fixed row height so exactly two rows fit without scrolling; the card's
-     content is 28px top row + 40px wave + 16px meta. Three columns (six
-     takes visible), dropping to two when a card would be narrower than its
-     title + action buttons need (160px). */
-  --sfx-take-h: 114px;
+  /* Three wide columns: the takes are the point of the page. Fixed row
+     height; the page scrolls when there are more than fit. */
+  --sfx-take-h: 128px;
   display: grid;
   grid-template-columns: repeat(
     auto-fill,
-    minmax(max(160px, calc((100% - 2 * var(--space-2)) / 3)), 1fr)
+    minmax(max(260px, calc((100% - 2 * var(--space-3)) / 3)), 1fr)
   );
   grid-auto-rows: var(--sfx-take-h);
-  gap: var(--space-2);
-  max-height: calc(2 * var(--sfx-take-h) + var(--space-2));
-  overflow-y: auto;
-  padding-right: 2px;
+  gap: var(--space-3);
 }
 
 .sfx-var-take-card {
@@ -2223,8 +2177,10 @@ body.sfx-resizing-x {
   box-shadow: var(--focus-ring);
 }
 
-.sfx-var-take-card.liked {
-  border-color: oklch(from var(--danger-400) l c h / 0.55);
+/* Left out of Save and Download: dimmed, still playable. */
+.sfx-var-take-card:not(.selected) .sfx-var-wave-wrap,
+.sfx-var-take-card:not(.selected) .sfx-var-take-meta {
+  opacity: 0.45;
 }
 
 .sfx-var-take-top {
@@ -2287,10 +2243,6 @@ body.sfx-resizing-x {
   border-color: var(--border-subtle);
 }
 
-.sfx-var-mini-btn.liked {
-  color: var(--danger-400);
-}
-
 .sfx-var-wave-wrap {
   position: relative;
   width: 100%;
@@ -2298,7 +2250,7 @@ body.sfx-resizing-x {
 
 .sfx-var-wave-canvas {
   width: 100%;
-  height: 40px;
+  height: 72px;
   display: block;
   border-radius: var(--radius-xs);
 }
@@ -2507,4 +2459,323 @@ button.ds-check:focus-visible {
 .sfx-drop-zone-title {
   font-size: var(--font-size-md);
   font-weight: 600;
+}
+
+/* ==========================================================================
+   App bar: Library and Studio tabs
+   ========================================================================== */
+
+.sfx-appbar {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-6);
+  flex-shrink: 0;
+  padding: 0 var(--sfx-bar-inset);
+  min-height: 46px;
+  background: var(--surface-panel);
+  border-bottom: var(--border-width) solid var(--border-subtle);
+  z-index: 25;
+}
+
+.sfx-appbar .sfx-brand {
+  align-self: center;
+}
+
+.sfx-apptabs {
+  align-items: stretch;
+  border-bottom: 0;
+}
+
+.sfx-apptabs .ds-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+.sfx-apptab-file {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+/* Studio holds edits (status colour: amber). */
+.sfx-apptab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--warning-500);
+  flex-shrink: 0;
+}
+
+.sfx-tabpanel,
+.sfx-studio-slot {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* The class sets display, so [hidden] needs restating. */
+.sfx-tabpanel[hidden],
+.sfx-studio-slot[hidden] {
+  display: none;
+}
+
+.sfx-topbar-setup {
+  justify-content: flex-end;
+}
+
+/* Library results bar: playback options above the results (not column headers). */
+.sfx-results-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: var(--border-width) solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.sfx-results-bar .sfx-transport-strip {
+  margin-left: 0;
+}
+
+/* Undo toast after Studio work was replaced */
+.sfx-toast-host {
+  position: fixed;
+  left: 50%;
+  bottom: 52px;
+  transform: translateX(-50%);
+  z-index: 60;
+  pointer-events: none;
+}
+
+.sfx-undo-toast {
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  pointer-events: auto;
+  max-width: min(640px, calc(100vw - 32px));
+}
+
+/* ==========================================================================
+   Studio: empty state, header, module row, pages
+   ========================================================================== */
+
+.sfx-studio-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: var(--sfx-gutter);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  transition: border-color var(--duration-fast), background var(--duration-fast);
+}
+
+.sfx-studio-empty.over {
+  border-color: var(--primary);
+  background: var(--primary-muted-bg);
+}
+
+.sfx-studio-empty-icon {
+  color: var(--text-tertiary);
+}
+
+.sfx-studio-empty-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: center;
+  margin-top: var(--space-4);
+}
+
+.sfx-studio-empty-hint {
+  margin-top: var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--text-tertiary);
+}
+
+.sfx-create-label {
+  margin-right: var(--space-1);
+}
+
+.sfx-editor-toolbar .ds-btn .sfx-kbd {
+  margin-left: 2px;
+}
+
+.sfx-editor-module-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--sfx-gutter) var(--sfx-gutter) 0;
+  flex-shrink: 0;
+}
+
+.sfx-module-tab .sfx-kbd {
+  margin-right: 2px;
+}
+
+/* Variations page: no main stage; the rack is the page. */
+.sfx-editor-rack.sfx-variations-page {
+  flex: 1;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sfx-gutter);
+}
+
+.sfx-var-top {
+  display: grid;
+  grid-template-columns: minmax(300px, 1.1fr) minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: var(--sfx-gutter);
+}
+
+@media (max-width: 1120px) {
+  .sfx-var-top {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sfx-var-source {
+    grid-column: 1 / -1;
+  }
+}
+
+.sfx-var-source-wave {
+  position: relative;
+  height: 120px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-sunken);
+}
+
+.sfx-var-source-wave > * {
+  height: 100%;
+}
+
+.sfx-var-source-transport {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.sfx-takes-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.sfx-takes-stale {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--warning-muted-bg);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.sfx-var-take-top .ds-check {
+  gap: var(--space-2);
+}
+
+.sfx-var-take-top .sfx-var-take-meta {
+  margin-left: var(--space-2);
+}
+
+.sfx-replace-btn {
+  margin-left: var(--space-1);
+}
+
+/* ==========================================================================
+   Output dialog: included list, files, library folder
+   ========================================================================== */
+
+.sfx-included {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  border: 1px solid var(--border-subtle);
+}
+
+.sfx-included ul,
+.sfx-included-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+
+.sfx-included li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sfx-included li svg {
+  color: var(--success-500);
+  flex-shrink: 0;
+}
+
+.sfx-included-files {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.sfx-folder-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sfx-folder-choice-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--text-primary);
+}
+
+.sfx-folder-choice-path.empty {
+  direction: ltr;
+  color: var(--text-tertiary);
+}
+
+.sfx-folder-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sfx-folder-picker-tree {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1);
 }

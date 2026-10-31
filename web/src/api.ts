@@ -219,44 +219,39 @@ export async function pickNativeFolder(): Promise<string | null> {
   return (data.path as string) || null;
 }
 
-export async function saveEditedFileToLibrary(
-  fileId: string,
+/** Save Studio output into a library folder and index it; returns the new hit. */
+export async function saveToLibraryFolder(
   wavBuffer: ArrayBuffer,
-  filename: string,
   options: {
-    suffix?: string;
-    name?: string;
-    overwrite?: boolean;
-    copyUserData?: boolean;
+    folder: string;
+    /** Filename stem; a known audio extension is stripped by the backend. */
+    name: string;
+    overwrite: boolean;
+    /** Library file whose favorite, tags and note the new file inherits. */
+    sourceFileId: string | null;
+    /** Tag the saved file "loop". */
+    loop: boolean;
     /** Output format query params (format, bit_depth / bitrate); default 24-bit WAV. */
-    encode?: Record<string, string>;
-  } = {}
+    encode: Record<string, string>;
+  }
 ): Promise<SearchHit> {
-  const params = new URLSearchParams(options.encode ?? {});
-  if (options.suffix !== undefined) {
-    params.set("suffix", options.suffix);
-  }
-  if (options.name !== undefined) {
-    params.set("name", options.name);
-  }
-  if (options.overwrite !== undefined) {
-    params.set("overwrite", String(options.overwrite));
-  }
-  if (options.copyUserData !== undefined) {
-    params.set("copy_user_data", String(options.copyUserData));
+  const params = new URLSearchParams(options.encode);
+  params.set("folder", options.folder);
+  params.set("name", options.name);
+  params.set("overwrite", String(options.overwrite));
+  params.set("loop", String(options.loop));
+  if (options.sourceFileId) {
+    params.set("source_file_id", options.sourceFileId);
   }
 
   const form = new FormData();
   const blob = new Blob([wavBuffer], { type: "audio/wav" });
-  form.append("file", blob, filename);
+  form.append("file", blob, `${options.name}.wav`);
 
-  const res = await fetch(
-    `/api/files/${encodeURIComponent(fileId)}/save-edited?${params}`,
-    {
-      method: "POST",
-      body: form,
-    }
-  );
+  const res = await fetch(`/api/library/save?${params}`, {
+    method: "POST",
+    body: form,
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail || `Save failed: ${res.statusText}`);

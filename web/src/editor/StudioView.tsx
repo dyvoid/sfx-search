@@ -8,34 +8,30 @@ import React, {
 import {
   Activity,
   ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
-  CircleHelp,
+  ArrowRight,
   Dices,
   Download,
   FolderOpen,
   GripHorizontal,
-  Heart,
   Maximize2,
   Pause,
   Play,
   Repeat,
+  Replace,
   RotateCcw,
   Save,
   Sliders,
   Sparkles,
   Square,
   Upload,
-  Wand2,
   X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { revealInExplorer, saveEditedFileToLibrary } from "../api";
-import { DsRange } from "../components/DsRange";
+import { revealInExplorer, saveToLibraryFolder } from "../api";
 import { KeyHints } from "../components/KeyHints";
 import { SpectrumMeter } from "../components/SpectrumMeter";
-import { SearchHit } from "../types";
+import { FolderEntry, SearchHit } from "../types";
 import {
   channelsOf,
   decodeAudioFile,
@@ -74,13 +70,10 @@ import {
   VariationSpec,
 } from "./audio/variations";
 import {
-  BIT_DEPTHS,
-  BITRATES,
   describeSpec,
   downloadBlob,
   encodeForDownload,
   extensionOf,
-  FORMAT_CHOICES,
   loadOutputSpec,
   normalizeSpec,
   OutputSpec,
@@ -92,51 +85,60 @@ import {
 } from "./audio/outputFormat";
 import { encodeWav, WavFormat } from "./audio/wav";
 import { EditorWaveform, EditorWaveformHandle } from "./EditorWaveform";
+import { OutputDialog } from "./OutputDialog";
+import { LoopPanels, LoopSearchMode } from "./panels/LoopPanels";
+import { TakesPanel } from "./panels/TakesPanel";
+import { ToneEqPanels } from "./panels/ToneEqPanels";
+import { TrimGainPanels } from "./panels/TrimGainPanels";
+import { VariationControls } from "./panels/VariationControls";
 import {
-  EqResponseGraph,
-  SeamScope,
-  VariationWaveCardCanvas,
-} from "./SeamScope";
+  DerivedSource,
+  originHit,
+  sourceFilename,
+  StudioSource,
+  StudioStatus,
+} from "./studioSource";
 import type { SearchMessage } from "./workers/search.worker";
 
-export type EditorModuleId = "loop" | "shaper" | "eq" | "variations";
+/** The edit page is the base; Loop and Variations are made from its output. */
+export type StudioPage = "edit" | "loop" | "variations";
+export type EditModule = "shaper" | "eq";
 
-const LabelWithTip: React.FC<{ label: string; tip: string }> = ({
-  label,
-  tip,
-}) => (
-  <span className="sfx-rack-label sfx-label-with-tip">
-    <span>{label}</span>
-    <span className="sfx-tip-wrap" tabIndex={0} aria-label={tip}>
-      <CircleHelp size={11} className="sfx-tip-icon" />
-      <span className="sfx-tip-bubble">{tip}</span>
-    </span>
-  </span>
-);
+const DEFAULT_LOOP_FADE_MS = 350;
+const DEFAULT_LOOP_CURVE: FadeCurve = "equal-power";
+
+const CURVE_NAMES: Record<FadeCurve, string> = {
+  "equal-power": "equal-power",
+  cosine: "cosine",
+  linear: "linear",
+};
 
 interface StudioViewProps {
-  hit: SearchHit | null;
-  /** A local file to edit instead of a library hit (opened by dropping it on the library). */
-  localFile?: File | null;
-  hasPrev: boolean;
-  hasNext: boolean;
-  onPrevHit: () => void;
-  onNextHit: () => void;
-  onBackToLibrary: () => void;
+  /** What this session edits; fixed for the session (a new source is a new session). */
+  source: StudioSource;
+  /** Visible and in front: owns the keyboard and may play audio. */
+  active: boolean;
+  /** Library folders, for choosing where Save to Library writes. */
+  libraryFolders: FolderEntry[];
+  libraryRoots: string[];
+  onOpenFile: (file: File) => void;
+  /** A rendered loop or take becomes the file being edited (undoable from the app). */
+  onReplaceSource: (source: DerivedSource) => void;
   onFindSimilarFromAudio: (file: File) => void;
   onSavedToLibrary: (newHit: SearchHit) => void;
+  onStatus: (status: StudioStatus) => void;
 }
 
 export const StudioView: React.FC<StudioViewProps> = ({
-  hit,
-  hasPrev,
-  hasNext,
-  onPrevHit,
-  onNextHit,
-  onBackToLibrary,
+  source,
+  active,
+  libraryFolders,
+  libraryRoots,
+  onOpenFile,
+  onReplaceSource,
   onFindSimilarFromAudio,
   onSavedToLibrary,
-  localFile = null,
+  onStatus,
 }) => {
   const waveRef = useRef<EditorWaveformHandle | null>(null);
   const transportRef = useRef<StudioTransport | null>(null);
@@ -145,24 +147,30 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const takesGridRef = useRef<HTMLDivElement | null>(null);
   const bakeTimerRef = useRef<number>(0);
 
+  const sourceName = sourceFilename(source);
+  const libHit = source.kind === "library" ? source.hit : null;
+  const origin = originHit(source);
+  const baseName = useMemo(
+    () => sourceName.replace(/\.[^.]+$/, "") || "sound",
+    [sourceName]
+  );
+
   // Source audio state
   const [sourceChannels, setSourceChannels] = useState<Float32Array[] | null>(
     null
   );
   const [sampleRate, setSampleRate] = useState<number>(48000);
-  const [baseName, setBaseName] = useState<string>("loop");
-  const [decoding, setDecoding] = useState<boolean>(false);
+  const [decoding, setDecoding] = useState<boolean>(source.kind !== "derived");
   const [decodeError, setDecodeError] = useState<string>("");
 
-  // Active module tab (Trim & Gain is Module 1 since cropping defines the region for downstream modules)
-  const [activeModule, setActiveModule] = useState<EditorModuleId>("shaper");
+  const [page, setPage] = useState<StudioPage>("edit");
+  const [editModule, setEditModule] = useState<EditModule>("shaper");
 
-  // Module 1: Seamless Loop state (disabled by default until enabled or auto-found)
-  const [loopEnabled, setLoopEnabled] = useState<boolean>(false);
+  // Loop page state. The whole sound loops by default; nothing needs changing for that.
   const [loopStart, setLoopStart] = useState<number>(0);
   const [loopEnd, setLoopEnd] = useState<number>(0);
-  const [fadeMs, setFadeMs] = useState<number>(350);
-  const [fadeCurve, setFadeCurve] = useState<FadeCurve>("equal-power");
+  const [fadeMs, setFadeMs] = useState<number>(DEFAULT_LOOP_FADE_MS);
+  const [fadeCurve, setFadeCurve] = useState<FadeCurve>(DEFAULT_LOOP_CURVE);
   const [bakeMode, setBakeMode] = useState<BakeMode>("auto");
   const [snapZero, setSnapZero] = useState<boolean>(true);
   const [activeMarker, setActiveMarker] = useState<"start" | "end">("start");
@@ -170,23 +178,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
   // Auto-loop search state
   const [minLoopSec, setMinLoopSec] = useState<number>(1.5);
   const [searchWindowMs, setSearchWindowMs] = useState<number>(400);
-  const [searchModePref, setSearchModePref] = useState<
-    "auto" | "pairs" | "fixed-end"
-  >("auto");
+  const [searchModePref, setSearchModePref] = useState<LoopSearchMode>("auto");
   const [searching, setSearching] = useState<boolean>(false);
   const [searchProgress, setSearchProgress] = useState<number>(0);
   const [candidates, setCandidates] = useState<LoopCandidate[]>([]);
   const [candIndex, setCandIndex] = useState<number>(-1);
 
-  // Module 2: Trim & Shaper state
+  // Edit page state
   const [shaper, setShaper] = useState<ShaperSpec>(DEFAULT_SHAPER_SPEC);
-
-  // Module 3: Tone & EQ state
   const [eq, setEq] = useState<EqSpec>(DEFAULT_EQ_SPEC);
 
-  // Module 4: Procedural Variations & Round-Robin Generator state
+  // Variations page state
   const [varSpec, setVarSpec] = useState<VariationSpec>(DEFAULT_VARIATION_SPEC);
   const [variations, setVariations] = useState<GeneratedVariation[]>([]);
+  /** The edited sound the current takes were generated from. */
+  const [takesBasis, setTakesBasis] = useState<Float32Array[] | null>(null);
   const [activeVarIdx, setActiveVarIdx] = useState<number>(-1);
   const [playingVarIdx, setPlayingVarIdx] = useState<number | null>(null);
   const [varPlayRatio, setVarPlayRatio] = useState<number | null>(null);
@@ -225,7 +231,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const cursorRef = useRef<number>(0);
   const cursorVisibleRef = useRef<boolean>(false);
 
-  // Drag-out stays 24-bit WAV (what DAWs expect); Save and Export use outputSpec.
+  // Drag-out stays 24-bit WAV (what DAWs expect); Save and Download use outputSpec.
   const exportFormat: WavFormat = "int24";
   const [outputSpec, setOutputSpecState] = useState<OutputSpec>(loadOutputSpec);
   const setOutputSpec = useCallback((next: OutputSpec) => {
@@ -234,7 +240,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
     storeOutputSpec(spec);
     setSaveName((name) => (name ? withExtension(name, spec) : name));
   }, []);
-  const [saveSuffix, setSaveSuffix] = useState<string>(".edit");
   const [savingToLibrary, setSavingToLibrary] = useState<boolean>(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
   const [errMsg, setErrMsg] = useState<string | null>(null);
@@ -242,12 +247,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setErrMsg(msg);
     setStatusMsg(msg);
   }, []);
-  /** Which output dialog is open: one sound or the takes, to library or download. */
-  const [saveDlg, setSaveDlg] = useState<
-    "save" | "download" | "save-takes" | "download-takes" | null
-  >(null);
+  /** Which output dialog is open; it acts on the current page's output. */
+  const [saveDlg, setSaveDlg] = useState<"save" | "download" | null>(null);
   const [saveName, setSaveName] = useState<string>("");
   const [saveOverwrite, setSaveOverwrite] = useState<boolean>(false);
+  /** Library folder Save to Library writes into; starts at the source's own folder. */
+  const [saveFolder, setSaveFolder] = useState<string>(() => origin?.folder ?? "");
   const [downloading, setDownloading] = useState<boolean>(false);
   // Any save/download in flight: the dialog locks at once, the spinner waits.
   const outputBusy = savingToLibrary || savingBatch || downloading;
@@ -275,6 +280,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
   }, [saveDlg]);
 
+  const canSaveToLibrary = libraryRoots.length > 0;
+  const onLoopPage = page === "loop";
+  const showCrop = page === "edit" && editModule === "shaper";
+  const loopAudition = onLoopPage && auditionMode === "loop";
+
   const fadeSamples = useMemo(
     () => Math.max(0, Math.round((fadeMs / 1000) * sampleRate)),
     [fadeMs, sampleRate]
@@ -297,13 +307,13 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, []);
 
   const stopVariationPlayback = useCallback(() => {
-    const active = varSourceRef.current;
+    const activeVar = varSourceRef.current;
     varSourceRef.current = null;
-    if (active) {
+    if (activeVar) {
       try {
-        active.source.onended = null;
-        active.source.stop();
-        active.source.disconnect();
+        activeVar.source.onended = null;
+        activeVar.source.stop();
+        activeVar.source.disconnect();
       } catch {
         // ignore
       }
@@ -316,10 +326,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
     return () => {
       searchWorkerRef.current?.terminate();
       window.clearTimeout(bakeTimerRef.current);
-      const active = varSourceRef.current;
+      const activeVar = varSourceRef.current;
       varSourceRef.current = null;
       try {
-        active?.source.stop();
+        activeVar?.source.stop();
       } catch {
         // ignore
       }
@@ -328,54 +338,44 @@ export const StudioView: React.FC<StudioViewProps> = ({
     };
   }, []);
 
-  // Load selected hit from `/api/audio/{file_id}` when `hit` changes
+  // Load the session's source once: a library file, a local file, or rendered audio.
   useEffect(() => {
-    if (!hit) {
+    const controller = new AbortController();
+    const show = (chs: Float32Array[], sr: number) => {
+      const len = chs[0]?.length ?? 0;
+      setSourceChannels(chs);
+      setSampleRate(sr);
+      setLoopStart(0);
+      setLoopEnd(len);
+      cursorRef.current = 0;
+      cursorVisibleRef.current = false;
+      setTimePosText("0:00.00");
+      setDecoding(false);
+      setStatusMsg(
+        `${sourceName} · ${chs.length}ch · ${(sr / 1000).toFixed(
+          1
+        )} kHz · ${formatDuration(len, sr)}`
+      );
+    };
+    if (source.kind === "derived") {
+      show(source.channels, source.sampleRate);
       return;
     }
-    const controller = new AbortController();
     setDecoding(true);
     setDecodeError("");
-    setErrMsg(null);
-    setSaveDlg(null);
-    setStatusMsg(`Loading ${hit.filename}…`);
-    transportRef.current?.stop();
-    setIsPlaying(false);
-    searchWorkerRef.current?.terminate();
-    setSearching(false);
-
-    const url = `/api/audio/${encodeURIComponent(hit.file_id)}`;
-    decodeAudioUrl(url, controller.signal)
+    setStatusMsg(`Loading ${sourceName}…`);
+    const pending =
+      source.kind === "library"
+        ? decodeAudioUrl(
+            `/api/audio/${encodeURIComponent(source.hit.file_id)}`,
+            controller.signal
+          )
+        : decodeAudioFile(source.file);
+    pending
       .then((buf) => {
-        if (controller.signal.aborted) {
-          return;
+        if (!controller.signal.aborted) {
+          show(channelsOf(buf), buf.sampleRate);
         }
-        const chs = channelsOf(buf);
-        const sr = buf.sampleRate;
-        const len = buf.length;
-        setSourceChannels(chs);
-        setSampleRate(sr);
-        setBaseName(hit.filename.replace(/\.[^.]+$/, "") || "sound");
-
-        // Reset variations & playhead
-        stopVariationPlayback();
-        setLoopStart(0);
-        setLoopEnd(len);
-        setCandidates([]);
-        setCandIndex(-1);
-        setShaper(DEFAULT_SHAPER_SPEC);
-        setEq(DEFAULT_EQ_SPEC);
-        setVariations([]);
-        setActiveVarIdx(-1);
-        cursorRef.current = 0;
-        cursorVisibleRef.current = false;
-        setTimePosText("0:00.00");
-        setDecoding(false);
-        setStatusMsg(
-          `${hit.filename} · ${buf.numberOfChannels}ch · ${(sr / 1000).toFixed(
-            1
-          )} kHz · ${formatDuration(len, sr)}`
-        );
       })
       .catch((err) => {
         if (controller.signal.aborted) {
@@ -384,90 +384,54 @@ export const StudioView: React.FC<StudioViewProps> = ({
         setDecoding(false);
         const msg = err instanceof Error ? err.message : String(err);
         setDecodeError(msg);
-        reportError(`Failed to decode audio: ${msg}`);
+        reportError(`Could not decode audio: ${msg}`);
       });
+    return () => controller.abort();
+  }, [source, sourceName, reportError]);
 
-    return () => {
-      controller.abort();
-    };
-  }, [hit?.file_id]);
-
-  // Also allow loading an external local file via Open or Drop
-  const loadLocalFile = useCallback(async (file: File) => {
-    setDecoding(true);
-    setDecodeError("");
-    setErrMsg(null);
-    setSaveDlg(null);
-    setStatusMsg(`Decoding ${file.name}…`);
-    transportRef.current?.stop();
-    setIsPlaying(false);
-    searchWorkerRef.current?.terminate();
-    setSearching(false);
-    try {
-      const buf = await decodeAudioFile(file);
-      const chs = channelsOf(buf);
-      const sr = buf.sampleRate;
-      const len = buf.length;
-      setSourceChannels(chs);
-      setSampleRate(sr);
-      setBaseName(file.name.replace(/\.[^.]+$/, "") || "sound");
-      setLoopStart(0);
-      setLoopEnd(len);
-      setCandidates([]);
-      setCandIndex(-1);
-      setShaper(DEFAULT_SHAPER_SPEC);
-      setEq(DEFAULT_EQ_SPEC);
-      setVariations([]);
-      setActiveVarIdx(-1);
-      cursorRef.current = 0;
-      cursorVisibleRef.current = false;
-      setTimePosText("0:00.00");
-      setDecoding(false);
-      setStatusMsg(
-        `${file.name} · ${buf.numberOfChannels}ch · ${(sr / 1000).toFixed(
-          1
-        )} kHz · ${formatDuration(len, sr)}`
-      );
-    } catch (err) {
-      setDecoding(false);
-      const msg = err instanceof Error ? err.message : String(err);
-      setDecodeError(msg);
-      reportError(`Could not decode file: ${msg}`);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (localFile) {
-      void loadLocalFile(localFile);
-    }
-  }, [localFile, loadLocalFile]);
-
-  // Recompute Processed Channels whenever source, shaper, or eq changes
-  const prevProcLenRef = useRef<number>(0);
+  // Recompute the edited sound whenever source, shaper, or eq changes
+  const prevProcRef = useRef<{
+    len: number;
+    trimStartMs: number;
+    trimEndMs: number;
+    reverse: boolean;
+  } | null>(null);
   useEffect(() => {
     if (!sourceChannels || sourceChannels.length === 0) {
       setProcessedChannels(null);
-      prevProcLenRef.current = 0;
+      prevProcRef.current = null;
       return;
     }
     const processed = applyDspChain(sourceChannels, sampleRate, shaper, eq);
     const newLen = processed[0]?.length ?? 0;
-    const oldLen = prevProcLenRef.current;
-    prevProcLenRef.current = newLen;
+    const prev = prevProcRef.current;
+    prevProcRef.current = {
+      len: newLen,
+      trimStartMs: shaper.trimStartMs,
+      trimEndMs: shaper.trimEndMs,
+      reverse: shaper.reverse,
+    };
     setProcessedChannels(processed);
-    if (oldLen > 0 && newLen !== oldLen) {
-      setLoopStart((prevS) => Math.max(0, Math.min(prevS, newLen - 2)));
-      setLoopEnd((prevE) =>
-        prevE >= oldLen - 4 ? newLen : Math.max(2, Math.min(prevE, newLen))
-      );
+    if (
+      prev &&
+      (prev.len !== newLen ||
+        prev.trimStartMs !== shaper.trimStartMs ||
+        prev.trimEndMs !== shaper.trimEndMs ||
+        prev.reverse !== shaper.reverse)
+    ) {
+      // The markers pointed into the old audio, even when the length stayed
+      // the same (a shifted trim): loop the whole edited sound again.
+      setLoopStart(0);
+      setLoopEnd(newLen);
+      setCandidates([]);
+      setCandIndex(-1);
     }
   }, [sourceChannels, sampleRate, shaper, eq]);
 
-  // Display channels for the waveform canvas:
-  // In the Trim & Gain tab, show the full uncropped duration so the user can drag IN/OUT crop handles
-  // and see the dimmed trimmed-away regions.
+  // In Trim & Gain the waveform shows the full, uncropped sound so the IN/OUT
+  // handles can be dragged and the trimmed-away parts show dimmed.
   const uncroppedChannels = useMemo(() => {
-    if (!sourceChannels || sourceChannels.length === 0) {
+    if (!showCrop || !sourceChannels || sourceChannels.length === 0) {
       return null;
     }
     const noCropShaper: ShaperSpec = {
@@ -478,35 +442,25 @@ export const StudioView: React.FC<StudioViewProps> = ({
       fadeOutMs: 0,
     };
     return applyDspChain(sourceChannels, sampleRate, noCropShaper, eq);
-  }, [sourceChannels, sampleRate, shaper, eq]);
+  }, [showCrop, sourceChannels, sampleRate, shaper, eq]);
 
   const rawTotalSamples = sourceChannels?.[0]?.length ?? 0;
   const cropStartSamples = useMemo(
     () =>
-      shaper.enabled
-        ? Math.min(
-            Math.max(0, Math.round((shaper.trimStartMs / 1000) * sampleRate)),
-            Math.max(0, rawTotalSamples - 4)
-          )
-        : 0,
-    [shaper.enabled, shaper.trimStartMs, sampleRate, rawTotalSamples]
+      Math.min(
+        Math.max(0, Math.round((shaper.trimStartMs / 1000) * sampleRate)),
+        Math.max(0, rawTotalSamples - 4)
+      ),
+    [shaper.trimStartMs, sampleRate, rawTotalSamples]
   );
   const cropEndSamples = useMemo(
     () =>
-      shaper.enabled
-        ? Math.max(
-            cropStartSamples + 4,
-            rawTotalSamples -
-              Math.max(0, Math.round((shaper.trimEndMs / 1000) * sampleRate))
-          )
-        : rawTotalSamples,
-    [
-      shaper.enabled,
-      shaper.trimEndMs,
-      sampleRate,
-      rawTotalSamples,
-      cropStartSamples,
-    ]
+      Math.max(
+        cropStartSamples + 4,
+        rawTotalSamples -
+          Math.max(0, Math.round((shaper.trimEndMs / 1000) * sampleRate))
+      ),
+    [shaper.trimEndMs, sampleRate, rawTotalSamples, cropStartSamples]
   );
   // Latest marker positions for the keyboard handler. Synced every render and
   // advanced immediately on each nudge, so keys pressed faster than React
@@ -538,7 +492,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
       );
       setShaper((s) => ({
         ...s,
-        enabled: true,
         trimStartMs: nextTrimStartMs,
         trimEndMs: nextTrimEndMs,
       }));
@@ -562,7 +515,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const detected = detectSilenceTrimMs(sourceChannels, sampleRate, -50);
     setShaper((s) => ({
       ...s,
-      enabled: true,
       trimStartMs: detected.trimStartMs,
       trimEndMs: detected.trimEndMs,
     }));
@@ -571,7 +523,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     );
   }, [sourceChannels, sampleRate]);
 
-  // Bake Loop & update transport whenever processedChannels or loop params change
+  // Bake the loop & update the transport whenever the edit or loop params change
   const performBake = useCallback(
     (
       proc: Float32Array[],
@@ -580,8 +532,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       end: number,
       fadeS: number,
       curve: FadeCurve,
-      mode: BakeMode,
-      isLoopingOn: boolean
+      mode: BakeMode
     ) => {
       const len = proc[0]?.length ?? 0;
       if (len < 2) {
@@ -594,11 +545,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
       );
 
       try {
-        const effectiveFade = isLoopingOn ? fadeS : 0;
         const res = bakeLoop(proc, {
           start: clampedStart,
           end: clampedEnd,
-          fadeLength: effectiveFade,
+          fadeLength: fadeS,
           curve,
           mode,
         });
@@ -606,7 +556,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
         setResolvedMode(res.mode);
         setFadeAtHead(res.fadeAtHead);
         setSeamMetrics(evaluateBakedSeam(res.buffers, sr));
-        setSignalStats(measureSignalStats(res.buffers));
 
         const tp = ensureTransport();
         tp.setFileAudio(tp.makeBuffer(proc, sr));
@@ -615,15 +564,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
         reportError(err instanceof Error ? err.message : String(err));
       }
     },
-    [ensureTransport]
+    [ensureTransport, reportError]
   );
 
-  useEffect(() => {
-    if (!processedChannels || processedChannels.length === 0) {
-      return;
-    }
-    window.clearTimeout(bakeTimerRef.current);
-    bakeTimerRef.current = window.setTimeout(() => {
+  const bakeCurrent = useCallback(() => {
+    if (processedChannels) {
       performBake(
         processedChannels,
         sampleRate,
@@ -631,11 +576,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
         loopEnd,
         fadeSamples,
         fadeCurve,
-        bakeMode,
-        loopEnabled
+        bakeMode
       );
-    }, 60);
-    return () => window.clearTimeout(bakeTimerRef.current);
+    }
   }, [
     processedChannels,
     sampleRate,
@@ -644,9 +587,25 @@ export const StudioView: React.FC<StudioViewProps> = ({
     fadeSamples,
     fadeCurve,
     bakeMode,
-    loopEnabled,
     performBake,
   ]);
+
+  useEffect(() => {
+    if (!processedChannels || processedChannels.length === 0) {
+      return;
+    }
+    window.clearTimeout(bakeTimerRef.current);
+    bakeTimerRef.current = window.setTimeout(bakeCurrent, 60);
+    return () => window.clearTimeout(bakeTimerRef.current);
+  }, [processedChannels, bakeCurrent]);
+
+  // Peak/RMS of what this page outputs: the loop on the loop page, else the edit.
+  useEffect(() => {
+    const chs = onLoopPage ? bakedChannels : processedChannels;
+    if (chs && chs.length > 0) {
+      setSignalStats(measureSignalStats(chs));
+    }
+  }, [onLoopPage, bakedChannels, processedChannels]);
 
   // Snap helper
   const snapSample = useCallback(
@@ -679,8 +638,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
       const clampedE = Math.max(clampedS + 2, Math.min(e, len));
       setLoopStart(clampedS);
       setLoopEnd(clampedE);
-      setLoopEnabled(true);
-      setSaveSuffix((prev) => (prev === ".edit" ? ".loop" : prev));
       return [clampedS, clampedE];
     },
     [processedChannels, sourceChannels, snapZero, snapSample]
@@ -692,7 +649,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const tick = () => {
       const tp = transportRef.current;
       let shown: number | null = null;
-      const offsetInRaw = activeModule === "shaper" ? cropStartSamples : 0;
+      const offsetInRaw = showCrop ? cropStartSamples : 0;
       if (tp && processedChannels) {
         if (tp.playing) {
           const p = tp.positionSamples();
@@ -735,7 +692,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     };
     rafId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(rafId);
-  }, [processedChannels, loopStart, sampleRate, activeModule, cropStartSamples]);
+  }, [processedChannels, loopStart, sampleRate, showCrop, cropStartSamples]);
 
   // Transport actions
   const togglePlay = useCallback(() => {
@@ -752,24 +709,16 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
       setIsPlaying(false);
     } else {
-      performBake(
-        processedChannels,
-        sampleRate,
-        loopStart,
-        loopEnd,
-        fadeSamples,
-        fadeCurve,
-        bakeMode,
-        loopEnabled
-      );
+      bakeCurrent();
       cursorVisibleRef.current = true;
       const cur = cursorRef.current;
-      if (auditionMode === "loop" && loopEnabled) {
+      if (loopAudition) {
         const offset =
           cur >= loopStart && cur < loopEnd ? cur - loopStart : 0;
         tp.playLoop(offset);
       } else {
-        tp.playFile(cur >= loopEnd ? loopStart : cur);
+        const len = processedChannels[0]?.length ?? 0;
+        tp.playFile(cur >= len - 1 ? 0 : cur);
       }
       setIsPlaying(true);
     }
@@ -778,13 +727,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
     ensureTransport,
     loopStart,
     loopEnd,
-    sampleRate,
-    fadeSamples,
-    fadeCurve,
-    bakeMode,
-    loopEnabled,
-    auditionMode,
-    performBake,
+    loopAudition,
+    bakeCurrent,
+    stopVariationPlayback,
   ]);
 
   const stopPlayback = useCallback(() => {
@@ -794,39 +739,31 @@ export const StudioView: React.FC<StudioViewProps> = ({
       return;
     }
     tp.stop();
-    cursorRef.current = loopEnabled ? loopStart : 0;
+    cursorRef.current = onLoopPage ? loopStart : 0;
     cursorVisibleRef.current = false;
     setIsPlaying(false);
-  }, [loopEnabled, loopStart, stopVariationPlayback]);
+  }, [onLoopPage, loopStart, stopVariationPlayback]);
 
   const restartLoop = useCallback(() => {
     const tp = transportRef.current;
-    cursorRef.current = loopStart;
+    const from = onLoopPage ? loopStart : 0;
+    cursorRef.current = from;
     cursorVisibleRef.current = true;
     if (tp?.playing) {
-      if (auditionMode === "loop" && loopEnabled) {
+      if (loopAudition) {
         tp.playLoop(0);
       } else {
-        tp.playFile(loopStart);
+        tp.playFile(from);
       }
     }
-  }, [loopStart, auditionMode, loopEnabled]);
+  }, [onLoopPage, loopStart, loopAudition]);
 
   const auditionSeam = useCallback(() => {
     if (!processedChannels) {
       return;
     }
     const tp = ensureTransport();
-    performBake(
-      processedChannels,
-      sampleRate,
-      loopStart,
-      loopEnd,
-      fadeSamples,
-      fadeCurve,
-      bakeMode,
-      loopEnabled
-    );
+    bakeCurrent();
     const loopLen = Math.max(2, loopEnd - loopStart);
     // Start 1.2 seconds before the seam wrap so the listener immediately hears the wrap
     const preRollSamples = Math.min(
@@ -843,14 +780,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, [
     processedChannels,
     ensureTransport,
-    performBake,
+    bakeCurrent,
     sampleRate,
     loopStart,
     loopEnd,
-    fadeSamples,
-    fadeCurve,
-    bakeMode,
-    loopEnabled,
   ]);
 
   const seekToSample = useCallback(
@@ -858,8 +791,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       if (!processedChannels) {
         return;
       }
-      const localSample =
-        activeModule === "shaper" ? sample - cropStartSamples : sample;
+      const localSample = showCrop ? sample - cropStartSamples : sample;
       const len = processedChannels[0].length;
       const s = Math.max(0, Math.min(Math.round(localSample), len - 1));
       cursorRef.current = s;
@@ -868,12 +800,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       if (!tp || !tp.playing) {
         return;
       }
-      if (
-        auditionMode === "loop" &&
-        loopEnabled &&
-        s >= loopStart &&
-        s < loopEnd
-      ) {
+      if (loopAudition && s >= loopStart && s < loopEnd) {
         tp.playLoop(s - loopStart);
       } else {
         tp.playFile(s);
@@ -881,14 +808,50 @@ export const StudioView: React.FC<StudioViewProps> = ({
     },
     [
       processedChannels,
-      activeModule,
+      showCrop,
       cropStartSamples,
-      auditionMode,
-      loopEnabled,
+      loopAudition,
       loopStart,
       loopEnd,
     ]
   );
+
+  /** Leave for another Studio page: playback stops, the page opens at the start. */
+  const goToPage = useCallback(
+    (next: StudioPage) => {
+      if (next === page) {
+        return;
+      }
+      stopVariationPlayback();
+      transportRef.current?.stop();
+      cursorRef.current = 0;
+      cursorVisibleRef.current = false;
+      setIsPlaying(false);
+      setAuditionMode("loop");
+      setPage(next);
+    },
+    [page, stopVariationPlayback]
+  );
+
+  // Leaving the tab (or being held for Undo) stops playback; the position is kept.
+  useEffect(() => {
+    if (active) {
+      return;
+    }
+    // A replaced session is held for Undo: it comes back without a dialog in front.
+    setSaveDlg(null);
+    stopVariationPlayback();
+    const tp = transportRef.current;
+    if (tp?.playing) {
+      const p = tp.positionSamples();
+      tp.pause();
+      if (p !== null) {
+        cursorRef.current =
+          tp.mode === "loop" ? markersRef.current.loopStart + p : p;
+      }
+      setIsPlaying(false);
+    }
+  }, [active, stopVariationPlayback]);
 
   // Auto-Loop Search via Web Worker
   const applyCandidate = useCallback(
@@ -909,7 +872,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       cursorVisibleRef.current = true;
       const tp = transportRef.current;
       if (tp?.playing) {
-        if (auditionMode === "loop") {
+        if (loopAudition) {
           performBake(
             processedChannels,
             sampleRate,
@@ -917,8 +880,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             e,
             fadeSamples,
             fadeCurve,
-            bakeMode,
-            true
+            bakeMode
           );
           tp.playLoop(0);
         } else {
@@ -939,7 +901,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       updateLoopPoints,
       snapZero,
       sampleRate,
-      auditionMode,
+      loopAudition,
       performBake,
       fadeSamples,
       fadeCurve,
@@ -1024,36 +986,106 @@ export const StudioView: React.FC<StudioViewProps> = ({
     applyCandidate,
   ]);
 
-  // Build WAV ArrayBuffer for current edited output
-  const buildCurrentWav = useCallback((): {
-    wav: ArrayBuffer;
-    filename: string;
-  } | null => {
-    const outBuffers = bakedChannels ?? processedChannels;
-    if (!outBuffers || outBuffers.length === 0) {
+  const resetLoop = useCallback(() => {
+    setLoopStart(0);
+    setLoopEnd(processedChannels?.[0]?.length ?? 0);
+    setFadeMs(DEFAULT_LOOP_FADE_MS);
+    setFadeCurve(DEFAULT_LOOP_CURVE);
+    setBakeMode("auto");
+    setCandidates([]);
+    setCandIndex(-1);
+    setStatusMsg("The whole sound loops again");
+  }, [processedChannels]);
+
+  /** The loop as it would be saved now, without waiting for the debounced bake. */
+  const bakeLoopNow = useCallback((): Float32Array[] | null => {
+    if (!processedChannels) {
       return null;
     }
-    const wav = encodeWav(outBuffers, sampleRate, exportFormat);
-    const defaultSuf = loopEnabled ? ".loop" : ".edit";
-    const cleanSuffix = (saveSuffix.trim() || defaultSuf).replace(/^\.?/, ".");
-    const filename = `${baseName}${cleanSuffix}.wav`;
-    return { wav, filename };
+    const len = processedChannels[0]?.length ?? 0;
+    if (len < 2) {
+      return null;
+    }
+    const s = Math.max(0, Math.min(Math.floor(loopStart), len - 2));
+    const e = Math.max(s + 2, Math.min(Math.floor(loopEnd), len));
+    return bakeLoop(processedChannels, {
+      start: s,
+      end: e,
+      fadeLength: fadeSamples,
+      curve: fadeCurve,
+      mode: bakeMode,
+    }).buffers;
+  }, [processedChannels, loopStart, loopEnd, fadeSamples, fadeCurve, bakeMode]);
+
+  // ----- Output: each page saves and downloads its own result -----
+  const selectedTakes = useMemo(
+    () => variations.filter((v) => v.selected),
+    [variations]
+  );
+  const outputChannels = onLoopPage ? bakedChannels : processedChannels;
+  const outputStem = `${baseName}${onLoopPage ? ".loop" : ".edit"}`;
+
+  /** Files a drag from the header carries: this page's output, as 24-bit WAV. */
+  const dragFiles = useCallback((): File[] => {
+    if (page === "variations") {
+      return selectedTakes.map(
+        (v) =>
+          new File([encodeWav(v.channels, v.sampleRate, exportFormat)], `${v.name}.wav`, {
+            type: "audio/wav",
+          })
+      );
+    }
+    const chs = onLoopPage ? bakeLoopNow() : processedChannels;
+    if (!chs || chs.length === 0) {
+      return [];
+    }
+    return [
+      new File([encodeWav(chs, sampleRate, exportFormat)], `${outputStem}.wav`, {
+        type: "audio/wav",
+      }),
+    ];
   }, [
-    bakedChannels,
+    page,
+    selectedTakes,
+    onLoopPage,
+    bakeLoopNow,
     processedChannels,
     sampleRate,
     exportFormat,
-    saveSuffix,
-     loopEnabled,
-    baseName,
+    outputStem,
   ]);
 
-  const outputChannels = bakedChannels ?? processedChannels;
-  const outputStem = useMemo(() => {
-    const defaultSuf = loopEnabled ? ".loop" : ".edit";
-    const cleanSuffix = (saveSuffix.trim() || defaultSuf).replace(/^\.?/, ".");
-    return `${baseName}${cleanSuffix}`;
-  }, [loopEnabled, saveSuffix, baseName]);
+  const handleDragOutStart = (e: React.DragEvent) => {
+    const files = dragFiles();
+    if (files.length === 0) {
+      e.preventDefault();
+      return;
+    }
+    const dt = e.dataTransfer;
+    dt.effectAllowed = "copy";
+    for (const file of files) {
+      try {
+        dt.items.add(file);
+      } catch {
+        // ignore if browser blocks items.add(File)
+      }
+    }
+    setStatusMsg(
+      files.length === 1
+        ? `Dragging ${files[0].name} to external app / DAW…`
+        : `Dragging ${files.length} takes to external app / DAW…`
+    );
+  };
+
+  const handleFindSimilarEdited = useCallback(() => {
+    if (!processedChannels) {
+      return;
+    }
+    const wav = encodeWav(processedChannels, sampleRate, exportFormat);
+    onFindSimilarFromAudio(
+      new File([wav], `${baseName}.edit.wav`, { type: "audio/wav" })
+    );
+  }, [processedChannels, sampleRate, exportFormat, baseName, onFindSimilarFromAudio]);
 
   const downloadOutput = useCallback(
     async (filename: string): Promise<boolean> => {
@@ -1085,35 +1117,28 @@ export const StudioView: React.FC<StudioViewProps> = ({
     [outputChannels, sampleRate, outputSpec, reportError]
   );
 
-  const handleSaveToLibrary = useCallback(
-    async (opts?: {
-      name?: string;
-      overwrite?: boolean;
-    }): Promise<boolean> => {
-      if (!hit || !outputChannels || outputChannels.length === 0) {
+  const saveOutputToLibrary = useCallback(
+    async (name: string, overwrite: boolean): Promise<boolean> => {
+      if (!saveFolder || !outputChannels || outputChannels.length === 0) {
         return false;
       }
-      const wav = uploadWav(outputChannels, sampleRate, outputSpec);
-      const ext = extensionOf(outputSpec);
-      const overwrite = opts?.overwrite ?? false;
-      const targetLabel = `${opts?.name ?? outputStem}${ext}`;
+      const targetLabel = `${name}${extensionOf(outputSpec)}`;
       setSavingToLibrary(true);
       setErrMsg(null);
       setStatusMsg(
         overwrite
-          ? `Saving ${targetLabel} (replace existing) and re-indexing…`
-          : `Saving ${targetLabel} to library folder and indexing…`
+          ? `Saving ${targetLabel} (replace existing) and indexing…`
+          : `Saving ${targetLabel} to the library and indexing…`
       );
       try {
-        const savedHit = await saveEditedFileToLibrary(
-          hit.file_id,
-          wav,
-          `${outputStem}.wav`,
+        const savedHit = await saveToLibraryFolder(
+          uploadWav(outputChannels, sampleRate, outputSpec),
           {
-            suffix: saveSuffix.trim() || ".loop",
-            name: opts?.name,
+            folder: saveFolder,
+            name,
             overwrite,
-            copyUserData: true,
+            sourceFileId: origin?.file_id ?? null,
+            loop: onLoopPage,
             encode: specParams(outputSpec),
           }
         );
@@ -1134,70 +1159,158 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
     },
     [
-      hit,
+      saveFolder,
       outputChannels,
       sampleRate,
       outputSpec,
-      outputStem,
-      saveSuffix,
+      origin,
+      onLoopPage,
       onSavedToLibrary,
       reportError,
     ]
   );
 
+  const saveTakesToLibrary = useCallback(async (): Promise<boolean> => {
+    if (!saveFolder || selectedTakes.length === 0) {
+      return false;
+    }
+    setSavingBatch(true);
+    setErrMsg(null);
+    let savedCount = 0;
+    try {
+      for (const v of selectedTakes) {
+        setStatusMsg(
+          `Saving take ${savedCount + 1}/${selectedTakes.length} (${v.name}${extensionOf(
+            outputSpec
+          )})…`
+        );
+        const savedHit = await saveToLibraryFolder(
+          uploadWav(v.channels, v.sampleRate, outputSpec),
+          {
+            folder: saveFolder,
+            name: v.name,
+            overwrite: false,
+            sourceFileId: origin?.file_id ?? null,
+            loop: false,
+            encode: specParams(outputSpec),
+          }
+        );
+        onSavedToLibrary(savedHit);
+        savedCount++;
+      }
+      setStatusMsg(
+        `Saved & indexed ${savedCount} take${savedCount === 1 ? "" : "s"} in the library`
+      );
+      return true;
+    } catch (err) {
+      reportError(
+        `Save failed after ${savedCount} files: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      return false;
+    } finally {
+      setSavingBatch(false);
+    }
+  }, [saveFolder, selectedTakes, outputSpec, origin, onSavedToLibrary, reportError]);
+
+  const downloadTakes = useCallback(async (): Promise<boolean> => {
+    if (selectedTakes.length === 0) {
+      return false;
+    }
+    setSavingBatch(true);
+    let done = 0;
+    try {
+      for (const v of selectedTakes) {
+        setStatusMsg(`Downloading take ${done + 1}/${selectedTakes.length}…`);
+        const blob = await encodeForDownload(v.channels, v.sampleRate, outputSpec);
+        downloadBlob(blob, `${v.name}${extensionOf(outputSpec)}`);
+        done++;
+      }
+      setStatusMsg(
+        `Downloaded ${done} take${done === 1 ? "" : "s"} (${describeSpec(outputSpec)})`
+      );
+      return true;
+    } catch (err) {
+      reportError(
+        `Download failed after ${done} files: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      return false;
+    } finally {
+      setSavingBatch(false);
+    }
+  }, [selectedTakes, outputSpec, reportError]);
+
   const openOutputDialog = useCallback(
-    (kind: "save" | "download" | "save-takes" | "download-takes") => {
-      const toLibrary = kind === "save" || kind === "save-takes";
-      if (toLibrary && !hit) {
+    (mode: "save" | "download") => {
+      if (mode === "save" && !canSaveToLibrary) {
         return;
       }
-      if (kind === "save" || kind === "download") {
-        if (!processedChannels) {
+      if (page === "variations") {
+        if (selectedTakes.length === 0) {
+          return;
+        }
+      } else {
+        if (!outputChannels) {
           return;
         }
         setSaveName(`${outputStem}${extensionOf(outputSpec)}`);
-      } else if (variations.length === 0) {
-        return;
       }
       setSaveOverwrite(false);
       setErrMsg(null);
       const a = document.activeElement;
       saveOpenerRef.current = a instanceof HTMLElement ? a : null;
-      setSaveDlg(kind);
+      setSaveDlg(mode);
     },
-    [processedChannels, hit, outputStem, outputSpec, variations.length]
-  );
-  const openSaveDialog = useCallback(
-    () => openOutputDialog("save"),
-    [openOutputDialog]
+    [
+      canSaveToLibrary,
+      page,
+      selectedTakes.length,
+      outputChannels,
+      outputStem,
+      outputSpec,
+    ]
   );
 
-  const handleDragEditedStart = (e: React.DragEvent) => {
-    const res = buildCurrentWav();
-    if (!res) {
+  const confirmSave = useCallback(async () => {
+    const mode = saveDlg;
+    if (!mode || outputBusy) {
       return;
     }
-    const dt = e.dataTransfer;
-    dt.effectAllowed = "copy";
-    const file = new File([res.wav], res.filename, { type: "audio/wav" });
-    try {
-      dt.items.add(file);
-    } catch {
-      // ignore if browser blocks items.add(File)
+    // Pressing Enter in the field: keep focus in the dialog once it locks.
+    saveConfirmRef.current?.focus();
+    let ok = false;
+    if (page === "variations") {
+      ok = mode === "save" ? await saveTakesToLibrary() : await downloadTakes();
+    } else {
+      const stem = stripExtension(saveName.trim());
+      if (!stem) {
+        return;
+      }
+      ok =
+        mode === "save"
+          ? await saveOutputToLibrary(stem, saveOverwrite)
+          : await downloadOutput(`${stem}${extensionOf(outputSpec)}`);
     }
-    setStatusMsg(`Dragging ${res.filename} to external app / DAW…`);
-  };
-
-  const handleFindSimilarEdited = useCallback(() => {
-    const res = buildCurrentWav();
-    if (!res) {
-      return;
+    if (ok) {
+      setSaveDlg(null);
     }
-    const file = new File([res.wav], res.filename, { type: "audio/wav" });
-    onFindSimilarFromAudio(file);
-  }, [buildCurrentWav, onFindSimilarFromAudio]);
+  }, [
+    saveDlg,
+    outputBusy,
+    page,
+    saveName,
+    saveOverwrite,
+    outputSpec,
+    saveTakesToLibrary,
+    downloadTakes,
+    saveOutputToLibrary,
+    downloadOutput,
+  ]);
 
-  // Procedural Variations & Round-Robin Generator actions
+  // ----- Variations -----
   const playVariationOnce = useCallback(
     (v: GeneratedVariation, idx: number) => {
       // Pause main transport if it was playing, without touching main playhead
@@ -1263,20 +1376,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
   );
 
   const handleGenerateVariations = useCallback(() => {
-    const baseAudio = bakedChannels ?? processedChannels ?? sourceChannels;
-    if (!baseAudio || baseAudio.length === 0) {
+    if (!processedChannels || processedChannels.length === 0) {
       return;
     }
     const batch = generateVariationBatch(
-      baseAudio,
+      processedChannels,
       sampleRate,
       varSpec,
       baseName
     );
     setVariations(batch);
+    setTakesBasis(processedChannels);
     if (batch.length > 0) {
       auditionVariation(batch[0], 0);
-      // The takes are this module's output: on a short window the rack scrolls, so bring them into view.
+      // On a short window the page scrolls: bring the new takes into view.
       window.requestAnimationFrame(() =>
         takesGridRef.current?.scrollIntoView({ block: "nearest" })
       );
@@ -1284,24 +1397,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
     setStatusMsg(
       `Generated ${batch.length} ${varSpec.mode} round-robin variations`
     );
-  }, [
-    bakedChannels,
-    processedChannels,
-    sourceChannels,
-    sampleRate,
-    varSpec,
-    baseName,
-    auditionVariation,
-  ]);
+  }, [processedChannels, sampleRate, varSpec, baseName, auditionVariation]);
 
   const handleRerollSingleVariation = useCallback(
     (idx: number) => {
-      const baseAudio = bakedChannels ?? processedChannels ?? sourceChannels;
-      if (!baseAudio || baseAudio.length === 0) {
+      if (!processedChannels || processedChannels.length === 0) {
         return;
       }
       const fresh = synthesizeVariation(
-        baseAudio,
+        processedChannels,
         sampleRate,
         varSpec,
         idx,
@@ -1309,215 +1413,76 @@ export const StudioView: React.FC<StudioViewProps> = ({
       );
       setVariations((prev) =>
         prev.map((item, i) =>
-          i === idx ? { ...fresh, liked: item.liked } : item
+          i === idx ? { ...fresh, selected: item.selected } : item
         )
       );
       auditionVariation(fresh, idx);
     },
-    [
-      bakedChannels,
-      processedChannels,
-      sourceChannels,
-      sampleRate,
-      varSpec,
-      baseName,
-      auditionVariation,
-    ]
+    [processedChannels, sampleRate, varSpec, baseName, auditionVariation]
   );
 
-  const toggleVariationLike = useCallback((idx: number) => {
+  const toggleTakeSelected = useCallback((idx: number) => {
     setVariations((prev) =>
       prev.map((item, i) =>
-        i === idx ? { ...item, liked: !item.liked } : item
+        i === idx ? { ...item, selected: !item.selected } : item
       )
     );
   }, []);
 
-  /** Download one take in the current output format; throws on encode failure. */
-  const downloadVariation = useCallback(
-    async (v: GeneratedVariation): Promise<string> => {
-      const filename = `${v.name}${extensionOf(outputSpec)}`;
-      const blob = await encodeForDownload(v.channels, v.sampleRate, outputSpec);
-      downloadBlob(blob, filename);
-      return filename;
-    },
-    [outputSpec]
-  );
-
-  /** Save one take to the library in the current output format. */
-  const saveVariation = useCallback(
-    async (v: GeneratedVariation): Promise<SearchHit> => {
-      if (!hit) {
-        throw new Error("No library file to save next to");
-      }
-      const savedHit = await saveEditedFileToLibrary(
-        hit.file_id,
-        uploadWav(v.channels, v.sampleRate, outputSpec),
-        `${v.name}.wav`,
-        {
-          suffix: `_var_${String(v.index + 1).padStart(2, "0")}`,
-          overwrite: false,
-          copyUserData: true,
-          encode: specParams(outputSpec),
-        }
-      );
-      onSavedToLibrary(savedHit);
-      return savedHit;
-    },
-    [hit, outputSpec, onSavedToLibrary]
-  );
-
-  const handleSaveVariationToLibrary = useCallback(
-    async (v: GeneratedVariation) => {
-      if (!hit) {
-        return;
-      }
-      setSavingBatch(true);
-      setStatusMsg(`Saving ${v.name}${extensionOf(outputSpec)} to library…`);
-      try {
-        const savedHit = await saveVariation(v);
-        setStatusMsg(`Saved & indexed variation: ${savedHit.filename}`);
-      } catch (err) {
-        reportError(
-          `Save variation failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      } finally {
-        setSavingBatch(false);
-      }
-    },
-    [hit, outputSpec, saveVariation, reportError]
-  );
-
-  const handleSaveLikedVariationsToLibrary = useCallback(async (): Promise<boolean> => {
-    if (!hit) {
-      return false;
-    }
-    const targets = variations.filter((v) => v.liked);
-    const list = targets.length > 0 ? targets : variations;
-    if (list.length === 0) {
-      return false;
-    }
-    setSavingBatch(true);
-    let savedCount = 0;
-    try {
-      for (const v of list) {
-        setStatusMsg(
-          `Saving variation ${savedCount + 1}/${list.length} (${v.name}${extensionOf(
-            outputSpec
-          )})…`
-        );
-        await saveVariation(v);
-        savedCount++;
-      }
-      setStatusMsg(
-        `Saved & indexed ${savedCount} round-robin variation${
-          savedCount === 1 ? "" : "s"
-        } to library`
-      );
-      return true;
-    } catch (err) {
-      reportError(
-        `Batch save failed after ${savedCount} files: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
-    } finally {
-      setSavingBatch(false);
-    }
-    return false;
-  }, [hit, variations, outputSpec, saveVariation, reportError]);
-
-  const handleDownloadLikedVariations = useCallback(async (): Promise<boolean> => {
-    const targets = variations.filter((v) => v.liked);
-    const list = targets.length > 0 ? targets : variations;
-    if (list.length === 0) {
-      return false;
-    }
-    setSavingBatch(true);
-    let done = 0;
-    try {
-      for (const v of list) {
-        setStatusMsg(`Downloading variation ${done + 1}/${list.length}…`);
-        await downloadVariation(v);
-        done++;
-      }
-      setStatusMsg(
-        `Downloaded ${done} variation file${done === 1 ? "" : "s"} (${describeSpec(
-          outputSpec
-        )})`
-      );
-      return true;
-    } catch (err) {
-      reportError(
-        `Download failed after ${done} files: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
-      return false;
-    } finally {
-      setSavingBatch(false);
-    }
-  }, [variations, downloadVariation, outputSpec, reportError]);
-
-  const confirmSave = useCallback(async () => {
-    const kind = saveDlg;
-    if (!kind || outputBusy) {
-      return;
-    }
-    // Pressing Enter in the field: keep focus in the dialog once it locks.
-    saveConfirmRef.current?.focus();
-    let ok = false;
-    if (kind === "save" || kind === "download") {
-      const stem = stripExtension(saveName.trim());
-      if (!stem) {
-        return;
-      }
-      ok =
-        kind === "save"
-          ? await handleSaveToLibrary({ name: stem, overwrite: saveOverwrite })
-          : await downloadOutput(`${stem}${extensionOf(outputSpec)}`);
-    } else {
-      ok =
-        kind === "save-takes"
-          ? await handleSaveLikedVariationsToLibrary()
-          : await handleDownloadLikedVariations();
-    }
-    if (ok) {
-      setSaveDlg(null);
-    }
-  }, [
-    saveDlg,
-    saveName,
-    saveOverwrite,
-    outputBusy,
-    outputSpec,
-    handleSaveToLibrary,
-    downloadOutput,
-    handleSaveLikedVariationsToLibrary,
-    handleDownloadLikedVariations,
-  ]);
-
-  const handleVariationDragStart = (
-    e: React.DragEvent,
-    v: GeneratedVariation
-  ) => {
+  const handleTakeDragStart = (e: React.DragEvent, v: GeneratedVariation) => {
     const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
     const filename = `${v.name}.wav`;
     const dt = e.dataTransfer;
     dt.effectAllowed = "copy";
-    const file = new File([wav], filename, { type: "audio/wav" });
     try {
-      dt.items.add(file);
+      dt.items.add(new File([wav], filename, { type: "audio/wav" }));
     } catch {
       // ignore
     }
     setStatusMsg(`Dragging ${filename} to DAW / external app…`);
   };
 
+  // ----- Replace source: a loop or take becomes the file being edited -----
+  const replaceSourceWith = useCallback(
+    (name: string, channels: Float32Array[] | null, sr: number) => {
+      if (!channels || channels.length === 0) {
+        return;
+      }
+      stopVariationPlayback();
+      transportRef.current?.stop();
+      setIsPlaying(false);
+      onReplaceSource({ kind: "derived", name, channels, sampleRate: sr, origin });
+    },
+    [origin, onReplaceSource, stopVariationPlayback]
+  );
+
+  // ----- Status for the app: tab label and the guards around replacing work -----
+  const procLen = processedChannels?.[0]?.length ?? 0;
+  const loopTouched =
+    loopStart !== 0 ||
+    (procLen > 0 && loopEnd !== procLen) ||
+    fadeMs !== DEFAULT_LOOP_FADE_MS ||
+    fadeCurve !== DEFAULT_LOOP_CURVE ||
+    bakeMode !== "auto";
+  const shaperActive = isShaperActive(shaper);
+  const eqActive = isEqActive(eq);
+  const dirty =
+    source.kind === "derived" ||
+    shaperActive ||
+    eqActive ||
+    loopTouched ||
+    variations.length > 0;
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
+  useEffect(() => {
+    onStatusRef.current({ name: sourceName, dirty });
+  }, [sourceName, dirty]);
+
   // Keyboard shortcuts inside StudioView
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     const onKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName?.toLowerCase();
@@ -1530,14 +1495,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
         if (f.length > 0) {
           const first = f[0];
           const last = f[f.length - 1];
-          const active = document.activeElement;
-          if (!saveDlgRef.current.contains(active)) {
+          const activeEl = document.activeElement;
+          if (!saveDlgRef.current.contains(activeEl)) {
             e.preventDefault();
             (e.shiftKey ? last : first).focus();
-          } else if (e.shiftKey && active === first) {
+          } else if (e.shiftKey && activeEl === first) {
             e.preventDefault();
             last.focus();
-          } else if (!e.shiftKey && active === last) {
+          } else if (!e.shiftKey && activeEl === last) {
             e.preventDefault();
             first.focus();
           }
@@ -1558,11 +1523,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         if (saveDlg || !processedChannels || e.repeat) {
           return;
         }
-        if (hit) {
-          openSaveDialog();
-        } else {
-          openOutputDialog("download");
-        }
+        openOutputDialog(canSaveToLibrary ? "save" : "download");
       };
       if (
         (tag === "input" && !nonTextInput) ||
@@ -1580,7 +1541,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
         return;
       }
       // Custom toggles (<label role="checkbox"> etc.) blur on Escape like
-      // native ones, so the first Escape never leaves the Studio from them.
+      // native ones, so the first Escape never leaves the page from them.
       const toggleControl =
         nonTextInput ||
         Boolean(
@@ -1605,9 +1566,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
       }
 
       if (e.key === "Escape") {
-        e.preventDefault();
-        transportRef.current?.stop();
-        onBackToLibrary();
+        // Back from Loop or Variations to the edit page; nothing above the edit page.
+        if (page !== "edit") {
+          e.preventDefault();
+          goToPage("edit");
+        }
         return;
       }
 
@@ -1673,8 +1636,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
         return;
       }
 
-      // Markers exist only in Trim & Gain (crop handles) and Seamless Loop.
-      const hasMarkers = activeModule === "shaper" || activeModule === "loop";
+      // Markers exist only in Trim & Gain (crop handles) and on the loop page.
+      const hasMarkers = showCrop || onLoopPage;
       if (
         !hasMarkers &&
         ["BracketLeft", "BracketRight", "ArrowLeft", "ArrowRight"].includes(e.code)
@@ -1695,22 +1658,28 @@ export const StudioView: React.FC<StudioViewProps> = ({
           restartLoop();
           break;
         case "KeyF":
-          if (activeModule === "loop" && !e.ctrlKey && !e.metaKey) {
+          if (onLoopPage) {
             e.preventDefault();
             runLoopSearch();
           }
           break;
         case "KeyS":
-          if (activeModule === "loop") {
+          if (onLoopPage) {
             e.preventDefault();
             auditionSeam();
+          }
+          break;
+        case "KeyG":
+          if (page === "variations") {
+            e.preventDefault();
+            handleGenerateVariations();
           }
           break;
         case "BracketLeft":
           e.preventDefault();
           setActiveMarker("start");
           setStatusMsg(
-            activeModule === "shaper"
+            showCrop
               ? "Active handle: Crop IN — use ←/→ to nudge"
               : "Active marker: Loop Start (S) — use ←/→ to nudge"
           );
@@ -1719,7 +1688,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           e.preventDefault();
           setActiveMarker("end");
           setStatusMsg(
-            activeModule === "shaper"
+            showCrop
               ? "Active handle: Crop OUT — use ←/→ to nudge"
               : "Active marker: Loop End (E) — use ←/→ to nudge"
           );
@@ -1729,7 +1698,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
           e.preventDefault();
           const delta = (e.code === "ArrowRight" ? 1 : -1) * stepSamples;
           const m = markersRef.current;
-          if (activeModule === "shaper") {
+          if (showCrop) {
             const next =
               activeMarker === "start"
                 ? updateCropPoints(m.cropIn + delta, m.cropOut)
@@ -1749,64 +1718,51 @@ export const StudioView: React.FC<StudioViewProps> = ({
           break;
         }
         case "Digit1":
-          setActiveModule("shaper");
+          goToPage("edit");
+          setEditModule("shaper");
           break;
         case "Digit2":
-          setActiveModule("eq");
+          goToPage("edit");
+          setEditModule("eq");
           break;
         case "Digit3":
-          setActiveModule("loop");
+          goToPage("loop");
           break;
         case "Digit4":
-          setActiveModule("variations");
+          goToPage("variations");
           break;
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    active,
     processedChannels,
     sampleRate,
     togglePlay,
     restartLoop,
     runLoopSearch,
     auditionSeam,
-    activeModule,
+    handleGenerateVariations,
+    page,
+    showCrop,
+    onLoopPage,
+    goToPage,
     activeMarker,
-    loopStart,
-    loopEnd,
+    updateCropPoints,
     updateLoopPoints,
-    onBackToLibrary,
-    hit,
-    handleSaveToLibrary,
-    openSaveDialog,
+    canSaveToLibrary,
     openOutputDialog,
     saveDlg,
     outputBusy,
   ]);
 
-  const totalSamples = processedChannels?.[0]?.length ?? 0;
-  const dialogToLibrary = saveDlg === "save" || saveDlg === "save-takes";
-  const qualityChoices: { kind: "depth" | "bitrate"; values: number[] } =
-    BIT_DEPTHS[outputSpec.format]
-      ? { kind: "depth", values: BIT_DEPTHS[outputSpec.format] ?? [] }
-      : { kind: "bitrate", values: BITRATES[outputSpec.format] ?? [] };
-  const likedTakes = variations.filter((v) => v.liked).length;
-  const takesCount = likedTakes > 0 ? likedTakes : variations.length;
-  const takesSummary = `${takesCount} ${likedTakes > 0 ? "liked " : ""}take${
-    takesCount === 1 ? "" : "s"
-  } as ${describeSpec(outputSpec)}.`;
+  const totalSamples = procLen;
   const loopDurationS = Math.max(0, (loopEnd - loopStart) / sampleRate);
   const totalDurationS = Math.max(0, totalSamples / sampleRate);
 
   const loopMarkers = useMemo(() => {
-    if (activeModule === "shaper" && uncroppedChannels) {
-      const fiSamples = shaper.enabled
-        ? Math.round((shaper.fadeInMs / 1000) * sampleRate)
-        : 0;
-      const foSamples = shaper.enabled
-        ? Math.round((shaper.fadeOutMs / 1000) * sampleRate)
-        : 0;
+    if (showCrop && uncroppedChannels) {
       return {
         start: cropStartSamples,
         end: cropEndSamples,
@@ -1814,17 +1770,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
         fadeAtHead: false,
         startLabel: "IN",
         endLabel: "OUT",
-        fadeInSamples: fiSamples,
-        fadeOutSamples: foSamples,
+        fadeInSamples: Math.round((shaper.fadeInMs / 1000) * sampleRate),
+        fadeOutSamples: Math.round((shaper.fadeOutMs / 1000) * sampleRate),
         curve: shaper.fadeCurve,
-        silenceOutside: shaper.enabled,
+        silenceOutside: true,
       };
     }
-    if (processedChannels && (loopEnabled || activeModule === "loop")) {
+    if (processedChannels && onLoopPage) {
       return {
         start: loopStart,
         end: loopEnd,
-        fade: loopEnabled ? fadeSamples : 0,
+        fade: fadeSamples,
         fadeAtHead,
         startLabel: "S",
         endLabel: "E",
@@ -1834,9 +1790,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
     }
     return null;
   }, [
-    activeModule,
+    showCrop,
     uncroppedChannels,
-    shaper.enabled,
     shaper.fadeInMs,
     shaper.fadeOutMs,
     shaper.fadeCurve,
@@ -1844,7 +1799,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
     cropStartSamples,
     cropEndSamples,
     processedChannels,
-    loopEnabled,
+    onLoopPage,
     loopStart,
     loopEnd,
     fadeSamples,
@@ -1860,226 +1815,246 @@ export const StudioView: React.FC<StudioViewProps> = ({
       ? "Post-roll (after E)"
       : "Loop head (internal)";
 
-  const shaperActive = isShaperActive(shaper);
-  const eqActive = isEqActive(eq);
+  /** What the edit page changes, one line each, for the output dialog. */
+  const editIncluded = useMemo(() => {
+    const lines: string[] = [];
+    if (shaper.trimStartMs > 0 || shaper.trimEndMs > 0) {
+      lines.push(
+        `Trim ${(cropStartSamples / sampleRate).toFixed(2)}–${(
+          cropEndSamples / sampleRate
+        ).toFixed(2)} s`
+      );
+    }
+    if (shaper.fadeInMs > 0 || shaper.fadeOutMs > 0) {
+      lines.push(`Fades ${shaper.fadeInMs} / ${shaper.fadeOutMs} ms`);
+    }
+    if (Math.abs(shaper.gainDb) > 0.01) {
+      lines.push(
+        `Gain ${shaper.gainDb > 0 ? "+" : ""}${shaper.gainDb.toFixed(1)} dB`
+      );
+    }
+    if (shaper.normalizePeakDbfs !== null) {
+      lines.push(`Peak normalized to ${shaper.normalizePeakDbfs.toFixed(1)} dB`);
+    }
+    if (shaper.reverse) {
+      lines.push("Reversed");
+    }
+    if (shaper.dcOffsetRemove) {
+      lines.push("DC offset removed");
+    }
+    if (eqActive) {
+      lines.push("Tone & EQ");
+    }
+    return lines;
+  }, [shaper, cropStartSamples, cropEndSamples, sampleRate, eqActive]);
 
-  return (
+  const fromEdit = editIncluded.length > 0 ? "Edits from the edit page" : "The sound as loaded";
+  const dialogIncluded =
+    page === "edit"
+      ? editIncluded.length > 0
+        ? editIncluded
+        : ["The sound as loaded, no edits"]
+      : page === "loop"
+      ? [
+          fromEdit,
+          fadeMs > 0
+            ? `${Math.round(fadeMs)} ms ${CURVE_NAMES[fadeCurve]} crossfade baked in`
+            : "No crossfade",
+        ]
+      : [
+          fromEdit,
+          `${selectedTakes.length} selected take${selectedTakes.length === 1 ? "" : "s"}`,
+        ];
+
+  const pageTitle = page === "loop" ? "Loop" : "Variations";
+  const downloadLabel =
+    page === "variations"
+      ? `Download ${selectedTakes.length} file${selectedTakes.length === 1 ? "" : "s"}`
+      : "Download";
+  const outputReady =
+    page === "variations" ? selectedTakes.length > 0 : Boolean(outputChannels);
+
+  const dragChip = (
     <div
-      className="sfx-editor-shell"
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={(e) => {
-        e.preventDefault();
-        const f = e.dataTransfer?.files?.[0];
-        if (f) {
-          void loadLocalFile(f);
-        }
-      }}
+      draggable={outputReady}
+      onDragStart={handleDragOutStart}
+      className="sfx-drag-chip"
+      title="Drag into your DAW, video editor, or desktop to drop this page's output as WAV"
     >
-      {/* Studio header: where you are (row 1), what you can do with this sound (row 2) */}
+      <GripHorizontal size={14} />
+      <span>Drag WAV</span>
+    </div>
+  );
+
+  const outputButtons = (
+    <>
+      {canSaveToLibrary && (
+        <button
+          type="button"
+          disabled={!outputReady || outputBusy}
+          onClick={() => openOutputDialog("save")}
+          className="ds-btn ds-btn-secondary"
+          title="Save into a library folder and index it immediately (Ctrl+S)"
+        >
+          <Save size={14} />
+          {savingToLibrary || savingBatch ? "Saving…" : "Save to Library"}
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={!outputReady || outputBusy}
+        onClick={() => openOutputDialog("download")}
+        className="ds-btn ds-btn-primary"
+        title="Download this page's output, choosing name and format"
+      >
+        <Download size={14} />
+        {downloadLabel}
+      </button>
+    </>
+  );
+
+  const header =
+    page === "edit" ? (
       <header className="sfx-editor-header">
-        <div className="sfx-editor-topbar">
-          <div className="sfx-editor-topbar-left">
-            <button
-              type="button"
-              onClick={() => {
-                transportRef.current?.stop();
-                onBackToLibrary();
-              }}
-              className="ds-btn ds-btn-secondary"
-              title="Return to Library Search (Esc)"
-            >
-              <ArrowLeft size={14} />
-              Library
-            </button>
-
-            <div className="sfx-divider-v" />
-
-            <div className="sfx-editor-file-nav">
-              <button
-                type="button"
-                disabled={!hasPrev}
-                onClick={onPrevHit}
-                className="sfx-icon-btn"
-                title="Previous sound in search results"
-                aria-label="Previous sound"
-              >
-                <ChevronLeft size={15} />
-              </button>
-              <div className="sfx-editor-file-meta">
-                <span className="sfx-editor-filename" title={hit?.path || baseName}>
-                  {hit ? hit.filename : `${baseName}.wav`}
-                </span>
-                <span className="sfx-editor-filespecs ds-tnum">
-                  {totalSamples > 0
-                    ? `${
-                        processedChannels?.length ?? 1
-                      }ch · ${(sampleRate / 1000).toFixed(1)} kHz · ${totalDurationS.toFixed(
-                        2
-                      )}s`
-                    : "Loading…"}
-                </span>
-              </div>
-              <button
-                type="button"
-                disabled={!hasNext}
-                onClick={onNextHit}
-                className="sfx-icon-btn"
-                title="Next sound in search results"
-                aria-label="Next sound"
-              >
-                <ChevronRight size={15} />
-              </button>
-            </div>
-          </div>
-
-          {/* Module Switcher Tabs */}
-          <div className="sfx-editor-module-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeModule === "shaper"}
-              aria-label="Trim & Gain"
-              title="Trim & Gain"
-              onClick={() => setActiveModule("shaper")}
-              className={`sfx-module-tab ${
-                activeModule === "shaper" ? "active" : ""
-              }`}
-            >
-              <Sliders size={14} />
-              <span>Trim &amp; Gain</span>
-              {shaperActive && <span className="sfx-module-dot on" />}
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeModule === "eq"}
-              aria-label="Tone & EQ"
-              title="Tone & EQ"
-              onClick={() => setActiveModule("eq")}
-              className={`sfx-module-tab ${
-                activeModule === "eq" ? "active" : ""
-              }`}
-            >
-              <Activity size={14} />
-              <span>Tone &amp; EQ</span>
-              {eqActive && <span className="sfx-module-dot on" />}
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeModule === "loop"}
-              aria-label="Seamless Loop"
-              title="Seamless Loop"
-              onClick={() => setActiveModule("loop")}
-              className={`sfx-module-tab ${
-                activeModule === "loop" ? "active" : ""
-              }`}
-            >
-              <Repeat size={14} />
-              <span>Seamless Loop</span>
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeModule === "variations"}
-              aria-label="Variations"
-              title="Variations"
-              onClick={() => setActiveModule("variations")}
-              className={`sfx-module-tab ${
-                activeModule === "variations" ? "active" : ""
-              }`}
-            >
-              <Dices size={14} />
-              <span>Variations</span>
-              {variations.length > 0 && <span className="sfx-module-dot on" />}
-            </button>
-          </div>
-
-        </div>
-
         <div className="sfx-editor-toolbar">
           <div className="sfx-editor-toolbar-group">
+            <div className="sfx-editor-file-meta">
+              <span className="sfx-editor-filename" title={libHit?.path || sourceName}>
+                {sourceName}
+              </span>
+              <span className="sfx-editor-filespecs ds-tnum">
+                {totalSamples > 0
+                  ? `${processedChannels?.length ?? 1}ch · ${(sampleRate / 1000).toFixed(
+                      1
+                    )} kHz · ${totalDurationS.toFixed(2)}s`
+                  : decodeError
+                  ? "Could not load"
+                  : "Loading…"}
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="ds-btn ds-btn-ghost"
-              title="Open any local audio file into the editor"
+              title="Open an audio file from your computer"
             >
               <Upload size={14} />
               Open file
             </button>
-
+            {dragChip}
             <button
               type="button"
               disabled={!processedChannels}
               onClick={handleFindSimilarEdited}
               className="ds-btn ds-btn-ghost"
-              title="Search library for sounds acoustically similar to your edited audio"
+              title="Search the library for sounds like your edited audio"
             >
               <Sparkles size={14} />
-              Find Similar
+              Find similar
             </button>
-
-            {hit && (
+            {libHit && (
               <button
                 type="button"
-                onClick={() => revealInExplorer(hit.file_id).catch(() => {})}
+                onClick={() => revealInExplorer(libHit.file_id).catch(() => {})}
                 className="ds-btn ds-btn-ghost"
-                title="Reveal source file in Explorer"
+                title="Show the source file in Explorer"
               >
                 <FolderOpen size={14} />
                 Show in Explorer
               </button>
             )}
-
-            <div
-              draggable={Boolean(processedChannels)}
-              onDragStart={handleDragEditedStart}
-              className="sfx-drag-chip"
-              title="Drag this chip directly into your DAW, video editor, or desktop to drop the rendered WAV"
-            >
-              <GripHorizontal size={14} />
-              <span>Drag WAV</span>
-            </div>
           </div>
 
           <div className="sfx-editor-toolbar-group">
-
-            {hit && (
-              <button
-                type="button"
-                disabled={!processedChannels || outputBusy}
-                onClick={openSaveDialog}
-                className="ds-btn ds-btn-secondary"
-                title="Save into the library folder and index it immediately (Ctrl+S)"
-              >
-                <Save size={14} />
-                {savingToLibrary ? "Saving…" : "Save to Library"}
-              </button>
-            )}
-
+            <span className="ds-microlabel sfx-create-label">Create</span>
             <button
               type="button"
-              disabled={!processedChannels || outputBusy}
-              onClick={() => openOutputDialog("download")}
-              className="ds-btn ds-btn-primary"
-              title="Download the edited sound, choosing name and format"
+              disabled={!processedChannels}
+              onClick={() => goToPage("loop")}
+              className="ds-btn ds-btn-secondary"
+              aria-label="Create loop"
+              title="Make a seamless loop from the edited sound (3)"
             >
-              <Download size={14} />
-              Download
+              <Repeat size={14} />
+              Loop
+              <ArrowRight size={13} />
+              <kbd className="sfx-kbd">3</kbd>
             </button>
+            <button
+              type="button"
+              disabled={!processedChannels}
+              onClick={() => goToPage("variations")}
+              className="ds-btn ds-btn-secondary"
+              aria-label="Create variations"
+              title="Make round-robin takes from the edited sound (4)"
+            >
+              <Dices size={14} />
+              Variations
+              <ArrowRight size={13} />
+              <kbd className="sfx-kbd">4</kbd>
+            </button>
+            <div className="sfx-divider-v" />
+            {outputButtons}
           </div>
         </div>
       </header>
+    ) : (
+      <header className="sfx-editor-header">
+        <div className="sfx-editor-toolbar">
+          <div className="sfx-editor-toolbar-group">
+            <button
+              type="button"
+              onClick={() => goToPage("edit")}
+              className="ds-btn ds-btn-secondary"
+              aria-label="Back to edit"
+              title="Back to the edit page; your settings here are kept (Esc)"
+            >
+              <ArrowLeft size={14} />
+              Back to edit
+              <kbd className="sfx-kbd">Esc</kbd>
+            </button>
+            <div className="sfx-divider-v" />
+            <div className="sfx-editor-file-meta">
+              <span className="sfx-editor-filename">{pageTitle}</span>
+              <span className="sfx-editor-filespecs ds-tnum">
+                {`From ${sourceName}${editIncluded.length > 0 ? ", as edited" : ""} · ${totalDurationS.toFixed(
+                  2
+                )} s`}
+              </span>
+            </div>
+            {dragChip}
+          </div>
+          <div className="sfx-editor-toolbar-group">
+            {onLoopPage && (
+              <>
+                <button
+                  type="button"
+                  disabled={!processedChannels}
+                  onClick={() =>
+                    replaceSourceWith(`${baseName}.loop`, bakeLoopNow(), sampleRate)
+                  }
+                  className="ds-btn ds-btn-ghost"
+                  title="The loop becomes the file you edit. Your current edits, loop settings and takes are cleared. You can undo for a few seconds."
+                >
+                  <Replace size={14} />
+                  Replace source with loop
+                </button>
+                <div className="sfx-divider-v" />
+              </>
+            )}
+            {outputButtons}
+          </div>
+        </div>
+      </header>
+    );
 
+  const stage = (
+    <>
       {/* Main Waveform Stage */}
       <div className="sfx-editor-stage">
         {/* Header strip: marker readouts + zoom, off the canvas */}
         <div className="sfx-editor-stage-bar">
-          {activeModule === "shaper" ? (
+          {showCrop ? (
             <div className="sfx-editor-stage-hud-left">
               <span className="sfx-hud-pill start">
                 <span className="dot" />
@@ -2097,7 +2072,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               )}
             </div>
           ) : (
-            activeModule === "loop" && (
+            onLoopPage && (
               <div className="sfx-editor-stage-hud-left">
                 <span className="sfx-hud-pill start">
                   <span className="dot" />S <b>{(loopStart / sampleRate).toFixed(3)}s</b>
@@ -2108,7 +2083,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 <span className="sfx-hud-pill">
                   Length <b>{loopDurationS.toFixed(3)}s</b>
                 </span>
-                {loopEnabled && fadeMs > 0 && (
+                {fadeMs > 0 && (
                   <span className="sfx-hud-pill fade">
                     Crossfade <b>{Math.round(fadeMs)} ms</b> · {resolvedModeLabel}
                   </span>
@@ -2134,7 +2109,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             >
               <ZoomOut size={13} />
             </button>
-            {activeModule === "loop" && (
+            {onLoopPage && (
               <>
                 <button
                   type="button"
@@ -2180,14 +2155,12 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
           <EditorWaveform
             ref={waveRef}
-            channels={
-              activeModule === "shaper" ? uncroppedChannels : processedChannels
-            }
+            channels={showCrop ? uncroppedChannels : processedChannels}
             sampleRate={sampleRate}
             loop={loopMarkers}
             activeMarker={activeMarker}
             onLoopChange={(s, e) => {
-              if (activeModule === "shaper") {
+              if (showCrop) {
                 updateCropPoints(s, e);
               } else {
                 updateLoopPoints(s, e, snapZero);
@@ -2215,19 +2188,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
       {/* Studio Transport Deck */}
       <div className="sfx-editor-transport-bar">
         <div className="sfx-editor-transport-left">
-          {activeModule === "loop" && (
-            <button
-              type="button"
-              disabled={!processedChannels}
-              onClick={auditionSeam}
-              className="ds-btn ds-btn-ghost ds-btn-sm"
-              title="Jump 1.2s before the loop end to immediately audition the E → S seam transition (S)"
-            >
-              Test Seam
-            </button>
-          )}
-          {loopEnabled && activeModule === "loop" && (
+          {onLoopPage && (
             <>
+              <button
+                type="button"
+                disabled={!processedChannels}
+                onClick={auditionSeam}
+                className="ds-btn ds-btn-ghost ds-btn-sm"
+                title="Jump 1.2s before the loop end to immediately audition the E → S seam transition (S)"
+              >
+                Test Seam
+              </button>
               <span className="sfx-rack-hint">Preview</span>
               <div
                 className="sfx-pill-group"
@@ -2249,7 +2220,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   className={`sfx-choice-pill ${
                     auditionMode === "file" ? "active" : ""
                   }`}
-                  title="Preview the full processed file instead of just the loop region"
+                  title="Preview the whole edited sound instead of just the loop region"
                 >
                   File
                 </button>
@@ -2300,7 +2271,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
               {formatDuration(totalSamples, sampleRate)}
             </span>
           </div>
-
         </div>
 
         <div className="sfx-editor-transport-right">
@@ -2339,7 +2309,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
                   : "—"}
               </strong>
             </span>
-            {activeModule === "loop" && (
+            {onLoopPage && (
               <span title="Computed loop seam continuity score">
                 Seam{" "}
                 <strong
@@ -2359,1642 +2329,260 @@ export const StudioView: React.FC<StudioViewProps> = ({
           </div>
         </div>
       </div>
+    </>
+  );
 
-      {/* Modular Lower Control Rack */}
-      <div className="sfx-editor-rack">
-        {activeModule === "loop" && (
-          <div className="sfx-rack-grid">
-            {/* Column 1: Loop Boundaries & Crossfade */}
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Crossfade &amp; Seam Blend</span>
-                <label
-                  className="ds-switch-item"
-                  style={{ fontSize: "var(--font-size-xs)" }}
-                >
-                  <div
-                    className={`ds-switch-track ${loopEnabled ? "on" : ""}`}
-                    onClick={() => setLoopEnabled((v) => !v)}
-                  >
-                    <div className="ds-switch-thumb" />
-                  </div>
-                  <span
-                    style={{ color: "var(--text-secondary)" }}
-                    title="Loop the preview and bake the crossfade into the exported file"
-                  >
-                    Export as loop
+  const keyHints =
+    page === "edit"
+      ? [
+          { keys: "Space", label: "Preview" },
+          ...(showCrop
+            ? [
+                { keys: "[ ]", label: "Pick handle" },
+                { keys: "← →", label: "Nudge (Shift: 10 ms)" },
+              ]
+            : []),
+          { keys: "1 2", label: "Edit modules" },
+          { keys: "3 4", label: "Loop / Variations" },
+          { keys: "Ctrl+S", label: "Save" },
+          { keys: "Alt+1", label: "Library" },
+          { keys: "Scroll", label: "Zoom" },
+        ]
+      : page === "loop"
+      ? [
+          { keys: "Space", label: "Preview" },
+          { keys: "F", label: "Find loops" },
+          { keys: "S", label: "Test seam" },
+          { keys: "[ ]", label: "Pick marker" },
+          { keys: "← →", label: "Nudge (Shift: 10 ms)" },
+          { keys: "Esc", label: "Back to edit" },
+          { keys: "Ctrl+S", label: "Save" },
+          { keys: "Scroll", label: "Zoom" },
+        ]
+      : [
+          { keys: "Space", label: "Preview" },
+          { keys: "G", label: "Generate" },
+          { keys: "Esc", label: "Back to edit" },
+          { keys: "Ctrl+S", label: "Save" },
+        ];
+
+  return (
+    <div
+      className="sfx-editor-shell"
+      data-page={page}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const f = e.dataTransfer?.files?.[0];
+        if (f) {
+          onOpenFile(f);
+        }
+      }}
+    >
+      {header}
+
+      {page !== "variations" && stage}
+
+      {page === "edit" && (
+        <div className="sfx-editor-module-row">
+          <div className="sfx-editor-module-tabs" role="tablist" aria-label="Edit modules">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={editModule === "shaper"}
+              aria-label="Trim & Gain"
+              title="Trim & Gain (1)"
+              onClick={() => setEditModule("shaper")}
+              className={`sfx-module-tab ${editModule === "shaper" ? "active" : ""}`}
+            >
+              <kbd className="sfx-kbd">1</kbd>
+              <Sliders size={14} />
+              <span>Trim &amp; Gain</span>
+              {shaperActive && <span className="sfx-module-dot on" />}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={editModule === "eq"}
+              aria-label="Tone & EQ"
+              title="Tone & EQ (2)"
+              onClick={() => setEditModule("eq")}
+              className={`sfx-module-tab ${editModule === "eq" ? "active" : ""}`}
+            >
+              <kbd className="sfx-kbd">2</kbd>
+              <Activity size={14} />
+              <span>Tone &amp; EQ</span>
+              {eqActive && <span className="sfx-module-dot on" />}
+            </button>
+          </div>
+          <button
+            type="button"
+            disabled={editModule === "shaper" ? !shaperActive : !eqActive}
+            onClick={() =>
+              editModule === "shaper"
+                ? setShaper(DEFAULT_SHAPER_SPEC)
+                : setEq(DEFAULT_EQ_SPEC)
+            }
+            className="ds-btn ds-btn-ghost ds-btn-sm"
+          >
+            <RotateCcw size={12} />
+            {editModule === "shaper" ? "Reset Trim & Gain" : "Reset Tone & EQ"}
+          </button>
+        </div>
+      )}
+
+      <div className={`sfx-editor-rack ${page === "variations" ? "sfx-variations-page" : ""}`}>
+        {page === "edit" && editModule === "shaper" && (
+          <TrimGainPanels
+            shaper={shaper}
+            setShaper={setShaper}
+            rawTotalSamples={rawTotalSamples}
+            sampleRate={sampleRate}
+            totalDurationS={totalDurationS}
+            canAutoTrim={Boolean(sourceChannels)}
+            onAutoTrim={handleAutoTrimSilence}
+          />
+        )}
+
+        {page === "edit" && editModule === "eq" && (
+          <ToneEqPanels eq={eq} setEq={setEq} sampleRate={sampleRate} />
+        )}
+
+        {onLoopPage && (
+          <LoopPanels
+            sampleRate={sampleRate}
+            totalDurationS={totalDurationS}
+            loopDurationS={loopDurationS}
+            fadeMs={fadeMs}
+            setFadeMs={setFadeMs}
+            fadeCurve={fadeCurve}
+            setFadeCurve={setFadeCurve}
+            bakeMode={bakeMode}
+            setBakeMode={setBakeMode}
+            snapZero={snapZero}
+            onToggleSnap={() => {
+              const next = !snapZero;
+              setSnapZero(next);
+              if (next) {
+                updateLoopPoints(loopStart, loopEnd, true);
+              }
+            }}
+            onResetLoop={resetLoop}
+            candidates={candidates}
+            candIndex={candIndex}
+            onApplyCandidate={(idx) => applyCandidate(idx)}
+            onClearCandidates={() => {
+              setCandidates([]);
+              setCandIndex(-1);
+              setStatusMsg("Cleared loop suggestions");
+            }}
+            searching={searching}
+            canSearch={Boolean(processedChannels)}
+            onFindLoops={runLoopSearch}
+            searchModePref={searchModePref}
+            setSearchModePref={setSearchModePref}
+            minLoopSec={minLoopSec}
+            setMinLoopSec={setMinLoopSec}
+            searchWindowMs={searchWindowMs}
+            setSearchWindowMs={setSearchWindowMs}
+            bakedChannels={bakedChannels}
+            fadeSamples={fadeSamples}
+          />
+        )}
+
+        {page === "variations" && (
+          <>
+            <div className="sfx-var-top">
+              <section className="sfx-rack-card sfx-var-source">
+                <div className="sfx-rack-card-head">
+                  <span className="ds-panel-title">
+                    Source{editIncluded.length > 0 ? " · edited" : ""}
                   </span>
-                </label>
-              </div>
-
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Crossfade (ms)</label>
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Crossfade (ms)"
-                      min={0}
-                      max={Math.min(
-                        5000,
-                        Math.max(100, Math.floor(loopDurationS * 500))
-                      )}
-                      step={5}
-                      value={fadeMs}
-                      onChange={(e) => setFadeMs(Number(e.target.value))}
-                    />
-                    <input
-                      aria-label="Crossfade (ms) value"
-                      type="number"
-                      min={0}
-                      max={10000}
-                      step={10}
-                      value={Math.round(fadeMs)}
-                      onChange={(e) =>
-                        setFadeMs(Math.max(0, Number(e.target.value) || 0))
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
+                  <span className="sfx-rack-hint ds-tnum">{totalDurationS.toFixed(2)} s</span>
                 </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Fade curve</label>
-                  <div className="sfx-pill-group" role="group" aria-label="Fade curve">
-                    {(
-                      [
-                        ["equal-power", "Equal Power"],
-                        ["cosine", "Cosine"],
-                        ["linear", "Linear"],
-                      ] as const
-                    ).map(([val, label]) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setFadeCurve(val)}
-                        className={`sfx-choice-pill ${
-                          fadeCurve === val ? "active" : ""
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Blend placement"
-                    tip="Where the join material is taken from. Auto picks per candidate; Pre-roll borrows audio just before loop end, Post-roll just after loop start, Internal crossfades inside the region." />
-                  <div className="sfx-pill-group" role="group" aria-label="Blend placement">
-                    {(
-                      [
-                        ["auto", "Auto"],
-                        ["pre", "Pre-roll"],
-                        ["post", "Post-roll"],
-                        ["head", "Internal"],
-                      ] as const
-                    ).map(([val, label]) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setBakeMode(val)}
-                        className={`sfx-choice-pill ${
-                          bakeMode === val ? "active" : ""
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Zero-crossing"
-                    tip="Snapping markers to a rising zero crossing is the safest place for a click-free loop join." />
-                  <label
-role="checkbox" aria-checked={snapZero} tabIndex={0}
-                    className="ds-check"
-                    onKeyDown={(e) => {
-                      if (e.key === " " || e.key === "Enter") {
-                        e.preventDefault();
-                        e.currentTarget.click();
-                      }
-                    }}
-                    onClick={() => {
-                      const next = !snapZero;
-                      setSnapZero(next);
-                      if (next) {
-                        updateLoopPoints(loopStart, loopEnd, true);
-                      }
-                    }}
-                  >
-                    <div className={`ds-checkbox ${snapZero ? "on" : ""}`}>
-                      {snapZero && <div className="ds-checkbox-inner" />}
-                    </div>
-                    <span
-                      className="ds-check-label"
-                      style={{ fontSize: "var(--font-size-xs)" }}
-                    >
-                      Snap markers to rising zero crossings
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            {/* Column 2: Auto-Loop Detection & Candidate Ranking */}
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Loop Finder</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  {candidates.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCandidates([]);
-                        setCandIndex(-1);
-                        setStatusMsg("Cleared loop suggestions");
-                      }}
-                      className="ds-btn ds-btn-ghost ds-btn-sm"
-                      title="Clear loop suggestions"
-                    >
-                      Clear
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    disabled={!processedChannels || searching}
-                    onClick={runLoopSearch}
-                    className="ds-btn ds-btn-primary ds-btn-sm sfx-find-loops-btn"
-                    title="Scan audio for seamless loop points (F)"
-                  >
-                    <Wand2 size={13} />
-                    {searching ? "Scanning…" : "Find Loops"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                      label="Search strategy"
-                      tip="How candidates are found. Auto tries both; Best Pairs matches loop start and end independently; Match End pins the loop end to the file end." />
-                  <div className="sfx-pill-group" role="group" aria-label="Search strategy">
-                    {(
-                      [
-                        ["auto", "Auto"],
-                        ["pairs", "Best Pairs (S & E)"],
-                        ["fixed-end", "Match End (E)"],
-                      ] as const
-                    ).map(([val, label]) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => setSearchModePref(val)}
-                        className={`sfx-choice-pill ${
-                          searchModePref === val ? "active" : ""
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Min loop length (s)"
-                    tip="Rejects candidates shorter than this." />
-                  <div className="sfx-rack-control-inline">
-                    <input
-                      aria-label="Min loop length (s)"
-                      type="number"
-                      min={0.1}
-                      max={Math.max(1, totalDurationS)}
-                      step={0.5}
-                      value={minLoopSec}
-                      onChange={(e) =>
-                        setMinLoopSec(
-                          Math.max(0.1, Number(e.target.value) || 0.5)
-                        )
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Search window (ms)"
-                    tip="How far the scanner searches around each promising point." />
-                  <div className="sfx-rack-control-inline">
-                    <input
-                      aria-label="Window (ms)"
-                      type="number"
-                      min={50}
-                      max={4000}
-                      step={50}
-                      value={searchWindowMs}
-                      onChange={(e) =>
-                        setSearchWindowMs(
-                          Math.max(50, Number(e.target.value) || 400)
-                        )
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
-                </div>
-
-                {/* Candidate chips */}
-                <div className="sfx-candidate-grid">
-                  {candidates.length === 0 ? (
-                    <div className="sfx-candidate-empty">
-                      Click <strong>Find Loops</strong> (or press{" "}
-                      <kbd className="sfx-kbd">F</kbd>) to scan for phase-aligned
-                      loop regions.
-                    </div>
-                  ) : (
-                    candidates.map((c, idx) => {
-                      const pct = Math.round(c.score * 100);
-                      const lenS = ((c.end - c.start) / sampleRate).toFixed(2);
-                      return (
-                        <button
-                          key={`${c.start}-${c.end}-${idx}`}
-                          type="button"
-                          onClick={() => applyCandidate(idx)}
-                          className={`sfx-candidate-chip ds-tnum ${
-                            idx === candIndex ? "active" : ""
-                          }`}
-                          title={`Start: ${(c.start / sampleRate).toFixed(
-                            2
-                          )}s → End: ${(c.end / sampleRate).toFixed(2)}s`}
-                        >
-                          <span className="rank">#{idx + 1}</span>
-                          <span className="score">{pct}%</span>
-                          <span className="dur">{lenS}s</span>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            </section>
-
-            {/* Column 3: Real-Time Seam Phase Scope */}
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Seam Continuity Scope</span>
-              </div>
-              <SeamScope
-                bakedChannels={bakedChannels}
-                sampleRate={sampleRate}
-                fadeSamples={loopEnabled ? fadeSamples : 0}
-              />
-              <div className="sfx-seam-caption">
-                <span>
-                  The last 25 ms of the loop (<strong style={{ color: "var(--danger-400)" }}>Tail</strong>) running into its first 25 ms (<strong style={{ color: "var(--success-500)" }}>Head</strong>).
-                </span>
-              </div>
-            </section>
-          </div>
-        )}
-
-        {activeModule === "shaper" && (
-          <div className="sfx-rack-grid">
-            {/* Column 1: Crop / Trim Region */}
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Trim</span>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <button
-                    type="button"
-                    disabled={!sourceChannels}
-                    onClick={handleAutoTrimSilence}
-                    className="ds-btn ds-btn-secondary ds-btn-sm"
-                    title="Automatically detect and crop leading and trailing silence below -50 dBFS"
-                  >
-                    <Wand2 size={12} />
-                    Auto-Trim Silence
-                  </button>
-                  <label
-                    className="ds-switch-item"
-                    style={{ fontSize: "var(--font-size-xs)" }}
-                  >
-                    <div
-                      className={`ds-switch-track ${
-                        shaper.enabled ? "on" : ""
-                      }`}
-                      onClick={() =>
-                        setShaper((s) => ({ ...s, enabled: !s.enabled }))
-                      }
-                    >
-                      <div className="ds-switch-thumb" />
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Trim Start (ms)"
-                    tip="Crops audio from the beginning of the file. You can also drag the green IN handle directly on the waveform."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Trim Start (ms)"
-                      min={0}
-                      max={Math.max(
-                        100,
-                        Math.floor(
-                          (rawTotalSamples / sampleRate) * 1000 -
-                            shaper.trimEndMs -
-                            20
-                        )
-                      )}
-                      step={5}
-                      value={shaper.trimStartMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          trimStartMs: Math.max(0, Number(e.target.value)),
-                        }))
-                      }
-                    />
-                    <input
-                      aria-label="Trim Start (ms) value"
-                      type="number"
-                      min={0}
-                      max={Math.floor((rawTotalSamples / sampleRate) * 1000)}
-                      step={10}
-                      value={shaper.trimStartMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          trimStartMs: Math.max(0, Number(e.target.value) || 0),
-                        }))
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Trim End (ms)"
-                    tip="Crops audio from the end of the file. You can also drag the red OUT handle directly on the waveform."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Trim End (ms)"
-                      min={0}
-                      max={Math.max(
-                        100,
-                        Math.floor(
-                          (rawTotalSamples / sampleRate) * 1000 -
-                            shaper.trimStartMs -
-                            20
-                        )
-                      )}
-                      step={5}
-                      value={shaper.trimEndMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          trimEndMs: Math.max(0, Number(e.target.value)),
-                        }))
-                      }
-                    />
-                    <input
-                      aria-label="Trim End (ms) value"
-                      type="number"
-                      min={0}
-                      max={Math.floor((rawTotalSamples / sampleRate) * 1000)}
-                      step={10}
-                      value={shaper.trimEndMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          trimEndMs: Math.max(0, Number(e.target.value) || 0),
-                        }))
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
-                </div>
-
-              </div>
-            </section>
-
-            {/* Column 2: Boundary Fades */}
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Fade In &amp; Fade Out</span>
-                <button
-                  type="button"
-                  onClick={() => setShaper(DEFAULT_SHAPER_SPEC)}
-                  className="ds-btn ds-btn-ghost ds-btn-sm"
-                  title="Reset all crop, fade, and gain settings"
-                >
-                  Reset All
-                </button>
-              </div>
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Fade-In (ms)"
-                    tip="Smoothly ramps volume up from silence at the start of the cropped region (shown in amber on the waveform)."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Fade-In (ms)"
-                      min={0}
-                      max={Math.min(
-                        10000,
-                        Math.max(100, Math.floor(totalDurationS * 500))
-                      )}
-                      step={5}
-                      value={shaper.fadeInMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          fadeInMs: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <input
-                      aria-label="Fade-In (ms) value"
-                      type="number"
-                      min={0}
-                      max={10000}
-                      step={10}
-                      value={shaper.fadeInMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          fadeInMs: Math.max(0, Number(e.target.value) || 0),
-                        }))
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Fade-Out (ms)"
-                    tip="Smoothly ramps volume down to silence at the end of the cropped region (shown in amber on the waveform)."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Fade-Out (ms)"
-                      min={0}
-                      max={Math.min(
-                        10000,
-                        Math.max(100, Math.floor(totalDurationS * 500))
-                      )}
-                      step={5}
-                      value={shaper.fadeOutMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          fadeOutMs: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <input
-                      aria-label="Fade-Out (ms) value"
-                      type="number"
-                      min={0}
-                      max={10000}
-                      step={10}
-                      value={shaper.fadeOutMs}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          fadeOutMs: Math.max(0, Number(e.target.value) || 0),
-                        }))
-                      }
-                      className="sfx-num-input ds-tnum"
-                    />
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Fade Curve"
-                    tip="Shape of the fade-in and fade-out slopes."
-                  />
-                  <div className="sfx-pill-group" role="group" aria-label="Fade Curve">
-                    {(
-                      [
-                        ["cosine", "S-Curve"],
-                        ["equal-power", "Fast Attack"],
-                        ["linear", "Linear"],
-                      ] as const
-                    ).map(([val, label]) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() =>
-                          setShaper((s) => ({
-                            ...s,
-                            enabled: true,
-                            fadeCurve: val,
-                          }))
-                        }
-                        className={`sfx-choice-pill ${
-                          shaper.fadeCurve === val ? "active" : ""
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Column 3: Gain, Normalization & Polarity */}
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Gain &amp; Normalization</span>
-              </div>
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Output Gain (dB)"
-                    tip="Boost or attenuate overall volume in decibels."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Output Gain (dB)"
-                      min={-24}
-                      max={24}
-                      step={0.5}
-                      value={shaper.gainDb}
-                      onChange={(e) =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          gainDb: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {shaper.gainDb >= 0
-                        ? `+${shaper.gainDb.toFixed(1)}`
-                        : shaper.gainDb.toFixed(1)}{" "}
-                      dB
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Peak Normalize"
-                    tip="Automatically scales the sound so its loudest peak hits the exact target ceiling."
-                  />
-                  <div className="sfx-pill-group" role="group" aria-label="Peak Normalize">
-                    {(
-                      [
-                        [null, "Off"],
-                        [-0.1, "-0.1 dB"],
-                        [-1.0, "-1.0 dB"],
-                        [-3.0, "-3.0 dB"],
-                        [-6.0, "-6.0 dB"],
-                      ] as const
-                    ).map(([val, label]) => (
-                      <button
-                        key={String(val)}
-                        type="button"
-                        onClick={() =>
-                          setShaper((s) => ({
-                            ...s,
-                            enabled: true,
-                            normalizePeakDbfs: val,
-                          }))
-                        }
-                        className={`sfx-choice-pill ${
-                          shaper.normalizePeakDbfs === val ? "active" : ""
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Phase &amp; Direction"
-                    tip="Reverse plays the cropped region backwards; Remove DC Offset centers the waveform on zero."
-                  />
-                  <div className="sfx-pill-group" role="group" aria-label="Phase & Direction">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          reverse: !s.reverse,
-                        }))
-                      }
-                      className={`sfx-choice-pill ${
-                        shaper.reverse ? "active" : ""
-                      }`}
-                    >
-                      Reverse Audio
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShaper((s) => ({
-                          ...s,
-                          enabled: true,
-                          dcOffsetRemove: !s.dcOffsetRemove,
-                        }))
-                      }
-                      className={`sfx-choice-pill ${
-                        shaper.dcOffsetRemove ? "active" : ""
-                      }`}
-                    >
-                      Remove DC Offset
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-          </div>
-        )}
-
-        {activeModule === "eq" && (
-          <div className="sfx-rack-grid">
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">High / Low Cut Filters</span>
-              </div>
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">High-Pass (Hz)</label>
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="High-Pass (Hz)"
-                      min={20}
-                      max={1200}
-                      step={5}
-                      value={eq.highpassHz}
-                      onChange={(e) =>
-                        setEq((s) => ({
-                          ...s,
-                          highpassHz: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {eq.highpassHz <= 22 ? "Off" : `${eq.highpassHz} Hz`}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Low-Pass (Hz)</label>
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Low-Pass (Hz)"
-                      min={400}
-                      max={20000}
-                      step={100}
-                      value={eq.lowpassHz}
-                      onChange={(e) =>
-                        setEq((s) => ({
-                          ...s,
-                          lowpassHz: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {eq.lowpassHz >= 19500
-                        ? "Off"
-                        : `${(eq.lowpassHz / 1000).toFixed(1)} kHz`}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Quick Presets</label>
-                  <div className="sfx-pill-group" role="group" aria-label="Quick Presets">
-                    <button
-                      type="button"
-                      onClick={() => setEq(DEFAULT_EQ_SPEC)}
-                      className="sfx-choice-pill"
-                    >
-                      Flat
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEq({
-                          ...DEFAULT_EQ_SPEC,
-                          highpassHz: 110,
-                          lowGainDb: -3,
-                        })
-                      }
-                      className="sfx-choice-pill"
-                    >
-                      De-Rumble
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEq({
-                          ...DEFAULT_EQ_SPEC,
-                          highpassHz: 60,
-                          lowpassHz: 2400,
-                          highGainDb: -6,
-                        })
-                      }
-                      className="sfx-choice-pill"
-                    >
-                      Warm Ambience
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEq({
-                          ...DEFAULT_EQ_SPEC,
-                          highpassHz: 420,
-                          lowpassHz: 3400,
-                          midGainDb: 6,
-                          midFreqHz: 1400,
-                          midQ: 1.8,
-                        })
-                      }
-                      className="sfx-choice-pill"
-                    >
-                      Radio Comms
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">3-Band Tone</span>
-                <button
-                  type="button"
-                  onClick={() => setEq(DEFAULT_EQ_SPEC)}
-                  className="ds-btn ds-btn-ghost ds-btn-sm"
-                >
-                  Reset EQ
-                </button>
-              </div>
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">Low Shelf (120Hz)</label>
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Low Shelf (120Hz)"
-                      min={-15}
-                      max={15}
-                      step={0.5}
-                      value={eq.lowGainDb}
-                      onChange={(e) =>
-                        setEq((s) => ({
-                          ...s,
-                          lowGainDb: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {eq.lowGainDb >= 0
-                        ? `+${eq.lowGainDb.toFixed(1)}`
-                        : eq.lowGainDb.toFixed(1)}{" "}
-                      dB
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">
-                    Mid Peak ({eq.midFreqHz}Hz)
-                  </label>
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label={`Mid Peak (${eq.midFreqHz}Hz)`}
-                      min={-15}
-                      max={15}
-                      step={0.5}
-                      value={eq.midGainDb}
-                      onChange={(e) =>
-                        setEq((s) => ({
-                          ...s,
-                          midGainDb: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {eq.midGainDb >= 0
-                        ? `+${eq.midGainDb.toFixed(1)}`
-                        : eq.midGainDb.toFixed(1)}{" "}
-                      dB
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label className="sfx-rack-label">High Shelf (4.5k)</label>
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="High Shelf (4.5k)"
-                      min={-15}
-                      max={15}
-                      step={0.5}
-                      value={eq.highGainDb}
-                      onChange={(e) =>
-                        setEq((s) => ({
-                          ...s,
-                          highGainDb: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {eq.highGainDb >= 0
-                        ? `+${eq.highGainDb.toFixed(1)}`
-                        : eq.highGainDb.toFixed(1)}{" "}
-                      dB
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">EQ Frequency Response</span>
-                <span className="sfx-rack-hint">20 Hz – 20 kHz</span>
-              </div>
-              <EqResponseGraph spec={eq} sampleRate={sampleRate} />
-            </section>
-          </div>
-        )}
-
-        {activeModule === "variations" && (
-          <div className="sfx-rack-grid sfx-rack-grid-variations">
-            {/* Column 1: Pitch, Drift & Volume */}
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Pitch &amp; Movement</span>
-                <div className="sfx-pill-group" role="group" aria-label="High Shelf (4.5k)">
-                  {(
-                    [
-                      ["foley", "Foley"],
-                      ["melodic", "Melodic"],
-                    ] as const
-                  ).map(([m, label]) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setVarSpec((s) => ({ ...s, mode: m }))}
-                      className={`sfx-choice-pill ${
-                        varSpec.mode === m ? "active" : ""
-                      }`}
-                      title={
-                        m === "foley"
-                          ? "Foley mode: continuous pitch shifts and organic internal movement"
-                          : "Melodic mode: keeps takes in key at low settings, or snaps to musical scale steps at high settings"
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Pitch Shift"
-                    tip="Shifts the overall pitch of each take up or down (evenly spread across your takes so no two sound identical). Great for footsteps, impacts, and weapons."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Pitch Shift"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={varSpec.pitchShift}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          pitchShift: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {varSpec.pitchShift}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Pitch Drift"
-                    tip="Bends pitch and speed dynamically over time along a smooth curve (amber line) without changing the total length of the sound. Ideal for whooshes, creaks, vocals, and textures."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Pitch Drift"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={varSpec.driftAmount}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          driftAmount: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {varSpec.driftAmount}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Volume Swell"
-                    tip="Varies the loudness contour over time (teal line) as well as the overall hit strength of each take."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Volume Swell"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={varSpec.volumeAmount}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          volumeAmount: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {varSpec.volumeAmount}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Curve Complexity"
-                    tip="Number of random inflection points along the Pitch Drift and Volume Swell curves (2 = slow gentle bend, 16 = fast wobbly movement)."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Curve Complexity"
-                      min={2}
-                      max={16}
-                      step={1}
-                      value={varSpec.controlPoints}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          controlPoints: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {varSpec.controlPoints} pts
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label
-role="checkbox" aria-checked={varSpec.linkPitchAndVolume} tabIndex={0}
-                    className="ds-check"
-                    onKeyDown={(e) => {
-                      if (e.key === " " || e.key === "Enter") {
-                        e.preventDefault();
-                        e.currentTarget.click();
-                      }
-                    }}
-                    onClick={() =>
-                      setVarSpec((s) => ({
-                        ...s,
-                        linkPitchAndVolume: !s.linkPitchAndVolume,
-                      }))
-                    }
-                  >
-                    <div
-                      className={`ds-checkbox ${
-                        varSpec.linkPitchAndVolume ? "on" : ""
-                      }`}
-                    >
-                      {varSpec.linkPitchAndVolume && (
-                        <div className="ds-checkbox-inner" />
-                      )}
-                    </div>
-                    <span
-                      className="ds-check-label"
-                      style={{ fontSize: "var(--font-size-xs)" }}
-                    >
-                      Link pitch &amp; volume movement
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            {/* Column 2: Tone, Protection & Character */}
-            <section className="sfx-rack-card">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">
-                  Tone, Timing &amp; Protection
-                </span>
-                <div className="sfx-rack-control-inline" style={{ flex: "none" }}>
-                  <span className="sfx-rack-hint">Takes</span>
-                  <input
-                      aria-label="Take count"
-                    type="number"
-                    min={1}
-                    max={12}
-                    step={1}
-                    value={varSpec.count}
-                    onChange={(e) =>
-                      setVarSpec((s) => ({
-                        ...s,
-                        count: Math.max(
-                          1,
-                          Math.min(12, Number(e.target.value) || 6)
-                        ),
-                      }))
-                    }
-                    className="sfx-num-input ds-tnum"
-                    style={{ width: 56 }}
+                <div className="sfx-var-source-wave">
+                  <EditorWaveform
+                    ref={waveRef}
+                    channels={processedChannels}
+                    sampleRate={sampleRate}
+                    loop={null}
+                    activeMarker={activeMarker}
+                    onLoopChange={() => {}}
+                    onSeek={seekToSample}
                   />
                 </div>
-              </div>
-
-              <div className="sfx-rack-fields">
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Tone Variation"
-                    tip="Controls how much EQ color (brightness, warmth, and resonant body) varies per take. Harder hits are naturally brighter; set to 0% for zero EQ change."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Tone Variation"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={varSpec.toneSpread}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          toneSpread: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {varSpec.toneSpread}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Attack Punch"
-                    tip="Subtly varies the crispness and snap of the first 30ms of each take so rapid-fire footsteps or weapon hits never sound robotic ('machine-gun effect')."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Attack Punch"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={varSpec.attackSnap}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          attackSnap: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {varSpec.attackSnap}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Length Variation"
-                    tip="How much faster or slower (shorter or longer) each take is allowed to be. Set to 0% when variations must stay locked to an exact animation length."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Length Variation"
-                      min={0}
-                      max={25}
-                      step={1}
-                      value={varSpec.lengthSpreadPct}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          lengthSpreadPct: Number(e.target.value),
-                        }))
-                      }
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      ±{varSpec.lengthSpreadPct}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <LabelWithTip
-                    label="Protect Start / End"
-                    tip="Fades the internal Pitch Drift and Volume Swell in at the start and out at the end so your initial impact stays untouched and your tail/loop end stays anchored."
-                  />
-                  <div className="sfx-rack-control-inline">
-                    <DsRange aria-label="Protect Start"
-                      min={0}
-                      max={45}
-                      step={1}
-                      value={varSpec.protectStartPct}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          protectStartPct: Number(e.target.value),
-                        }))
-                      }
-                      title={`Protect Start: ${varSpec.protectStartPct}%`}
-                    />
-                    <DsRange aria-label="Protect End"
-                      min={0}
-                      max={45}
-                      step={1}
-                      value={varSpec.protectEndPct}
-                      onChange={(e) =>
-                        setVarSpec((s) => ({
-                          ...s,
-                          protectEndPct: Number(e.target.value),
-                        }))
-                      }
-                      title={`Protect End: ${varSpec.protectEndPct}%`}
-                    />
-                    <span className="sfx-val-readout ds-tnum">
-                      {varSpec.protectStartPct}% / {varSpec.protectEndPct}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="sfx-rack-row">
-                  <label
-role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
-                    className="ds-check"
-                    onKeyDown={(e) => {
-                      if (e.key === " " || e.key === "Enter") {
-                        e.preventDefault();
-                        e.currentTarget.click();
-                      }
-                    }}
-                    onClick={() =>
-                      setVarSpec((s) => ({
-                        ...s,
-                        preserveFormants: !s.preserveFormants,
-                      }))
-                    }
-                  >
-                    <div
-                      className={`ds-checkbox ${
-                        varSpec.preserveFormants ? "on" : ""
-                      }`}
-                    >
-                      {varSpec.preserveFormants && (
-                        <div className="ds-checkbox-inner" />
-                      )}
-                    </div>
-                    <span
-                      className="ds-check-label"
-                      style={{ fontSize: "var(--font-size-xs)" }}
-                    >
-                      Preserve natural body when pitching (Formants)
-                    </span>
-                  </label>
-                </div>
-              </div>
-            </section>
-
-            {/* Column 3: Generated Round-Robin Takes & Curation */}
-            <section className="sfx-rack-card sfx-rack-card-wide">
-              <div className="sfx-rack-card-head">
-                <span className="ds-panel-title">Round-Robin Takes</span>
-
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div className="sfx-var-source-transport">
                   <button
                     type="button"
                     disabled={!processedChannels}
-                    onClick={handleGenerateVariations}
-                    className="ds-btn ds-btn-primary ds-btn-sm"
+                    onClick={togglePlay}
+                    className={`sfx-tp-play-btn ${isPlaying ? "playing" : ""}`}
+                    title="Play / Pause the source (Space)"
+                    aria-label="Play or pause preview"
                   >
-                    <Dices size={13} />
-                    Generate
+                    {isPlaying ? <Pause size={18} /> : <Play size={18} />}
                   </button>
-
-
-                  {variations.length > 0 && hit && (
-                    <button
-                      type="button"
-                      disabled={savingBatch}
-                      onClick={() => openOutputDialog("save-takes")}
-                      className="ds-btn ds-btn-secondary ds-btn-sm"
-                      title="Save liked variations (or all if none starred) into the library folder and index immediately"
-                    >
-                      <Save size={13} />
-                      {savingBatch
-                        ? "Saving…"
-                        : variations.some((v) => v.liked)
-                        ? `Save Liked (${
-                            variations.filter((v) => v.liked).length
-                          })`
-                        : "Save All"}
-                    </button>
-                  )}
-
-                  {variations.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => openOutputDialog("download-takes")}
-                      disabled={savingBatch}
-                      className="ds-btn ds-btn-ghost ds-btn-sm"
-                      title="Download liked variations (or all if none starred), choosing the format"
-                    >
-                      <Download size={13} />
-                      Download
-                    </button>
-                  )}
+                  <div className="sfx-tp-time ds-tnum">
+                    <span>{timePosText}</span>
+                    <span className="sep"> / </span>
+                    <span className="tot">{formatDuration(totalSamples, sampleRate)}</span>
+                  </div>
                 </div>
-              </div>
-
-              {variations.length === 0 ? (
-                <div className="sfx-candidate-empty">
-                  Set the variation amounts, then generate takes.
-                </div>
-              ) : (
-                <div ref={takesGridRef} className="sfx-var-takes-grid">
-                  {variations.map((v, idx) => {
-                    const isAct = idx === activeVarIdx;
-                    const isTakePlaying = idx === playingVarIdx;
-                    return (
-                      <div
-                        key={v.id}
-                        draggable
-                        onDragStart={(e) => handleVariationDragStart(e, v)}
-                        onClick={() => auditionVariation(v, idx)}
-                        className={`sfx-var-take-card ${
-                          isAct ? "active" : ""
-                        } ${v.liked ? "liked" : ""}`}
-                        title="Click to play from start · Drag into DAW · Heart to keep"
-                      >
-                        <div className="sfx-var-take-top">
-                          <span className="sfx-var-take-title ds-tnum">
-                            #{idx + 1}
-                          </span>
-                          <div
-                            className="sfx-var-take-actions"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => auditionVariation(v, idx)}
-                              className="sfx-var-mini-btn"
-                              title="Audition take from start"
-                              aria-label={`Audition take ${idx + 1} from start`}
-                            >
-                              <Play size={12} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (
-                                  v.liked &&
-                                  !window.confirm(
-                                    "Re-roll this take? It is marked as liked and will be replaced."
-                                  )
-                                ) {
-                                  return;
-                                }
-                                handleRerollSingleVariation(idx);
-                              }}
-                              className="sfx-var-mini-btn"
-                              title="Re-roll this variation"
-                            >
-                              <Dices size={12} />
-                            </button>
-                            {hit && (
-                              <button
-                                type="button"
-                                disabled={savingBatch}
-                                onClick={() =>
-                                  void handleSaveVariationToLibrary(v)
-                                }
-                                className="sfx-var-mini-btn"
-                                title="Save this variation to library"
-                              >
-                                <Save size={12} />
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => toggleVariationLike(idx)}
-                              className={`sfx-var-mini-btn ${
-                                v.liked ? "liked" : ""
-                              }`}
-                              title={
-                                v.liked
-                                  ? "Liked (included in batch save)"
-                                  : "Like this variation"
-                              }
-                            >
-                              <Heart
-                                size={12}
-                                fill={v.liked ? "currentColor" : "none"}
-                              />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="sfx-var-wave-wrap">
-                          <VariationWaveCardCanvas
-                            peaks={v.peaks}
-                            pitchCurve={v.pitchCurve}
-                            volumeCurve={v.volumeCurve}
-                            isActive={isAct}
-                            playheadRatio={isTakePlaying ? varPlayRatio : null}
-                          />
-                          {isTakePlaying && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                stopVariationPlayback();
-                              }}
-                              className="sfx-var-stop-corner-btn"
-                              title="Stop playing take"
-                              aria-label="Stop playing take"
-                            >
-                              <Square size={10} fill="currentColor" />
-                            </button>
-                          )}
-                        </div>
-                        <div className="sfx-var-take-meta ds-tnum">
-                          <span className="sfx-var-take-pitch">
-                            {v.meanSemitones >= 0
-                              ? `+${v.meanSemitones.toFixed(1)}`
-                              : v.meanSemitones.toFixed(1)}{" "}
-                            st
-                          </span>
-                          <span>{v.durationS.toFixed(2)}s</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          </div>
+              </section>
+              <VariationControls
+                varSpec={varSpec}
+                setVarSpec={setVarSpec}
+                onReset={() =>
+                  setVarSpec((s) => ({ ...DEFAULT_VARIATION_SPEC, count: s.count }))
+                }
+              />
+            </div>
+            <TakesPanel
+              variations={variations}
+              activeVarIdx={activeVarIdx}
+              playingVarIdx={playingVarIdx}
+              varPlayRatio={varPlayRatio}
+              takeCount={varSpec.count}
+              setTakeCount={(n) => setVarSpec((s) => ({ ...s, count: n }))}
+              canGenerate={Boolean(processedChannels)}
+              stale={variations.length > 0 && takesBasis !== processedChannels}
+              onGenerate={handleGenerateVariations}
+              onAudition={auditionVariation}
+              onStop={stopVariationPlayback}
+              onReroll={handleRerollSingleVariation}
+              onToggleSelected={toggleTakeSelected}
+              onReplaceSource={(v) => replaceSourceWith(v.name, v.channels, v.sampleRate)}
+              onDragStart={handleTakeDragStart}
+              gridRef={takesGridRef}
+            />
+          </>
         )}
       </div>
 
-      {/* Save / Download dialog: one sound or the takes, with output format */}
       {saveDlg && (
-        <div
-          className="ds-scrim"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !outputBusy) {
-              setSaveDlg(null);
-            }
-          }}
-        >
-          <div
-            ref={saveDlgRef}
-            aria-busy={outputBusy}
-            className="ds-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="save-dialog-title"
-            style={{ maxWidth: 380 }}
-          >
-            <div
-              className="ds-dialog-head"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <span id="save-dialog-title">
-                {saveDlg === "save"
-                  ? "Save to library"
-                  : saveDlg === "download"
-                  ? "Download"
-                  : saveDlg === "save-takes"
-                  ? "Save takes to library"
-                  : "Download takes"}
-              </span>
-              <button
-                type="button"
-                disabled={outputBusy}
-                onClick={() => setSaveDlg(null)}
-                className="sfx-icon-btn"
-                aria-label="Close dialog"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <fieldset
-              disabled={outputBusy}
-              className="ds-dialog-body sfx-dialog-fieldset"
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: "var(--space-3)",
-              }}
-            >
-              {saveDlg === "save" || saveDlg === "download" ? (
-                <>
-                  <label className="ds-input-label" htmlFor="save-filename">
-                    Filename
-                  </label>
-                  <div className="ds-input-box">
-                    <input
-                      id="save-filename"
-                      type="text"
-                      autoFocus
-                      className="ds-input"
-                      style={{ fontFamily: "var(--font-mono)" }}
-                      value={saveName}
-                      onChange={(e) => setSaveName(e.target.value)}
-                      onFocus={(e) => e.currentTarget.select()}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          if (!e.repeat) {
-                            // a held Enter that opened the dialog must not also save
-                            void confirmSave();
-                          }
-                        } else if (e.key === "Escape") {
-                          e.preventDefault();
-                          if (!outputBusy) {
-                            setSaveDlg(null);
-                          }
-                        }
-                      }}
-                      spellCheck={false}
-                    />
-                  </div>
-                </>
-              ) : (
-                <span className="sfx-rack-hint">{takesSummary}</span>
-              )}
-
-              <span className="ds-input-label">Format</span>
-              <div className="sfx-pill-group" role="group" aria-label="Format">
-                {FORMAT_CHOICES.map(({ value, label }) => (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={outputSpec.format === value}
-                    autoFocus={
-                      saveDlg !== "save" &&
-                      saveDlg !== "download" &&
-                      outputSpec.format === value
-                    }
-                    onClick={() => setOutputSpec({ ...outputSpec, format: value })}
-                    className={`sfx-choice-pill ${
-                      outputSpec.format === value ? "active" : ""
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {qualityChoices.kind === "depth" ? (
-                <>
-                  <span className="ds-input-label">Bit depth</span>
-                  <div className="sfx-pill-group" role="group" aria-label="Bit depth">
-                    {qualityChoices.values.map((d) => (
-                      <button
-                        key={d}
-                        type="button"
-                        aria-pressed={outputSpec.bitDepth === d}
-                        onClick={() => setOutputSpec({ ...outputSpec, bitDepth: d })}
-                        className={`sfx-choice-pill ds-tnum ${
-                          outputSpec.bitDepth === d ? "active" : ""
-                        }`}
-                      >
-                        {d === 32 ? "32 float" : `${d}-bit`}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <span className="ds-input-label">Bitrate (kbps)</span>
-                  <div className="sfx-pill-group" role="group" aria-label="Bitrate">
-                    {qualityChoices.values.map((r) => (
-                      <button
-                        key={r}
-                        type="button"
-                        aria-pressed={outputSpec.bitrate === r}
-                        onClick={() => setOutputSpec({ ...outputSpec, bitrate: r })}
-                        className={`sfx-choice-pill ds-tnum ${
-                          outputSpec.bitrate === r ? "active" : ""
-                        }`}
-                      >
-                        {r}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {saveDlg === "save" && (
-                <label
-                  role="checkbox"
-                  aria-checked={saveOverwrite}
-                  aria-disabled={outputBusy}
-                  tabIndex={outputBusy ? -1 : 0}
-                  className="ds-check"
-                  onKeyDown={(e) => {
-                    if (e.key === " " || e.key === "Enter") {
-                      e.preventDefault();
-                      if (!e.repeat) {
-                        e.currentTarget.click();
-                      }
-                    }
-                  }}
-                  onClick={() => {
-                    if (!outputBusy) {
-                      setSaveOverwrite((v) => !v);
-                    }
-                  }}
-                >
-                  <div className={`ds-checkbox ${saveOverwrite ? "on" : ""}`}>
-                    {saveOverwrite && <div className="ds-checkbox-inner" />}
-                  </div>
-                  <span
-                    className="ds-check-label"
-                    style={{ fontSize: "var(--font-size-xs)" }}
-                  >
-                    Replace file if it already exists
-                  </span>
-                </label>
-              )}
-              <span className="sfx-rack-hint">
-                {dialogToLibrary
-                  ? "Saved to the source folder and indexed immediately."
-                  : "Saved to your browser's downloads folder."}
-              </span>
-              {errMsg && (
-                <span className="sfx-status-err" role="alert">
-                  {errMsg}
-                </span>
-              )}
-            </fieldset>
-            <div className="ds-dialog-foot">
-              <button
-                type="button"
-                className="ds-btn ds-btn-ghost ds-btn-sm"
-                disabled={outputBusy}
-                onClick={() => setSaveDlg(null)}
-              >
-                Cancel
-              </button>
-              {/* aria-disabled, not disabled, while busy: it keeps focus in the dialog */}
-              <button
-                ref={saveConfirmRef}
-                type="button"
-                className="ds-btn ds-btn-primary ds-btn-sm"
-                disabled={
-                  (saveDlg === "save" || saveDlg === "download") &&
-                  !stripExtension(saveName.trim())
-                }
-                aria-disabled={outputBusy}
-                onClick={() => void confirmSave()}
-              >
-                {showBusySpinner && (
-                  <span className="ds-spinner sfx-btn-spinner" aria-hidden="true" />
-                )}
-                {showBusySpinner
-                  ? dialogToLibrary
-                    ? "Saving…"
-                    : "Encoding…"
-                  : dialogToLibrary
-                  ? "Save"
-                  : "Download"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <OutputDialog
+          mode={saveDlg}
+          takeStems={page === "variations" ? selectedTakes.map((v) => v.name) : null}
+          fileName={saveName}
+          setFileName={setSaveName}
+          included={dialogIncluded}
+          outputSpec={outputSpec}
+          setOutputSpec={setOutputSpec}
+          folder={saveFolder}
+          setFolder={setSaveFolder}
+          folders={libraryFolders}
+          roots={libraryRoots}
+          overwrite={saveOverwrite}
+          setOverwrite={setSaveOverwrite}
+          busy={outputBusy}
+          showSpinner={showBusySpinner}
+          errMsg={errMsg}
+          onConfirm={() => void confirmSave()}
+          onClose={() => setSaveDlg(null)}
+          dialogRef={saveDlgRef}
+          confirmRef={saveConfirmRef}
+        />
       )}
 
       {/* Studio Footer Status Bar */}
@@ -4015,31 +2603,7 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
         ) : (
           <span className="ds-tnum">{statusMsg}</span>
         )}
-        <KeyHints
-          hints={[
-            { keys: "Space", label: "Preview" },
-            ...(activeModule === "loop"
-              ? [
-                  { keys: "F", label: "Find loops" },
-                  { keys: "S", label: "Test seam" },
-                ]
-              : []),
-            ...(activeModule === "shaper"
-              ? [{ keys: "[ ]", label: "Pick handle" }]
-              : []),
-            ...(activeModule === "loop"
-              ? [{ keys: "[ ]", label: "Pick marker" }]
-              : []),
-            ...(activeModule === "shaper" || activeModule === "loop"
-              ? [{ keys: "← →", label: "Nudge (Shift: 10 ms)" }]
-              : []),
-            { keys: "Ctrl+S", label: "Save" },
-            { keys: "Esc", label: "Back to library" },
-            { keys: "1–4", label: "Modules" },
-            { keys: "Scroll", label: "Zoom" },
-            { keys: "Drag", label: "Pan" },
-          ]}
-        />
+        <KeyHints hints={keyHints} />
       </footer>
 
       <input
@@ -4049,10 +2613,10 @@ role="checkbox" aria-checked={varSpec.preserveFormants} tabIndex={0}
         hidden
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) {
-            void loadLocalFile(f);
-          }
           e.target.value = "";
+          if (f) {
+            onOpenFile(f);
+          }
         }}
       />
     </div>

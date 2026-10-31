@@ -283,7 +283,7 @@ export class MockApi {
         ? json({ detail: "Could not reveal file" }, 500)
         : json({ ok: true });
     }
-    if (p.endsWith("/save-edited")) {
+    if (p.endsWith("/save-edited") || p === "/api/library/save") {
       if (this.opts.saveDelayMs > 0) {
         await new Promise((r) => setTimeout(r, this.opts.saveDelayMs));
       }
@@ -368,7 +368,8 @@ export async function playingIndex(page: Page): Promise<number> {
   );
 }
 
-export const studioShell = (page: Page) => page.locator(".sfx-editor-shell");
+/** The Studio session in front (a replaced one may still be mounted, hidden, for Undo). */
+export const studioShell = (page: Page) => page.locator(".sfx-editor-shell:visible");
 
 /**
  * Open the Studio for the selected row (E) and wait until the audio has
@@ -414,7 +415,7 @@ export async function keydownPrevented(page: Page, init: KeyInit): Promise<boole
 // ---------------------------------------------------------------------------
 
 /** The footer status bar (library and Studio both render one). */
-export const statusbar = (page: Page) => page.locator(".sfx-statusbar");
+export const statusbar = (page: Page) => page.locator(".sfx-statusbar:visible");
 
 /** The inspector drawer of the library view. */
 export const inspector = (page: Page) => page.locator(".sfx-inspector");
@@ -428,15 +429,23 @@ export const downloadButton = (page: Page) => page.getByRole("button", { name: "
 /** The Studio's "Download" dialog (name and format). */
 export const downloadDialog = (page: Page) => page.getByRole("dialog", { name: "Download", exact: true });
 
+/** The app bar tabs. */
+export const libraryTab = (page: Page) => page.getByRole("tab", { name: "Library" });
+export const studioTab = (page: Page) => page.getByRole("tab", { name: /^Studio/ });
+
 /** The Studio's "Save to library" dialog. */
 export const saveDialog = (page: Page) => page.getByRole("dialog", { name: "Save to library" });
 
 /** The Library folders modal. */
 export const foldersModal = (page: Page) => page.getByRole("dialog", { name: "Library folders" });
 
-/** Save requests recorded so far (all `save-edited` posts). */
+/** Save requests recorded so far (all Save to Library posts). */
 export function saveCalls(api: MockApi): string[] {
-  return api.calls.filter((c) => c.startsWith("POST /api/files/") && c.includes("/save-edited"));
+  return api.calls.filter(
+    (c) =>
+      c.startsWith("POST /api/library/save") ||
+      (c.startsWith("POST /api/files/") && c.includes("/save-edited"))
+  );
 }
 
 /**

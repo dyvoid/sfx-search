@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -48,6 +49,12 @@ import { SetupPanel } from "./components/SetupPanel";
 import { MiniWaveform } from "./components/MiniWaveform";
 import { SpectrumMeter } from "./components/SpectrumMeter";
 import { KeyHints } from "./components/KeyHints";
+import { StudioEmpty } from "./editor/StudioEmpty";
+import {
+  sourceFilename,
+  StudioSource,
+  StudioStatus,
+} from "./editor/studioSource";
 import { StudioView } from "./editor/StudioView";
 import {
   AvailableFilters,
@@ -77,6 +84,22 @@ function extractQueryTokens(q: string): string[] {
 }
 
 const PAGE_SIZE = 50;
+
+/** How long "Studio now holds …" offers Undo after replacing unsaved Studio work. */
+const UNDO_WINDOW_MS = 8000;
+
+type AppTab = "library" | "studio";
+
+interface StudioSession {
+  id: number;
+  source: StudioSource;
+}
+
+interface StudioSessions {
+  current: StudioSession | null;
+  /** The session the last replace pushed out, kept mounted while Undo is offered. */
+  undo: StudioSession | null;
+}
 
 // "Loopable only" threshold; same value the backend uses for the `loop:true` query filter.
 const LOOPABLE_MIN_SCORE = "0.6";
@@ -583,9 +606,18 @@ export const App: React.FC = () => {
   const [statusLabel, setStatusLabel] = useState<string>("");
 
   const [selectedIndex, setSelectedIndex] = useState<number>(0);
-  const [appView, setAppView] = useState<"library" | "editor">("library");
-  // A file dropped on "Edit in Studio": the Studio edits it instead of the selected hit.
-  const [localStudioFile, setLocalStudioFile] = useState<File | null>(null);
+  const [tab, setTab] = useState<AppTab>("library");
+  const [studio, setStudio] = useState<StudioSessions>({ current: null, undo: null });
+  const studioRef = useRef<StudioSessions>(studio);
+  studioRef.current = studio;
+  const [studioStatus, setStudioStatus] = useState<Record<number, StudioStatus>>({});
+  const studioStatusRef = useRef(studioStatus);
+  studioStatusRef.current = studioStatus;
+  const nextSessionIdRef = useRef<number>(1);
+  /** "Studio now holds …" with Undo, while the replaced session is still kept. */
+  const [studioToast, setStudioToast] = useState<string | null>(null);
+  const undoTimerRef = useRef<number>(0);
+  const libraryScrollRef = useRef<number>(0);
   const [dropZone, setDropZone] = useState<"similar" | "edit" | null>(null);
   // Below the 960px breakpoint the inspector is a blocking overlay, so it
   // starts collapsed there -- the edge tab (or Enter) opens it explicitly.
@@ -1004,21 +1036,164 @@ export const App: React.FC = () => {
     [playingFileId, startAtBestOffset, loopEnabled]
   );
 
-  const openEditorForHit = useCallback((idx?: number) => {
-    if (idx !== undefined) {
-      setSelectedIndex(idx);
+  const tabRef = useRef<AppTab>(tab);
+  tabRef.current = tab;
+
+  /** Switch tabs. Playback stops: only the tab in front may play. */
+  const switchTab = useCallback((next: AppTab) => {
+    if (tabRef.current === next) {
+      return;
     }
-    if (audioRef.current && !audioRef.current.paused) {
-      audioRef.current.pause();
-      setIsPlaying(false);
+    if (tabRef.current === "library") {
+      libraryScrollRef.current = resultsListRef.current?.scrollTop ?? 0;
+      if (audioRef.current && !audioRef.current.paused) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      }
     }
-    setAppView("editor");
+    tabRef.current = next;
+    setTab(next);
   }, []);
+
+  // A hidden list can lose its scroll offset; put it back when the Library returns.
+  useLayoutEffect(() => {
+    if (tab === "library" && resultsListRef.current) {
+      resultsListRef.current.scrollTop = libraryScrollRef.current;
+    }
+  }, [tab]);
+
+  /**
+   * Load a source into the Studio and switch to it. Unsaved work there is
+   * replaced at once; a toast offers Undo for a few seconds.
+   */
+  const openInStudio = useCallback(
+    (source: StudioSource, how: "open" | "replace" = "open") => {
+      const { current } = studioRef.current;
+      if (
+        source.kind === "library" &&
+        current?.source.kind === "library" &&
+        current.source.hit.file_id === source.hit.file_id
+      ) {
+        switchTab("studio");
+        return;
+      }
+      const prevStatus = current ? studioStatusRef.current[current.id] : undefined;
+      const keepForUndo = current !== null && prevStatus?.dirty === true;
+      const session: StudioSession = { id: nextSessionIdRef.current++, source };
+      window.clearTimeout(undoTimerRef.current);
+      setStudio({ current: session, undo: keepForUndo ? current : null });
+      if (keepForUndo && prevStatus) {
+        const name = sourceFilename(source);
+        setStudioToast(
+          how === "replace"
+            ? `Studio now holds ${name}. ${prevStatus.name} and its edits were replaced.`
+            : `Studio now holds ${name}.`
+        );
+        undoTimerRef.current = window.setTimeout(() => {
+          setStudio((s) => (s.undo ? { ...s, undo: null } : s));
+          setStudioToast(null);
+        }, UNDO_WINDOW_MS);
+      } else {
+        setStudioToast(null);
+      }
+      switchTab("studio");
+    },
+    [switchTab]
+  );
+
+  const undoStudioReplace = useCallback(() => {
+    window.clearTimeout(undoTimerRef.current);
+    setStudio((s) => (s.undo ? { current: s.undo, undo: null } : s));
+    setStudioToast(null);
+    switchTab("studio");
+  }, [switchTab]);
+
+  useEffect(() => () => window.clearTimeout(undoTimerRef.current), []);
+
+  const reportStudioStatus = useCallback((id: number, status: StudioStatus) => {
+    setStudioStatus((prev) => {
+      const old = prev[id];
+      if (old && old.name === status.name && old.dirty === status.dirty) {
+        return prev;
+      }
+      return { ...prev, [id]: status };
+    });
+  }, []);
+
+  // Forget the status of sessions that are gone.
+  useEffect(() => {
+    const live = new Set([studio.current?.id, studio.undo?.id]);
+    setStudioStatus((prev) => {
+      const ids = Object.keys(prev).map(Number);
+      if (ids.every((id) => live.has(id))) {
+        return prev;
+      }
+      const next: Record<number, StudioStatus> = {};
+      for (const id of ids) {
+        if (live.has(id)) {
+          next[id] = prev[id];
+        }
+      }
+      return next;
+    });
+  }, [studio]);
+
+  // Closing the page with Studio work still held asks first (Undo is short-lived).
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      const { current, undo } = studioRef.current;
+      const held =
+        undo !== null ||
+        (current !== null && studioStatusRef.current[current.id]?.dirty === true);
+      if (held) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
+  // Alt+1 / Alt+2 switch tabs from anywhere, unless a dialog is in front.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+        return;
+      }
+      const next: AppTab | null =
+        e.code === "Digit1" ? "library" : e.code === "Digit2" ? "studio" : null;
+      if (!next) {
+        return;
+      }
+      e.preventDefault();
+      if (
+        e.repeat ||
+        document.querySelector(".sfx-tabpanel:not([hidden]) [aria-modal='true']")
+      ) {
+        return;
+      }
+      switchTab(next);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [switchTab]);
+
+  /** "Edit in Studio" for a result row. */
+  const editInStudio = useCallback(
+    (idx: number) => {
+      setSelectedIndex(idx);
+      const hit = resultsRef.current[idx];
+      if (hit) {
+        openInStudio({ kind: "library", hit });
+      }
+    },
+    [openInStudio]
+  );
 
   // Keyboard navigation
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (appView === "editor") {
+      if (tab !== "library") {
         return;
       }
       if (libraryModalOpen) {
@@ -1103,7 +1278,7 @@ export const App: React.FC = () => {
       ) {
         e.preventDefault();
         if (results[selectedIndex]) {
-          openEditorForHit(selectedIndex);
+          editInStudio(selectedIndex);
         }
       } else if (
         (e.key === "r" || e.key === "R") &&
@@ -1139,7 +1314,7 @@ export const App: React.FC = () => {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [results, selectedIndex, playHit, libraryModalOpen, appView, openEditorForHit]);
+  }, [results, selectedIndex, playHit, libraryModalOpen, tab, editInStudio]);
 
   const handleAddRoot = async (path: string) => {
     const res = await addLibraryRoot(path);
@@ -1420,7 +1595,7 @@ export const App: React.FC = () => {
     select: setSelectedIndex,
     play: playHit,
     openDetail: () => setDetailOpen(true),
-    edit: openEditorForHit,
+    edit: editInStudio,
     reveal: handleRevealRow,
     similar: handleFindSimilarFile,
     favorite: handleToggleFavoriteRow,
@@ -1458,6 +1633,7 @@ export const App: React.FC = () => {
 
   const handleSavedToLibrary = useCallback(
     (newHit: SearchHit) => {
+      const known = resultsRef.current.some((h) => h.file_id === newHit.file_id);
       setResults((prev) => {
         const existingIdx = prev.findIndex((h) => h.file_id === newHit.file_id);
         if (existingIdx >= 0) {
@@ -1467,8 +1643,13 @@ export const App: React.FC = () => {
         }
         return [newHit, ...prev];
       });
-      setTotalResults((prev) => prev + 1);
-      setSelectedIndex(0);
+      if (!known) {
+        setTotalResults((prev) => prev + 1);
+        // The Library keeps its own selection: it moves down with the row.
+        if (resultsRef.current.length > 0) {
+          setSelectedIndex((i) => i + 1);
+        }
+      }
       void refreshLibraryState();
     },
     []
@@ -1483,6 +1664,7 @@ export const App: React.FC = () => {
       ? Math.min(100, Math.round((doneFiles / totalToIndex) * 100))
       : 0;
   const selectedHit = results[selectedIndex] || null;
+  const currentStatus = studio.current ? studioStatus[studio.current.id] : undefined;
   const playingHit = results.find((r) => r.file_id === playingFileId) || null;
   const activeFilterCount = [
     filters.minDuration,
@@ -1501,7 +1683,7 @@ export const App: React.FC = () => {
       className="sfx-shell"
       onDragOver={(e) => {
         e.preventDefault();
-        if (hasIndexedFiles) {
+        if (hasIndexedFiles && tabRef.current === "library") {
           setIsDraggingFile(true);
         }
       }}
@@ -1516,7 +1698,7 @@ export const App: React.FC = () => {
         e.preventDefault();
         setIsDraggingFile(false);
         setDropZone(null);
-        if (!hasIndexedFiles) {
+        if (!hasIndexedFiles || tabRef.current !== "library") {
           return;
         }
         const selfFileId = e.dataTransfer.getData(
@@ -1577,6 +1759,62 @@ export const App: React.FC = () => {
         }}
       />
 
+      <nav className="sfx-appbar" aria-label="Sections">
+        <div className="sfx-brand">
+          <div className="sfx-brand-mark">
+            <Volume2 size={15} />
+          </div>
+          <span className="sfx-brand-title">sfx-search</span>
+          {hasIndexedFiles && stats && (
+            <span className="sfx-brand-count ds-tnum">
+              {`${stats.ok_files.toLocaleString()} sounds`}
+            </span>
+          )}
+        </div>
+        <div className="ds-tabs sfx-apptabs" role="tablist" aria-label="Sections">
+          <button
+            type="button"
+            role="tab"
+            id="sfx-tab-library"
+            aria-selected={tab === "library"}
+            aria-controls="sfx-panel-library"
+            className={`ds-tab ${tab === "library" ? "active" : ""}`}
+            title="Library (Alt+1)"
+            onClick={() => switchTab("library")}
+          >
+            Library
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="sfx-tab-studio"
+            aria-selected={tab === "studio"}
+            aria-controls="sfx-panel-studio"
+            className={`ds-tab ${tab === "studio" ? "active" : ""}`}
+            title="Studio (Alt+2)"
+            onClick={() => switchTab("studio")}
+          >
+            Studio
+            {currentStatus && (
+              <span className="sfx-apptab-file" title={currentStatus.name}>
+                {currentStatus.name}
+              </span>
+            )}
+            {currentStatus?.dirty && (
+              <span className="sfx-apptab-dot" aria-label="has edits" />
+            )}
+          </button>
+        </div>
+      </nav>
+
+      <div
+        className="sfx-tabpanel"
+        role="tabpanel"
+        id="sfx-panel-library"
+        aria-labelledby="sfx-tab-library"
+        hidden={tab !== "library"}
+      >
+
       {/* Drop targets while a file is dragged over the library. A drop
           outside "Edit in Studio" falls through to the shell: find similar. */}
       {isDraggingFile && (
@@ -1608,14 +1846,13 @@ export const App: React.FC = () => {
                     (h) => h.file_id === selfId
                   );
                   if (idx >= 0) {
-                    openEditorForHit(idx);
+                    editInStudio(idx);
                   }
                   return;
                 }
                 const f = e.dataTransfer.files?.[0];
                 if (f) {
-                  setLocalStudioFile(f);
-                  openEditorForHit();
+                  openInStudio({ kind: "file", file: f });
                 }
               }}
             >
@@ -1639,144 +1876,21 @@ export const App: React.FC = () => {
         onRescan={handleRescan}
       />
 
-      {appView === "editor" ? (
-        <StudioView
-          hit={localStudioFile ? null : selectedHit}
-          localFile={localStudioFile}
-          hasPrev={selectedIndex > 0}
-          hasNext={selectedIndex < results.length - 1}
-          onPrevHit={() =>
-            setSelectedIndex((prev) => Math.max(0, prev - 1))
-          }
-          onNextHit={() =>
-            setSelectedIndex((prev) =>
-              Math.min(results.length - 1, prev + 1)
-            )
-          }
-          onBackToLibrary={() => {
-            setLocalStudioFile(null);
-            setAppView("library");
-          }}
-          onFindSimilarFromAudio={(file) => {
-            setAppView("library");
-            void handleDropFile(file);
-          }}
-          onSavedToLibrary={handleSavedToLibrary}
-        />
-      ) : (
-        <>
           {/* Top bar: brand, playback options, folders. Search row only once there is something to search. */}
           <header className="sfx-toolbar">
-            <div className="sfx-topbar">
-              <div className="sfx-brand">
-                <div className="sfx-brand-mark">
-                  <Volume2 size={15} />
-                </div>
-                <span className="sfx-brand-title">sfx-search</span>
-                {hasIndexedFiles && stats && (
-                  <span className="sfx-brand-count ds-tnum">
-                    {`${stats.ok_files.toLocaleString()} sounds`}
-                  </span>
-                )}
-              </div>
-
-              {hasIndexedFiles && (
-                <div className="sfx-transport-strip" aria-label="Playback options">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={startAtBestOffset}
-                    className="ds-switch-item"
-                    style={{
-                      background: "none",
-                      border: 0,
-                      padding: 0,
-                      font: "inherit",
-                    }}
-                    onClick={() => setStartAtBestOffset((prev) => !prev)}
-                    title="Start playback where the sound best matches your search"
-                  >
-                    <div className={`ds-switch-track ${startAtBestOffset ? "on" : ""}`}>
-                      <div className="ds-switch-thumb" />
-                    </div>
-                    <span
-                      className="ds-switch-label"
-                      style={{
-                        fontSize: "var(--font-size-xs)",
-                        color: "var(--text-secondary)",
-                      }}
-                    >
-                      Play from best match
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setLoopEnabled((prev) => !prev)}
-                    className={`ds-btn ds-btn-sm ${
-                      loopEnabled ? "ds-btn-primary" : "ds-btn-ghost"
-                    }`}
-                    aria-pressed={loopEnabled}
-                    title="Repeat playback"
-                  >
-                    <Repeat size={13} />
-                    Repeat
-                  </button>
-
-                  {isPlaying && (
-                    <>
-                      {playingHit && (
-                        <span className="sfx-readout-val warm">
-                          {`${currentTimeS.toFixed(2).padStart(5, "0")}s / ${playingHit.duration_s
-                            .toFixed(2)
-                            .padStart(5, "0")}s`}
-                        </span>
-                      )}
-                      <SpectrumMeter
-                        audioElement={audioRef.current}
-                        isPlaying={isPlaying}
-                      />
-                    </>
-                  )}
-                </div>
-              )}
-
-              <div className="sfx-workspace-tools">
+            {!hasIndexedFiles && (
+              <div className="sfx-topbar sfx-topbar-setup">
                 <button
                   type="button"
                   onClick={() => setLibraryModalOpen(true)}
-                  className="ds-btn ds-btn-secondary ds-btn-sm"
+                  className="ds-btn ds-btn-secondary sfx-btn-lg"
                   title="Manage your library folders"
                 >
                   <FolderOpen size={14} />
                   {roots.length > 0 ? `Folders (${roots.length})` : "Folders"}
                 </button>
-
-                {hasIndexedFiles && (
-                  <button
-                    type="button"
-                    onClick={() => setCompactDensity((prev) => !prev)}
-                    className="sfx-icon-btn"
-                    style={{
-                      color: compactDensity ? "var(--primary-400)" : undefined,
-                    }}
-                    aria-pressed={compactDensity}
-                    aria-label={
-                      compactDensity
-                        ? "Switch to spacious density"
-                        : "Switch to compact density"
-                    }
-                    title={
-                      compactDensity
-                        ? "Switch to spacious density"
-                        : "Switch to compact density"
-                    }
-                  >
-                    <Rows3 size={15} />
-                  </button>
-                )}
               </div>
-            </div>
+            )}
 
             {hasIndexedFiles && (
               <form
@@ -1963,6 +2077,16 @@ export const App: React.FC = () => {
                       }}
                     />
                   </label>
+                  <div className="sfx-divider-v" />
+                  <button
+                  type="button"
+                  onClick={() => setLibraryModalOpen(true)}
+                  className="ds-btn ds-btn-secondary sfx-btn-lg"
+                  title="Manage your library folders"
+                >
+                  <FolderOpen size={14} />
+                  {roots.length > 0 ? `Folders (${roots.length})` : "Folders"}
+                </button>
                 </div>
               </form>
             )}
@@ -2276,6 +2400,89 @@ export const App: React.FC = () => {
           </button>
         )}
         <main className={`sfx-main${hasIndexedFiles ? "" : " sfx-main-setup"}`}>
+          {hasIndexedFiles && (
+            <div className="sfx-results-bar">
+              <div className="sfx-transport-strip" aria-label="Playback options">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={startAtBestOffset}
+                    className="ds-switch-item"
+                    style={{
+                      background: "none",
+                      border: 0,
+                      padding: 0,
+                      font: "inherit",
+                    }}
+                    onClick={() => setStartAtBestOffset((prev) => !prev)}
+                    title="Start playback where the sound best matches your search"
+                  >
+                    <div className={`ds-switch-track ${startAtBestOffset ? "on" : ""}`}>
+                      <div className="ds-switch-thumb" />
+                    </div>
+                    <span
+                      className="ds-switch-label"
+                      style={{
+                        fontSize: "var(--font-size-xs)",
+                        color: "var(--text-secondary)",
+                      }}
+                    >
+                      Play from best match
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLoopEnabled((prev) => !prev)}
+                    className={`ds-btn ds-btn-sm ${
+                      loopEnabled ? "ds-btn-primary" : "ds-btn-ghost"
+                    }`}
+                    aria-pressed={loopEnabled}
+                    title="Repeat playback"
+                  >
+                    <Repeat size={13} />
+                    Repeat
+                  </button>
+
+                  {isPlaying && (
+                    <>
+                      {playingHit && (
+                        <span className="sfx-readout-val warm">
+                          {`${currentTimeS.toFixed(2).padStart(5, "0")}s / ${playingHit.duration_s
+                            .toFixed(2)
+                            .padStart(5, "0")}s`}
+                        </span>
+                      )}
+                      <SpectrumMeter
+                        audioElement={audioRef.current}
+                        isPlaying={isPlaying}
+                      />
+                    </>
+                  )}
+                </div>
+                  <button
+                    type="button"
+                    onClick={() => setCompactDensity((prev) => !prev)}
+                    className="sfx-icon-btn"
+                    style={{
+                      color: compactDensity ? "var(--primary-400)" : undefined,
+                    }}
+                    aria-pressed={compactDensity}
+                    aria-label={
+                      compactDensity
+                        ? "Switch to spacious density"
+                        : "Switch to compact density"
+                    }
+                    title={
+                      compactDensity
+                        ? "Switch to spacious density"
+                        : "Switch to compact density"
+                    }
+                  >
+                    <Rows3 size={15} />
+                  </button>
+            </div>
+          )}
           {/* Content: Onboarding Empty State vs Results List */}
           <div
             ref={resultsListRef}
@@ -2415,7 +2622,7 @@ export const App: React.FC = () => {
               onTogglePlay={() => playHit(selectedHit)}
               onSeek={(timeS) => playHit(selectedHit, timeS)}
               onClose={() => setDetailOpen(false)}
-              onOpenEditor={() => openEditorForHit(selectedIndex)}
+              onOpenEditor={() => editInStudio(selectedIndex)}
               onFindSimilarFile={handleFindSimilarFile}
               onFindSimilarChunk={handleFindSimilarChunk}
               onToggleFavorite={() => void toggleFavoriteFile(selectedHit)}
@@ -2450,7 +2657,61 @@ export const App: React.FC = () => {
           )}
         </footer>
       )}
-      </>
+      </div>
+
+      <div
+        className="sfx-tabpanel"
+        role="tabpanel"
+        id="sfx-panel-studio"
+        aria-labelledby="sfx-tab-studio"
+        hidden={tab !== "studio"}
+      >
+        {!studio.current && (
+          <StudioEmpty
+            onOpenFile={(file) => openInStudio({ kind: "file", file })}
+            onPickFromLibrary={() => switchTab("library")}
+          />
+        )}
+        {[studio.undo, studio.current].map(
+          (session) =>
+            session && (
+              <div
+                key={session.id}
+                className="sfx-studio-slot"
+                hidden={session !== studio.current}
+              >
+                <StudioView
+                  source={session.source}
+                  active={tab === "studio" && session === studio.current}
+                  libraryFolders={folderIndex}
+                  libraryRoots={roots}
+                  onOpenFile={(file) => openInStudio({ kind: "file", file })}
+                  onReplaceSource={(derived) => openInStudio(derived, "replace")}
+                  onFindSimilarFromAudio={(file) => {
+                    switchTab("library");
+                    void handleDropFile(file);
+                  }}
+                  onSavedToLibrary={handleSavedToLibrary}
+                  onStatus={(status) => reportStudioStatus(session.id, status)}
+                />
+              </div>
+            )
+        )}
+      </div>
+
+      {studioToast && (
+        <div className="sfx-toast-host">
+          <div className="ds-toast sfx-undo-toast" role="status">
+            <span>{studioToast}</span>
+            <button
+              type="button"
+              className="ds-btn ds-btn-ghost ds-btn-sm"
+              onClick={undoStudioReplace}
+            >
+              Undo
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

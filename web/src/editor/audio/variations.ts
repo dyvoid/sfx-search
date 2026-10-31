@@ -94,7 +94,8 @@ export interface GeneratedVariation {
   meanSemitones: number;
   stretchRatio: number;
   eqTiltDb: [number, number, number];
-  liked: boolean;
+  /** Included in Save and Download (every new take starts selected). */
+  selected: boolean;
 }
 
 /** Deterministic Mulberry32 PRNG so any variation seed can be re-synthesized. */
@@ -355,7 +356,7 @@ export function synthesizeVariation(
       meanSemitones: 0,
       stretchRatio: 1,
       eqTiltDb: [0, 0, 0],
-      liked: false,
+      selected: true,
     };
   }
 
@@ -523,7 +524,7 @@ export function synthesizeVariation(
       Math.round(midDb * 10) / 10,
       Math.round(highDb * 10) / 10,
     ],
-    liked: false,
+    selected: true,
   };
 }
 

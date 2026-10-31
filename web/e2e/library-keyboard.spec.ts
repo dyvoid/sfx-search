@@ -17,7 +17,7 @@ import {
 
 const searchBox = (page: Page) => page.getByLabel("Search sounds");
 const foldersButton = (page: Page) =>
-  page.locator(".sfx-workspace-tools").getByRole("button", { name: /^Folders/ });
+  page.locator(".sfx-command-actions").getByRole("button", { name: /^Folders/ });
 const selectTrigger = (page: Page, label: string) =>
   page.getByRole("button", { name: label, exact: true });
 const popup = (page: Page) => page.locator(".ds-select-pop");
@@ -226,12 +226,12 @@ test.describe("focus handling around mouse and Tab", () => {
     });
   }
 
-  test("L9 after a mouse click on the row's Edit button the Studio opens and Escape returns to a keyboard-ready library", async ({
+  test("L9 after a mouse click on the row's Edit button the Studio opens and Alt+1 returns to a keyboard-ready library", async ({
     app,
   }) => {
     await row(app, 1).getByRole("button", { name: "Edit in Studio" }).click();
     await expect(studioShell(app)).toBeVisible();
-    await app.keyboard.press("Escape");
+    await app.keyboard.press("Alt+1");
     await expect(studioShell(app)).toHaveCount(0);
     const sel = await selectedIndex(app);
     await app.keyboard.press("ArrowDown");

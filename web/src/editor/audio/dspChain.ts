@@ -10,7 +10,6 @@
 import { FadeCurve, fadeInGain, fadeOutGain } from "./loopdsp";
 
 export interface ShaperSpec {
-  enabled: boolean;
   /** Crop / trim start offset from the beginning of the source file (ms). */
   trimStartMs: number;
   /** Crop / trim amount removed from the end of the source file (ms). */
@@ -29,7 +28,6 @@ export interface ShaperSpec {
 }
 
 export const DEFAULT_SHAPER_SPEC: ShaperSpec = {
-  enabled: false,
   trimStartMs: 0,
   trimEndMs: 0,
   gainDb: 0,
@@ -225,9 +223,6 @@ function buildEqStages(spec: EqSpec, sampleRate: number): BiquadCoeffs[] {
 }
 
 export function isShaperActive(shaper: ShaperSpec): boolean {
-  if (!shaper.enabled) {
-    return false;
-  }
   return (
     shaper.trimStartMs > 0 ||
     shaper.trimEndMs > 0 ||

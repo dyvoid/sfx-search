@@ -134,9 +134,10 @@ test("D3 Escape closes only the dialog and returns focus to the opener", async (
   await expect(studioShell(app)).toBeVisible();
   await expect(saveButton(app)).toBeFocused();
 
-  // A later Escape leaves the Studio.
+  // A later Escape on the edit page does nothing: the Studio stays.
   await app.keyboard.press("Escape");
-  await expect(studioShell(app)).toHaveCount(0);
+  await expect(studioShell(app)).toBeVisible();
+  await expect(studioShell(app)).toHaveAttribute("data-page", "edit");
 });
 
 test.describe("slow save", () => {
@@ -230,22 +231,13 @@ test("D8 holding Space or Enter on the Replace file checkbox toggles it once per
   await expect(saveDialog(app)).toBeVisible();
 });
 
-test("D10 the dialog closes when the loaded file changes", async ({ app }) => {
-  await openDialog(app);
-  // The scrim covers the toolbar, so trigger the Next-sound button directly.
-  await app.getByRole("button", { name: "Next sound" }).dispatchEvent("click");
-  await expect(app.locator(".sfx-editor-filename")).toHaveText("snd1.wav");
-  await expect(saveDialog(app)).toHaveCount(0);
-  await expect(studioShell(app)).toBeVisible();
-});
-
 test("D10 the dialog closes when a local file is loaded", async ({ app }) => {
   await openDialog(app);
-  await app.locator("input[type=file][hidden]").setInputFiles({
+  await studioShell(app).locator("input[type=file][hidden]").setInputFiles({
     name: "other.wav",
     mimeType: "audio/wav",
     buffer: makeWav(1),
   });
   await expect(saveDialog(app)).toHaveCount(0);
-  await expect(app.locator(".sfx-editor-shell")).toBeVisible();
+  await expect(studioShell(app).locator(".sfx-editor-filename")).toHaveText("other.wav");
 });

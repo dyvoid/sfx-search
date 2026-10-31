@@ -148,6 +148,7 @@ test.describe("library top bar", () => {
   test("no column header row", async ({ app, pageErrors }) => {
     void pageErrors;
     await expect(app.locator(".sfx-list-head")).toHaveCount(0);
+    await expect(app.getByRole("columnheader")).toHaveCount(0);
   });
 
   test("inspector has no text label in its header", async ({ app, pageErrors }) => {

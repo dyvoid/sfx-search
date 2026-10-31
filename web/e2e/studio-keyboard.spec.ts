@@ -91,16 +91,20 @@ test.describe("Studio, nothing focused", () => {
     });
   });
 
-  test("S2 Digit1-4 switch the module", async ({ app }) => {
+  test("S2 Digit1/2 pick the edit module, Digit3/4 open the Loop and Variations pages", async ({
+    app,
+  }) => {
     await expect(tab(app, "Trim & Gain")).toHaveAttribute("aria-selected", "true");
     await app.keyboard.press("Digit2");
     await expect(tab(app, "Tone & EQ")).toHaveAttribute("aria-selected", "true");
     await expect(tab(app, "Trim & Gain")).toHaveAttribute("aria-selected", "false");
     await app.keyboard.press("Digit3");
-    await expect(tab(app, "Seamless Loop")).toHaveAttribute("aria-selected", "true");
+    await expect(studioShell(app)).toHaveAttribute("data-page", "loop");
     await app.keyboard.press("Digit4");
-    await expect(tab(app, "Variations")).toHaveAttribute("aria-selected", "true");
+    await expect(studioShell(app)).toHaveAttribute("data-page", "variations");
+    // From a sub-page, 1 and 2 go back to the edit page first.
     await app.keyboard.press("Digit1");
+    await expect(studioShell(app)).toHaveAttribute("data-page", "edit");
     await expect(tab(app, "Trim & Gain")).toHaveAttribute("aria-selected", "true");
   });
 
@@ -268,15 +272,23 @@ test.describe("Studio, nothing focused", () => {
     await expect(studioShell(app)).toBeVisible();
   });
 
-  test("S12 Escape leaves the Studio and returns to the library", async ({ app }) => {
+  test("S12 Escape returns from Loop or Variations to the edit page, and does nothing there", async ({
+    app,
+  }) => {
+    await app.keyboard.press("Digit3");
     await app.keyboard.press("Space");
     await expect(studioPlayButton(app)).toHaveClass(/playing/);
     await app.keyboard.press("Escape");
-    await expect(studioShell(app)).toHaveCount(0);
-    await expect(row(app, 0)).toBeVisible();
-    // Library shortcuts work again.
-    await app.keyboard.press("ArrowDown");
-    await expect(row(app, 1)).toHaveClass(/selected/);
+    await expect(studioShell(app)).toHaveAttribute("data-page", "edit");
+    await expect(studioPlayButton(app), "leaving a page stops playback").not.toHaveClass(
+      /playing/
+    );
+    await app.keyboard.press("Digit4");
+    await app.keyboard.press("Escape");
+    await expect(studioShell(app)).toHaveAttribute("data-page", "edit");
+    expect(await keydownPrevented(app, { key: "Escape", code: "Escape" })).toBe(false);
+    await expect(studioShell(app)).toBeVisible();
+    await expect(row(app, 0)).toBeHidden();
   });
 });
 
@@ -370,7 +382,30 @@ test.describe("Studio, save chord (S5)", () => {
     await expect(studioShell(app)).toHaveCount(0);
   });
 
-  test("S5 without a library file (local file) Ctrl+S opens the Download dialog instead", async ({
+  test("S5 a local file Ctrl+S opens Save with no folder chosen yet", async ({ app, api }) => {
+    await dropFile(app, "Edit in Studio", "local.wav");
+    await expect(studioShell(app)).toBeVisible();
+    await expect(app.locator(".sfx-editor-filename")).toHaveText("local.wav");
+    await app.keyboard.press("Control+s");
+    await expect(saveDialog(app)).toBeVisible();
+    const save = saveDialog(app).getByRole("button", { name: "Save", exact: true });
+    await expect(save).toBeDisabled();
+    await saveDialog(app).getByRole("button", { name: "Filter to /lib/a" }).click();
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(saveDialog(app)).toHaveCount(0);
+    const calls = saveCalls(api);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("POST /api/library/save?");
+    expect(calls[0]).toContain("folder=%2Flib%2Fa");
+    expect(calls[0]).not.toContain("source_file_id");
+  });
+});
+
+test.describe("Studio, save chord without library folders (S5)", () => {
+  test.use({ apiOptions: { roots: [] } });
+
+  test("S5 with no library folders Ctrl+S opens the Download dialog instead", async ({
     app,
   }) => {
     await dropFile(app, "Edit in Studio", "local.wav");
@@ -458,12 +493,14 @@ test.describe("Studio, focused controls", () => {
     await app.keyboard.press("Escape");
 
     await gain.focus();
-    await app.keyboard.press("Digit3");
-    await expect(tab(app, "Seamless Loop")).toHaveAttribute("aria-selected", "true");
     await app.keyboard.press("Digit2");
     await expect(tab(app, "Tone & EQ")).toHaveAttribute("aria-selected", "true");
+    await app.keyboard.press("Digit1");
+    await outputGain(app).focus();
+    await app.keyboard.press("Digit3");
+    await expect(studioShell(app)).toHaveAttribute("data-page", "loop");
     await app.keyboard.press("Digit4");
-    await expect(tab(app, "Variations")).toHaveAttribute("aria-selected", "true");
+    await expect(studioShell(app)).toHaveAttribute("data-page", "variations");
     await app.keyboard.press("Digit1");
     await expect(tab(app, "Trim & Gain")).toHaveAttribute("aria-selected", "true");
     await expect(outputGain(app)).toHaveValue(before);
@@ -486,7 +523,7 @@ test.describe("Studio, focused controls", () => {
     await expect(studioPlayButton(app), "Space on a checkbox must not play").not.toHaveClass(
       /playing/
     );
-    await expect(tab(app, "Seamless Loop")).toHaveAttribute("aria-selected", "true");
+    await expect(studioShell(app)).toHaveAttribute("data-page", "loop");
   });
 
   test("S9 holding Space or Enter on a checkbox toggles it once", async ({ app }) => {
@@ -548,19 +585,20 @@ test.describe("Studio, focused controls", () => {
     await expect(saveDialog(app)).toBeVisible();
   });
 
-  test("S12 Escape on a focused slider blurs it first, a second Escape leaves the Studio", async ({
+  test("S12 Escape on a focused slider blurs it first, a second Escape goes back to the edit page", async ({
     app,
   }) => {
-    const gain = outputGain(app);
-    await gain.focus();
+    await app.keyboard.press("Digit3");
+    const crossfade = app.getByLabel("Crossfade (ms)", { exact: true });
+    await crossfade.focus();
     await app.keyboard.press("Escape");
-    await expect(gain).not.toBeFocused();
-    await expect(studioShell(app)).toBeVisible();
+    await expect(crossfade).not.toBeFocused();
+    await expect(studioShell(app)).toHaveAttribute("data-page", "loop");
     await app.keyboard.press("Escape");
-    await expect(studioShell(app)).toHaveCount(0);
+    await expect(studioShell(app)).toHaveAttribute("data-page", "edit");
   });
 
-  test("S12 Escape on a focused checkbox blurs it first, a second Escape leaves the Studio", async ({
+  test("S12 Escape on a focused checkbox blurs it first, a second Escape goes back to the edit page", async ({
     app,
   }) => {
     await app.keyboard.press("Digit3");
@@ -568,8 +606,8 @@ test.describe("Studio, focused controls", () => {
     await cb.focus();
     await app.keyboard.press("Escape");
     await expect(cb).not.toBeFocused();
-    await expect(studioShell(app)).toBeVisible();
+    await expect(studioShell(app)).toHaveAttribute("data-page", "loop");
     await app.keyboard.press("Escape");
-    await expect(studioShell(app)).toHaveCount(0);
+    await expect(studioShell(app)).toHaveAttribute("data-page", "edit");
   });
 });
