@@ -421,7 +421,7 @@ export const statusbar = (page: Page) => page.locator(".sfx-statusbar:visible");
 export const inspector = (page: Page) => page.locator(".sfx-inspector");
 
 /** The Studio's hero play/pause button; `.playing` while audio runs. */
-export const studioPlayButton = (page: Page) => page.locator(".sfx-tp-play-btn");
+export const studioPlayButton = (page: Page) => page.locator(".sfx-tp-play-btn:visible");
 
 /** The Studio toolbar's Download button (opens the Download dialog). */
 export const downloadButton = (page: Page) => page.getByRole("button", { name: "Download", exact: true });

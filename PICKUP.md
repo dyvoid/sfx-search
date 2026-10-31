@@ -5,7 +5,14 @@ instead of archaeology.
 
 ## Current focus
 
-All milestones (**M1, M2, M3, M4**), the integrated **Edit Mode / Audio Studio & Seamless Loop Workstation** (`task/audio-editor-loop-module`), UI/UX refinements, large-library infinite scroll + sorting, launcher scripts (`start.bat`, `start.sh`), and GitHub Actions CI (`.github/workflows/ci.yml`) are implemented, tested, and verified.
+**Library/Studio redesign** on `task/library-studio-redesign` (not merged): Library and Studio
+as top-level tabs, the Studio split into edit / Loop / Variations pages, Save to Library into a
+chosen folder, Replace source with Undo. Decisions in [ADR 0007](docs/adr/0007-library-studio-tabs-and-studio-pages.md);
+the wireframe brief is in the untracked `redesign/` folder. Two Sonnet review rounds found no major
+issues; their minor findings are fixed or recorded in `docs/review-decisions.md`. Next: try it in
+the real app, then rebase and fast-forward to `main`.
+
+Earlier: All milestones (**M1, M2, M3, M4**), the integrated **Edit Mode / Audio Studio & Seamless Loop Workstation** (`task/audio-editor-loop-module`), UI/UX refinements, large-library infinite scroll + sorting, launcher scripts (`start.bat`, `start.sh`), and GitHub Actions CI (`.github/workflows/ci.yml`) are implemented, tested, and verified.
 
 ## State
 
@@ -35,4 +42,4 @@ All milestones (**M1, M2, M3, M4**), the integrated **Edit Mode / Audio Studio &
 - None.
 
 ---
-*Last updated: 2026-04-20*
+*Last updated: 2026-10-31*

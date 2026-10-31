@@ -1100,9 +1100,9 @@ export const App: React.FC = () => {
         );
       } else if (studioRef.current.undo) {
         // Replacing clean work while Undo is offered: Undo still brings back
-        // the work that was replaced before, until the toast runs out.
+        // the work that was replaced before, with a fresh window.
         setStudio((s) => ({ ...s, current: session }));
-        setStudioToast(`Studio now holds ${name}.`);
+        offerUndo(`Studio now holds ${name}.`);
       } else {
         window.clearTimeout(undoTimerRef.current);
         setStudio({ current: session, undo: null });
@@ -2754,7 +2754,13 @@ export const App: React.FC = () => {
             <button
               type="button"
               className="ds-btn ds-btn-ghost ds-btn-sm"
-              onClick={undoStudioReplace}
+              onClick={(e) => {
+                // The toast can stay (Undo swaps), so a clicked Undo keeps no focus.
+                if (e.detail > 0) {
+                  e.currentTarget.blur();
+                }
+                undoStudioReplace();
+              }}
             >
               Undo
             </button>

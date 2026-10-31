@@ -1026,10 +1026,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
     [variations]
   );
   const outputChannels = onLoopPage ? bakedChannels : processedChannels;
-  // "x.loop" edited again saves as "x.edit", not "x.loop.edit"; looped again, "x.loop".
-  const outputStem = `${baseName.replace(/\.(loop|edit)$/i, "")}${
-    onLoopPage ? ".loop" : ".edit"
-  }`;
+  // A loop made here and edited again saves as "x.edit", not "x.loop.edit";
+  // only derived names are stripped, so a real "foo.edit.wav" keeps its name.
+  const stemBase =
+    source.kind === "derived" ? baseName.replace(/\.(loop|edit)$/i, "") : baseName;
+  const outputStem = `${stemBase}${onLoopPage ? ".loop" : ".edit"}`;
 
   /** Files a drag from the header carries: this page's output, as 24-bit WAV. */
   const dragFiles = useCallback((): File[] => {
@@ -1182,6 +1183,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   /** Takes saved by this dialog so far: a retry after a failure skips them. */
   const savedTakeIdsRef = useRef<Set<string>>(new Set());
+  // Another folder or format is a different save: nothing is skipped.
+  useEffect(() => {
+    savedTakeIdsRef.current = new Set();
+  }, [saveFolder, outputSpec]);
   const saveTakesToLibrary = useCallback(async (): Promise<boolean> => {
     if (!saveFolder || selectedTakes.length === 0) {
       return false;

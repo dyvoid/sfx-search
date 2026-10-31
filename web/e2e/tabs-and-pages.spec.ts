@@ -148,6 +148,11 @@ test.describe("tabs", () => {
     await undoToast(app).getByRole("button", { name: "Undo" }).click();
     await expect(studioFilename(app)).toHaveText("snd0.wav");
     await expect(trimStart(app)).toHaveValue("100");
+    // The clicked Undo keeps no focus: Space plays instead of undoing again.
+    await app.keyboard.press("Space");
+    await expect(studioPlayButton(app)).toHaveClass(/playing/);
+    await expect(studioFilename(app)).toHaveText("snd0.wav");
+    await app.keyboard.press("Space");
     // The newer file's work is held in turn, with its own Undo.
     await undoToast(app).getByRole("button", { name: "Undo" }).click();
     await expect(studioFilename(app)).toHaveText("snd1.wav");
