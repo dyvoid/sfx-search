@@ -1,3 +1,30 @@
+/* Fonts ship with the app (web/public/fonts, OFL licences alongside): one
+   variable file per family, Latin subset only. Other scripts fall back to the
+   system font. */
+@font-face {
+  font-family: 'Familjen Grotesk';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/familjen-grotesk-latin-var.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/geist-latin-var.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin-var.woff2') format('woff2');
+}
+
 :root {
   --font-display: 'Familjen Grotesk', ui-sans-serif, system-ui, sans-serif;
   --font-body: 'Geist', ui-sans-serif, system-ui, sans-serif;
