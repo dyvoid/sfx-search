@@ -139,7 +139,7 @@ export const SeamScope: React.FC<SeamScopeProps> = ({
 
     // Labels
     // Labels sit on a backing so the trace never overprints them.
-    g.font = '500 12px "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif';
+    g.font = '500 12px "Geist", ui-sans-serif, system-ui, sans-serif';
     const labelBg = readTokenColor("--surface-sunken", "#0b0f17");
     const label = (text: string, x: number, baseline: number, color: string) => {
       const tw = g.measureText(text).width;

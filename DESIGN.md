@@ -23,7 +23,7 @@ typography:
     fontWeight: 600
     letterSpacing: "-0.02em"
   body:
-    fontFamily: "Hanken Grotesk, sans-serif"
+    fontFamily: "Geist, sans-serif"
     fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.5
@@ -113,17 +113,17 @@ One neutral family plus four identity hues with assigned meaning; functional hue
 ## Typography
 
 **Display Font:** Familjen Grotesk (page titles, large values; negative tracking)
-**Body Font:** Hanken Grotesk (labels, buttons, paragraphs)
+**Body Font:** Geist Sans (labels, buttons, paragraphs)
 **Mono Font:** JetBrains Mono ("DM Mono" inside canvas) — *every* number that measures something (`ds-tnum` tabular figures), paths, and key caps. Never for words.
 
-**Character:** Grotesk pair for a calm technical voice; mono reserved for measurement, not decoration.
+**Character:** a grotesk display face with Geist Sans for a calm technical voice; mono reserved for measurement, not decoration.
 
 ### Hierarchy
 - **Display** (Familjen 600, negative tracking): file titles, hero numbers
-- **Section title** (kit `ds-panel-title`: mono 500, `--text-xs`, uppercase, wide tracking, `--text-secondary`): panel and card titles. Filenames are Hanken 600.
-- **Label** (Hanken 400–500, `--font-size-sm`, `--text-secondary`): control labels, rack row labels, filter labels (`ds-microlabel`)
-- **Key** (Hanken 400, `--font-size-xs`, `--text-tertiary`): data keys above or beside a value (`sfx-param-label`, `sfx-kv-key`)
-- **Body** (Hanken 400, `--font-size-sm`/`--font-size-base`, 1.5): descriptions, buttons
+- **Section title** (kit `ds-panel-title`: mono 500, `--text-xs`, uppercase, wide tracking, `--text-secondary`): panel and card titles. Filenames are Geist 600.
+- **Label** (Geist 400–500, `--font-size-sm`, `--text-secondary`): control labels, rack row labels, filter labels (`ds-microlabel`)
+- **Key** (Geist 400, `--font-size-xs`, `--text-tertiary`): data keys above or beside a value (`sfx-param-label`, `sfx-kv-key`)
+- **Body** (Geist 400, `--font-size-sm`/`--font-size-base`, 1.5): descriptions, buttons
 - **Value** (JetBrains Mono, `xs–sm`, tabular): readouts, durations, levels, scores, tick labels, paths
 
 ## Layout
@@ -180,7 +180,7 @@ because of space and layering, not fonts. These apply to every screen.
    regions (results, folder tree, inspector, waveform, each Studio rack card) are panels on
    the background with a gutter. Dialogs follow the same order: header bar, body, action bar.
 2. **Words in the body font, values in mono.** Labels, buttons, hints and HUD buttons use
-   Hanken Grotesk as written. Section titles (`ds-panel-title`) are the one exception: the
+   Geist Sans as written. Section titles (`ds-panel-title`) are the one exception: the
    kit's uppercase mono marks the section level. Mono is otherwise for numbers, times,
    levels, paths and key caps.
 3. **Readable floor.** No text below 12px; control labels 13px; section titles 12px uppercase mono.

@@ -1,6 +1,6 @@
 :root {
   --font-display: 'Familjen Grotesk', ui-sans-serif, system-ui, sans-serif;
-  --font-body: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Geist', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
 
   /* Canonical size scale. Deliberate steps: 1px fine control at the bottom,

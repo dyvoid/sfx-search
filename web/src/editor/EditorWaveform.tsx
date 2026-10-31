@@ -731,7 +731,7 @@ export const EditorWaveform = React.forwardRef<
 
               if (cfx1 - cfx0 > 72) {
                 g.fillStyle = COLORS.fadeLabel;
-                g.font = '500 12px "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif';
+                g.font = '500 12px "Geist", ui-sans-serif, system-ui, sans-serif';
                 g.fillText("Crossfade", Math.max(6, fx0 + 6), wh - 8);
               }
             }
