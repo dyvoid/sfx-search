@@ -13,6 +13,7 @@ import {
   saveCalls,
   saveDialog,
   statusbar,
+  studioFront,
   studioPlayButton,
   studioShell,
   test,
@@ -21,7 +22,7 @@ import {
 const tab = (page: Page, name: string) => page.getByRole("tab", { name });
 const trimStart = (page: Page) => page.getByLabel("Trim Start (ms) value");
 const trimEnd = (page: Page) => page.getByLabel("Trim End (ms) value");
-const timeNow = (page: Page) => page.locator(".sfx-tp-time span").first();
+const timeNow = (page: Page) => studioFront(page).locator(".sfx-tp-time span").first();
 const snapCheckbox = (page: Page) => page.getByRole("checkbox", { name: /Snap markers/ });
 const outputGain = (page: Page) => page.getByLabel("Output Gain (dB)", { exact: true });
 
@@ -148,15 +149,15 @@ test.describe("Studio, nothing focused", () => {
 
   test("S4 nudging the loop markers in Seamless Loop shows the new position", async ({ app }) => {
     await app.keyboard.press("Digit3");
-    await expect(app.locator(".sfx-hud-pill.start")).toContainText("S 0.000s");
+    await expect(studioFront(app).locator(".sfx-hud-pill.start")).toContainText("S 0.000s");
     await app.keyboard.press("Shift+ArrowRight");
-    await expect(app.locator(".sfx-hud-pill.start")).toContainText("S 0.010s");
+    await expect(studioFront(app).locator(".sfx-hud-pill.start")).toContainText("S 0.010s");
     await app.keyboard.press("BracketRight");
-    const end = app.locator(".sfx-hud-pill.end");
+    const end = studioFront(app).locator(".sfx-hud-pill.end");
     const before = (await end.textContent()) ?? "";
     await app.keyboard.press("Shift+ArrowLeft");
     await expect(end).not.toHaveText(before);
-    await expect(app.locator(".sfx-hud-pill.start")).toContainText("S 0.010s");
+    await expect(studioFront(app).locator(".sfx-hud-pill.start")).toContainText("S 0.010s");
   });
 
   test("S4 auto-repeat keeps nudging", async ({ app }) => {

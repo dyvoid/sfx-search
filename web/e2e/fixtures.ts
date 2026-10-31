@@ -371,6 +371,10 @@ export async function playingIndex(page: Page): Promise<number> {
 /** The Studio session in front (a replaced one may still be mounted, hidden, for Undo). */
 export const studioShell = (page: Page) => page.locator(".sfx-editor-shell:visible");
 
+/** The Studio page in front: the Loop/Variations sheet, or the edit page when no sheet covers it. */
+export const studioFront = (page: Page) =>
+  studioShell(page).locator(".sfx-studio-sheet, .sfx-studio-base:not([inert])");
+
 /**
  * Open the Studio for the selected row (E) and wait until the audio has
  * decoded (Download enables once processed channels exist). Pass
@@ -421,7 +425,8 @@ export const statusbar = (page: Page) => page.locator(".sfx-statusbar:visible");
 export const inspector = (page: Page) => page.locator(".sfx-inspector");
 
 /** The Studio's hero play/pause button; `.playing` while audio runs. */
-export const studioPlayButton = (page: Page) => page.locator(".sfx-tp-play-btn:visible");
+export const studioPlayButton = (page: Page) =>
+  studioFront(page).locator(".sfx-tp-play-btn:visible");
 
 /** The Studio toolbar's Download button (opens the Download dialog). */
 export const downloadButton = (page: Page) => page.getByRole("button", { name: "Download", exact: true });

@@ -21,7 +21,7 @@ import {
 const trimStart = (page: Page) => studioShell(page).getByLabel("Trim Start (ms) value");
 const undoToast = (page: Page) => page.locator(".sfx-undo-toast");
 const takeCards = (page: Page) => page.locator(".sfx-var-take-card");
-const studioFilename = (page: Page) => studioShell(page).locator(".sfx-editor-filename");
+const studioFilename = (page: Page) => studioShell(page).locator(".sfx-studio-base .sfx-editor-filename");
 
 /** Open the Studio for the selected row and make an edit (trim start 100 ms). */
 async function openEdited(page: Page): Promise<void> {
@@ -46,7 +46,7 @@ test.describe("tabs", () => {
 
     await app.keyboard.press("Alt+2");
     await expect(studioShell(app)).toHaveAttribute("data-page", "loop");
-    await expect(studioFilename(app)).toHaveText("Loop");
+    await expect(studioShell(app).getByRole("region", { name: "Loop" })).toBeVisible();
   });
 
   test("T2 the Studio tab without a file shows the empty state; Pick from Library goes back", async ({
@@ -266,5 +266,33 @@ test.describe("Studio pages", () => {
     await undoToast(app).getByRole("button", { name: "Undo" }).click();
     await expect(studioShell(app)).toHaveAttribute("data-page", "variations");
     await expect(takeCards(app)).toHaveCount(6);
+  });
+
+  test("P6 Loop opens over the edit page; a click on the edit page around it goes back", async ({
+    app,
+  }) => {
+    await openEdited(app);
+    await app.getByRole("button", { name: "Create loop" }).click();
+    const sheet = studioShell(app).getByRole("region", { name: "Loop" });
+    await expect(sheet).toBeVisible();
+
+    // The edit page stays in view but out of reach: Tab never lands on it.
+    const base = studioShell(app).locator(".sfx-studio-base");
+    await expect(base).toHaveAttribute("inert", "");
+    await expect(base).toHaveAttribute("aria-hidden", "true");
+    for (let i = 0; i < 12; i++) {
+      await app.keyboard.press("Tab");
+      const onBase = await app.evaluate(() =>
+        Boolean(document.activeElement?.closest(".sfx-studio-base"))
+      );
+      expect(onBase).toBe(false);
+    }
+
+    // A click on the dimmed edit page beside the sheet goes back; the edit is kept.
+    await app.locator(".sfx-studio-sheet-scrim").click({ position: { x: 8, y: 300 } });
+    await expect(sheet).toHaveCount(0);
+    await expect(studioShell(app)).toHaveAttribute("data-page", "edit");
+    await expect(base).not.toHaveAttribute("inert");
+    await expect(trimStart(app)).toHaveValue("100");
   });
 });

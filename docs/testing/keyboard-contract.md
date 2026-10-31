@@ -102,3 +102,4 @@ Behavior rules for the pages; the e2e tests reference these IDs too.
 | P3 | Variations page | Generate, take checkboxes | Every new take starts selected. Save and Download act on the selected takes, one file each; the buttons count them ("Download 5 files"). |
 | P4 | Variations page, takes exist | the edit changes | "The edit changed after these takes were made." with Regenerate. Loop markers reset to the whole sound whenever the trim or direction changes. |
 | P5 | Loop page / a take | Replace source | That output becomes the Studio's file (unsaved, amber dot), on the edit page, as in T4: Undo while the toast shows. |
+| P6 | Loop or Variations page | Tab; a click on the dimmed edit page around the sheet | Loop and Variations open as a sheet over the edit page, which stays in view but inert: Tab never lands on it. A click on it goes back to the edit page (as Escape, S12), settings kept. |

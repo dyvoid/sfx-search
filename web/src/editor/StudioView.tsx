@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -8,7 +9,6 @@ import React, {
 import {
   Activity,
   ArrowLeft,
-  ArrowRight,
   Dices,
   Download,
   FolderOpen,
@@ -141,6 +141,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onStatus,
 }) => {
   const waveRef = useRef<EditorWaveformHandle | null>(null);
+  /** The edit page; inert while Loop or Variations covers it. */
+  const baseRef = useRef<HTMLDivElement | null>(null);
+  /** The edit page's header stays in view above the sheet, so the sheet opens below it. */
+  const editHeaderRef = useRef<HTMLElement | null>(null);
   const transportRef = useRef<StudioTransport | null>(null);
   const searchWorkerRef = useRef<Worker | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -429,9 +433,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
   }, [sourceChannels, sampleRate, shaper, eq]);
 
   // In Trim & Gain the waveform shows the full, uncropped sound so the IN/OUT
-  // handles can be dragged and the trimmed-away parts show dimmed.
+  // handles can be dragged and the trimmed-away parts show dimmed. Kept while
+  // Loop or Variations covers the edit page, which stays visible behind them.
   const uncroppedChannels = useMemo(() => {
-    if (!showCrop || !sourceChannels || sourceChannels.length === 0) {
+    if (editModule !== "shaper" || !sourceChannels || sourceChannels.length === 0) {
       return null;
     }
     const noCropShaper: ShaperSpec = {
@@ -442,7 +447,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
       fadeOutMs: 0,
     };
     return applyDspChain(sourceChannels, sampleRate, noCropShaper, eq);
-  }, [showCrop, sourceChannels, sampleRate, shaper, eq]);
+  }, [editModule, sourceChannels, sampleRate, shaper, eq]);
 
   const rawTotalSamples = sourceChannels?.[0]?.length ?? 0;
   const cropStartSamples = useMemo(
@@ -818,6 +823,31 @@ export const StudioView: React.FC<StudioViewProps> = ({
       loopEnd,
     ]
   );
+
+  useLayoutEffect(() => {
+    const base = baseRef.current;
+    if (base) {
+      base.inert = page !== "edit";
+      if (page === "edit") {
+        base.removeAttribute("aria-hidden");
+      } else {
+        base.setAttribute("aria-hidden", "true");
+      }
+    }
+  }, [page]);
+
+  useLayoutEffect(() => {
+    const header = editHeaderRef.current;
+    const base = baseRef.current;
+    if (!header || !base) {
+      return;
+    }
+    const ro = new ResizeObserver(() => {
+      base.parentElement?.style.setProperty("--sfx-sheet-top", `${header.offsetHeight}px`);
+    });
+    ro.observe(header);
+    return () => ro.disconnect();
+  }, []);
 
   /** Leave for another Studio page: playback stops, the page opens at the start. */
   const goToPage = useCallback(
@@ -1784,36 +1814,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const loopDurationS = Math.max(0, (loopEnd - loopStart) / sampleRate);
   const totalDurationS = Math.max(0, totalSamples / sampleRate);
 
-  const loopMarkers = useMemo(() => {
-    if (showCrop && uncroppedChannels) {
-      return {
-        start: cropStartSamples,
-        end: cropEndSamples,
-        fade: 0,
-        fadeAtHead: false,
-        startLabel: "IN",
-        endLabel: "OUT",
-        fadeInSamples: Math.round((shaper.fadeInMs / 1000) * sampleRate),
-        fadeOutSamples: Math.round((shaper.fadeOutMs / 1000) * sampleRate),
-        curve: shaper.fadeCurve,
-        silenceOutside: true,
-      };
+  const cropMarkers = useMemo(() => {
+    if (editModule !== "shaper" || !uncroppedChannels) {
+      return null;
     }
-    if (processedChannels && onLoopPage) {
-      return {
-        start: loopStart,
-        end: loopEnd,
-        fade: fadeSamples,
-        fadeAtHead,
-        startLabel: "S",
-        endLabel: "E",
-        curve: fadeCurve,
-        mode: resolvedMode,
-      };
-    }
-    return null;
+    return {
+      start: cropStartSamples,
+      end: cropEndSamples,
+      fade: 0,
+      fadeAtHead: false,
+      startLabel: "IN",
+      endLabel: "OUT",
+      fadeInSamples: Math.round((shaper.fadeInMs / 1000) * sampleRate),
+      fadeOutSamples: Math.round((shaper.fadeOutMs / 1000) * sampleRate),
+      curve: shaper.fadeCurve,
+      silenceOutside: true,
+    };
   }, [
-    showCrop,
+    editModule,
     uncroppedChannels,
     shaper.fadeInMs,
     shaper.fadeOutMs,
@@ -1821,6 +1839,23 @@ export const StudioView: React.FC<StudioViewProps> = ({
     sampleRate,
     cropStartSamples,
     cropEndSamples,
+  ]);
+
+  const loopRegionMarkers = useMemo(() => {
+    if (!processedChannels || !onLoopPage) {
+      return null;
+    }
+    return {
+      start: loopStart,
+      end: loopEnd,
+      fade: fadeSamples,
+      fadeAtHead,
+      startLabel: "S",
+      endLabel: "E",
+      curve: fadeCurve,
+      mode: resolvedMode,
+    };
+  }, [
     processedChannels,
     onLoopPage,
     loopStart,
@@ -1890,10 +1925,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
         ];
 
   const pageTitle = page === "loop" ? "Loop" : "Variations";
-  const downloadLabel =
-    page === "variations"
-      ? `Download ${selectedTakes.length} file${selectedTakes.length === 1 ? "" : "s"}`
-      : "Download";
   const outputReady =
     page === "variations" ? selectedTakes.length > 0 : Boolean(outputChannels);
 
@@ -1909,451 +1940,440 @@ export const StudioView: React.FC<StudioViewProps> = ({
     </div>
   );
 
-  const outputButtons = (
-    <>
-      {canSaveToLibrary && (
+  /** Save and Download for a page; the edit page's stay as they were while a sheet covers it. */
+  const renderOutputButtons = (forPage: StudioPage) => {
+    const live = forPage === page;
+    const ready =
+      forPage === "variations"
+        ? selectedTakes.length > 0
+        : Boolean(forPage === "loop" ? bakedChannels : processedChannels);
+    return (
+      <>
+        {canSaveToLibrary && (
+          <button
+            type="button"
+            disabled={!ready || outputBusy}
+            onClick={() => openOutputDialog("save")}
+            className="ds-btn ds-btn-secondary"
+            title="Save into a library folder and index it immediately (Ctrl+S)"
+          >
+            <Save size={14} />
+            {live && (savingToLibrary || savingBatch) ? "Saving…" : "Save to Library"}
+          </button>
+        )}
         <button
           type="button"
-          disabled={!outputReady || outputBusy}
-          onClick={() => openOutputDialog("save")}
-          className="ds-btn ds-btn-secondary"
-          title="Save into a library folder and index it immediately (Ctrl+S)"
+          disabled={!ready || outputBusy}
+          onClick={() => openOutputDialog("download")}
+          className="ds-btn ds-btn-primary"
+          title="Download this page's output, choosing name and format"
         >
-          <Save size={14} />
-          {savingToLibrary || savingBatch ? "Saving…" : "Save to Library"}
+          <Download size={14} />
+          {forPage === "variations"
+            ? `Download ${selectedTakes.length} file${selectedTakes.length === 1 ? "" : "s"}`
+            : "Download"}
         </button>
-      )}
-      <button
-        type="button"
-        disabled={!outputReady || outputBusy}
-        onClick={() => openOutputDialog("download")}
-        className="ds-btn ds-btn-primary"
-        title="Download this page's output, choosing name and format"
-      >
-        <Download size={14} />
-        {downloadLabel}
-      </button>
-    </>
-  );
-
-  const header =
-    page === "edit" ? (
-      <header className="sfx-editor-header">
-        <div className="sfx-editor-toolbar">
-          <div className="sfx-editor-toolbar-group">
-            <div className="sfx-editor-file-meta">
-              <span className="sfx-editor-filename" title={libHit?.path || sourceName}>
-                {sourceName}
-              </span>
-              <span className="sfx-editor-filespecs ds-tnum">
-                {totalSamples > 0
-                  ? `${processedChannels?.length ?? 1}ch · ${(sampleRate / 1000).toFixed(
-                      1
-                    )} kHz · ${totalDurationS.toFixed(2)}s`
-                  : decodeError
-                  ? "Could not load"
-                  : "Loading…"}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="ds-btn ds-btn-ghost"
-              title="Open an audio file from your computer"
-            >
-              <Upload size={14} />
-              Open file
-            </button>
-            {dragChip}
-            <button
-              type="button"
-              disabled={!processedChannels}
-              onClick={handleFindSimilarEdited}
-              className="ds-btn ds-btn-ghost"
-              title="Search the library for sounds like your edited audio"
-            >
-              <Sparkles size={14} />
-              Find similar
-            </button>
-            {libHit && (
-              <button
-                type="button"
-                onClick={() => revealInExplorer(libHit.file_id).catch(() => {})}
-                className="ds-btn ds-btn-ghost"
-                title="Show the source file in Explorer"
-              >
-                <FolderOpen size={14} />
-                Show in Explorer
-              </button>
-            )}
-          </div>
-
-          <div className="sfx-editor-toolbar-group">
-            <span className="ds-microlabel sfx-create-label">Create</span>
-            <button
-              type="button"
-              disabled={!processedChannels}
-              onClick={() => goToPage("loop")}
-              className="ds-btn ds-btn-secondary"
-              aria-label="Create loop"
-              title="Make a seamless loop from the edited sound (3)"
-            >
-              <Repeat size={14} />
-              Loop
-              <ArrowRight size={13} />
-              <kbd className="sfx-kbd">3</kbd>
-            </button>
-            <button
-              type="button"
-              disabled={!processedChannels}
-              onClick={() => goToPage("variations")}
-              className="ds-btn ds-btn-secondary"
-              aria-label="Create variations"
-              title="Make round-robin takes from the edited sound (4)"
-            >
-              <Dices size={14} />
-              Variations
-              <ArrowRight size={13} />
-              <kbd className="sfx-kbd">4</kbd>
-            </button>
-            <div className="sfx-divider-v" />
-            {outputButtons}
-          </div>
-        </div>
-      </header>
-    ) : (
-      <header className="sfx-editor-header">
-        <div className="sfx-editor-toolbar">
-          <div className="sfx-editor-toolbar-group">
-            <button
-              type="button"
-              onClick={() => goToPage("edit")}
-              className="ds-btn ds-btn-secondary"
-              aria-label="Back to edit"
-              title="Back to the edit page; your settings here are kept (Esc)"
-            >
-              <ArrowLeft size={14} />
-              Back to edit
-              <kbd className="sfx-kbd">Esc</kbd>
-            </button>
-            <div className="sfx-divider-v" />
-            <div className="sfx-editor-file-meta">
-              <span className="sfx-editor-filename">{pageTitle}</span>
-              <span className="sfx-editor-filespecs ds-tnum">
-                {`From ${sourceName}${editIncluded.length > 0 ? ", as edited" : ""} · ${totalDurationS.toFixed(
-                  2
-                )} s`}
-              </span>
-            </div>
-            {dragChip}
-          </div>
-          <div className="sfx-editor-toolbar-group">
-            {onLoopPage && (
-              <>
-                <button
-                  type="button"
-                  disabled={!processedChannels}
-                  onClick={() =>
-                    replaceSourceWith(`${baseName}.loop`, bakeLoopNow(), sampleRate)
-                  }
-                  className="ds-btn ds-btn-ghost"
-                  title="The loop becomes the file you edit. Your current edits, loop settings and takes are cleared. You can undo for a few seconds."
-                >
-                  <Replace size={14} />
-                  Replace source with loop
-                </button>
-                <div className="sfx-divider-v" />
-              </>
-            )}
-            {outputButtons}
-          </div>
-        </div>
-      </header>
+      </>
     );
+  };
 
-  const stage = (
-    <>
-      {/* Main Waveform Stage */}
-      <div className="sfx-editor-stage">
-        {/* Header strip: marker readouts + zoom, off the canvas */}
-        <div className="sfx-editor-stage-bar">
-          {showCrop ? (
-            <div className="sfx-editor-stage-hud-left">
-              <span className="sfx-hud-pill start">
-                <span className="dot" />
-                IN <b>{(cropStartSamples / sampleRate).toFixed(3)}s</b>
-              </span>
-              <span className="sfx-hud-pill end">
-                <span className="dot" />
-                OUT <b>{(cropEndSamples / sampleRate).toFixed(3)}s</b>
-              </span>
-              {cropEndSamples - cropStartSamples < rawTotalSamples && (
-                <span className="sfx-hud-pill">
-                  Length <b>{totalDurationS.toFixed(3)}s</b> of{" "}
-                  <b>{(rawTotalSamples / sampleRate).toFixed(3)}s</b>
-                </span>
-              )}
-            </div>
-          ) : (
-            onLoopPage && (
-              <div className="sfx-editor-stage-hud-left">
-                <span className="sfx-hud-pill start">
-                  <span className="dot" />S <b>{(loopStart / sampleRate).toFixed(3)}s</b>
-                </span>
-                <span className="sfx-hud-pill end">
-                  <span className="dot" />E <b>{(loopEnd / sampleRate).toFixed(3)}s</b>
-                </span>
-                <span className="sfx-hud-pill">
-                  Length <b>{loopDurationS.toFixed(3)}s</b>
-                </span>
-                {fadeMs > 0 && (
-                  <span className="sfx-hud-pill fade">
-                    Crossfade <b>{Math.round(fadeMs)} ms</b> · {resolvedModeLabel}
-                  </span>
-                )}
-              </div>
-            )
-          )}
-
-          <div className="sfx-editor-stage-hud-right">
-            <button
-              type="button"
-              onClick={() => waveRef.current?.zoomByFactor(0.6)}
-              className="sfx-hud-btn"
-              title="Zoom in (Scroll wheel up)"
-            >
-              <ZoomIn size={13} />
-            </button>
-            <button
-              type="button"
-              onClick={() => waveRef.current?.zoomByFactor(1.6)}
-              className="sfx-hud-btn"
-              title="Zoom out (Scroll wheel down)"
-            >
-              <ZoomOut size={13} />
-            </button>
-            {onLoopPage && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => waveRef.current?.zoomToLoop()}
-                  className="sfx-hud-btn"
-                  title="Zoom to active loop region"
-                >
-                  Loop
-                </button>
-                <button
-                  type="button"
-                  onClick={() => waveRef.current?.zoomToSeam()}
-                  className="sfx-hud-btn"
-                  title="Zoom into the crossfade seam"
-                >
-                  Seam
-                </button>
-              </>
-            )}
-            <button
-              type="button"
-              onClick={() => waveRef.current?.resetView()}
-              className="sfx-hud-btn"
-              title="Fit entire file in view (Double-click waveform)"
-            >
-              <Maximize2 size={12} />
-              Fit
-            </button>
+  const editHeader = (
+    <header className="sfx-editor-header" ref={editHeaderRef}>
+      <div className="sfx-editor-toolbar">
+        <div className="sfx-editor-toolbar-group">
+          <div className="sfx-editor-file-meta">
+            <span className="sfx-editor-filename" title={libHit?.path || sourceName}>
+              {sourceName}
+            </span>
+            <span className="sfx-editor-filespecs ds-tnum">
+              {totalSamples > 0
+                ? `${processedChannels?.length ?? 1}ch · ${(sampleRate / 1000).toFixed(
+                    1
+                  )} kHz · ${totalDurationS.toFixed(2)}s`
+                : decodeError
+                ? "Could not load"
+                : "Loading…"}
+            </span>
           </div>
-        </div>
-        <div className="sfx-editor-stage-view">
-          {decoding ? (
-            <div className="sfx-editor-stage-overlay">
-              <span className="ds-spinner" />
-              <span>Decoding audio into float32 studio buffers…</span>
-            </div>
-          ) : decodeError ? (
-            <div className="sfx-editor-stage-overlay">
-              <div className="ds-empty-title">Could not load audio</div>
-              <div className="ds-empty-desc">{decodeError}</div>
-            </div>
-          ) : null}
-
-          <EditorWaveform
-            ref={waveRef}
-            channels={showCrop ? uncroppedChannels : processedChannels}
-            sampleRate={sampleRate}
-            loop={loopMarkers}
-            activeMarker={activeMarker}
-            onLoopChange={(s, e) => {
-              if (showCrop) {
-                updateCropPoints(s, e);
-              } else {
-                updateLoopPoints(s, e, snapZero);
-              }
-            }}
-            onSeek={seekToSample}
-            onSelectMarker={setActiveMarker}
-          />
-
-          {searching && (
-            <div
-              className="sfx-editor-search-progress"
-              role="progressbar"
-              aria-valuenow={Math.round(searchProgress * 100)}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="ds-btn ds-btn-ghost"
+            title="Open an audio file from your computer"
+          >
+            <Upload size={14} />
+            Open file
+          </button>
+          {dragChip}
+          <button
+            type="button"
+            disabled={!processedChannels}
+            onClick={handleFindSimilarEdited}
+            className="ds-btn ds-btn-ghost"
+            title="Search the library for sounds like your edited audio"
+          >
+            <Sparkles size={14} />
+            Find similar
+          </button>
+          {libHit && (
+            <button
+              type="button"
+              onClick={() => revealInExplorer(libHit.file_id).catch(() => {})}
+              className="ds-btn ds-btn-ghost"
+              title="Show the source file in Explorer"
             >
-              <div
-                className="sfx-editor-search-progress-fill"
-                style={{ transform: `scaleX(${searchProgress})` }}
-              />
-            </div>
+              <FolderOpen size={14} />
+              Show in Explorer
+            </button>
           )}
+        </div>
+
+        <div className="sfx-editor-toolbar-group">
+          {renderOutputButtons("edit")}
         </div>
       </div>
+    </header>
+    );
 
-      {/* Studio Transport Deck */}
-      <div className="sfx-editor-transport-bar">
-        <div className="sfx-editor-transport-left">
+  const sheetHeader = (
+    <header className="sfx-editor-header">
+      <div className="sfx-editor-toolbar">
+        <div className="sfx-editor-toolbar-group">
+          <button
+            type="button"
+            onClick={() => goToPage("edit")}
+            className="ds-btn ds-btn-secondary"
+            aria-label="Back to edit"
+            title="Back to the edit page; your settings here are kept (Esc)"
+          >
+            <ArrowLeft size={14} />
+            Back to edit
+            <kbd className="sfx-kbd">Esc</kbd>
+          </button>
+          <div className="sfx-divider-v" />
+          <div className="sfx-editor-file-meta">
+            <span className="sfx-editor-filename">{pageTitle}</span>
+            <span className="sfx-editor-filespecs ds-tnum">
+              {`From ${sourceName}${editIncluded.length > 0 ? ", as edited" : ""} · ${totalDurationS.toFixed(
+                2
+              )} s`}
+            </span>
+          </div>
+          {dragChip}
+        </div>
+        <div className="sfx-editor-toolbar-group">
           {onLoopPage && (
             <>
               <button
                 type="button"
                 disabled={!processedChannels}
-                onClick={auditionSeam}
-                className="ds-btn ds-btn-ghost ds-btn-sm"
-                title="Jump 1.2s before the loop end to immediately audition the E → S seam transition (S)"
+                onClick={() =>
+                  replaceSourceWith(`${baseName}.loop`, bakeLoopNow(), sampleRate)
+                }
+                className="ds-btn ds-btn-ghost"
+                title="The loop becomes the file you edit. Your current edits, loop settings and takes are cleared. You can undo for a few seconds."
               >
-                Test Seam
+                <Replace size={14} />
+                Replace source with loop
               </button>
-              <span className="sfx-rack-hint">Preview</span>
-              <div
-                className="sfx-pill-group"
-                role="group"
-                aria-label="Audition source"
-              >
-                <button
-                  type="button"
-                  onClick={() => setAuditionMode("loop")}
-                  className={`sfx-choice-pill ${
-                    auditionMode === "loop" ? "active" : ""
-                  }`}
-                >
-                  Loop
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAuditionMode("file")}
-                  className={`sfx-choice-pill ${
-                    auditionMode === "file" ? "active" : ""
-                  }`}
-                  title="Preview the whole edited sound instead of just the loop region"
-                >
-                  File
-                </button>
-              </div>
+              <div className="sfx-divider-v" />
             </>
           )}
+          {renderOutputButtons(page)}
         </div>
+      </div>
+    </header>
+    );
 
-        {/* Center Hero Transport Pill */}
-        <div className="sfx-tp-pill">
-          <button
-            type="button"
-            disabled={!processedChannels}
-            onClick={restartLoop}
-            className="sfx-tp-icon-btn"
-            title="Restart from beginning / loop start (Home)"
-            aria-label="Restart playback"
-          >
-            <RotateCcw size={15} />
-          </button>
+  /** The waveform stage of the edit page or the Loop sheet; only the page in front is live. */
+  const renderStage = (stagePage: "edit" | "loop") => {
+    const live = stagePage === page;
+    const crop = stagePage === "edit" && editModule === "shaper";
+    const loopStage = stagePage === "loop";
+    return (
+      <>
+        {/* Main Waveform Stage */}
+        <div className="sfx-editor-stage">
+          {/* Header strip: marker readouts + zoom, off the canvas */}
+          <div className="sfx-editor-stage-bar">
+            {crop ? (
+              <div className="sfx-editor-stage-hud-left">
+                <span className="sfx-hud-pill start">
+                  <span className="dot" />
+                  IN <b>{(cropStartSamples / sampleRate).toFixed(3)}s</b>
+                </span>
+                <span className="sfx-hud-pill end">
+                  <span className="dot" />
+                  OUT <b>{(cropEndSamples / sampleRate).toFixed(3)}s</b>
+                </span>
+                {cropEndSamples - cropStartSamples < rawTotalSamples && (
+                  <span className="sfx-hud-pill">
+                    Length <b>{totalDurationS.toFixed(3)}s</b> of{" "}
+                    <b>{(rawTotalSamples / sampleRate).toFixed(3)}s</b>
+                  </span>
+                )}
+              </div>
+            ) : (
+              loopStage && (
+                <div className="sfx-editor-stage-hud-left">
+                  <span className="sfx-hud-pill start">
+                    <span className="dot" />S <b>{(loopStart / sampleRate).toFixed(3)}s</b>
+                  </span>
+                  <span className="sfx-hud-pill end">
+                    <span className="dot" />E <b>{(loopEnd / sampleRate).toFixed(3)}s</b>
+                  </span>
+                  <span className="sfx-hud-pill">
+                    Length <b>{loopDurationS.toFixed(3)}s</b>
+                  </span>
+                  {fadeMs > 0 && (
+                    <span className="sfx-hud-pill fade">
+                      Crossfade <b>{Math.round(fadeMs)} ms</b> · {resolvedModeLabel}
+                    </span>
+                  )}
+                </div>
+              )
+            )}
 
-          <button
-            type="button"
-            disabled={!processedChannels}
-            onClick={togglePlay}
-            className={`sfx-tp-play-btn ${isPlaying ? "playing" : ""}`}
-            title="Play / Pause preview (Space)"
-            aria-label="Play or pause preview"
-          >
-            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-          </button>
-
-          <button
-            type="button"
-            disabled={!processedChannels}
-            onClick={stopPlayback}
-            className="sfx-tp-icon-btn"
-            title="Stop and rewind"
-            aria-label="Stop and rewind"
-          >
-            <Square size={14} />
-          </button>
-
-          <div className="sfx-tp-time ds-tnum">
-            <span>{timePosText}</span>
-            <span className="sep"> / </span>
-            <span className="tot">
-              {formatDuration(totalSamples, sampleRate)}
-            </span>
+            <div className="sfx-editor-stage-hud-right">
+              <button
+                type="button"
+                onClick={() => waveRef.current?.zoomByFactor(0.6)}
+                className="sfx-hud-btn"
+                title="Zoom in (Scroll wheel up)"
+              >
+                <ZoomIn size={13} />
+              </button>
+              <button
+                type="button"
+                onClick={() => waveRef.current?.zoomByFactor(1.6)}
+                className="sfx-hud-btn"
+                title="Zoom out (Scroll wheel down)"
+              >
+                <ZoomOut size={13} />
+              </button>
+              {loopStage && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => waveRef.current?.zoomToLoop()}
+                    className="sfx-hud-btn"
+                    title="Zoom to active loop region"
+                  >
+                    Loop
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => waveRef.current?.zoomToSeam()}
+                    className="sfx-hud-btn"
+                    title="Zoom into the crossfade seam"
+                  >
+                    Seam
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => waveRef.current?.resetView()}
+                className="sfx-hud-btn"
+                title="Fit entire file in view (Double-click waveform)"
+              >
+                <Maximize2 size={12} />
+                Fit
+              </button>
+            </div>
           </div>
-        </div>
+          <div className="sfx-editor-stage-view">
+            {decoding ? (
+              <div className="sfx-editor-stage-overlay">
+                <span className="ds-spinner" />
+                <span>Decoding audio into float32 studio buffers…</span>
+              </div>
+            ) : decodeError ? (
+              <div className="sfx-editor-stage-overlay">
+                <div className="ds-empty-title">Could not load audio</div>
+                <div className="ds-empty-desc">{decodeError}</div>
+              </div>
+            ) : null}
 
-        <div className="sfx-editor-transport-right">
-          <div
-            className="sfx-meter-slot"
-            aria-hidden={!(isPlaying || playingVarIdx !== null)}
-          >
-            {(isPlaying || playingVarIdx !== null) && (
-              <SpectrumMeter
-                analyserNode={transportRef.current?.analyser ?? null}
-                isPlaying
-              />
+            <EditorWaveform
+              ref={live ? waveRef : undefined}
+              channels={crop ? uncroppedChannels : processedChannels}
+              sampleRate={sampleRate}
+              loop={crop ? cropMarkers : loopStage ? loopRegionMarkers : null}
+              activeMarker={activeMarker}
+              onLoopChange={(s, e) => {
+                if (crop) {
+                  updateCropPoints(s, e);
+                } else {
+                  updateLoopPoints(s, e, snapZero);
+                }
+              }}
+              onSeek={seekToSample}
+              onSelectMarker={setActiveMarker}
+            />
+
+            {searching && (
+              <div
+                className="sfx-editor-search-progress"
+                role="progressbar"
+                aria-valuenow={Math.round(searchProgress * 100)}
+              >
+                <div
+                  className="sfx-editor-search-progress-fill"
+                  style={{ transform: `scaleX(${searchProgress})` }}
+                />
+              </div>
             )}
           </div>
-          <div className="sfx-signal-meters ds-tnum">
-            <span title="Peak amplitude of the output">
-              Peak{" "}
-              <strong
-                style={{
-                  color:
-                    signalStats.peakDbfs > -0.2
-                      ? "var(--danger-400)"
-                      : "var(--text-primary)",
-                }}
-              >
-                {signalStats.peakDbfs > -119
-                  ? `${signalStats.peakDbfs.toFixed(1)} dB`
-                  : "—"}
-              </strong>
-            </span>
-            <span className="rms" title="RMS level of the output">
-              RMS{" "}
-              <strong>
-                {signalStats.rmsDbfs > -119
-                  ? `${signalStats.rmsDbfs.toFixed(1)} dB`
-                  : "—"}
-              </strong>
-            </span>
-            {onLoopPage && (
-              <span title="Computed loop seam continuity score">
-                Seam{" "}
+        </div>
+
+        {/* Studio Transport Deck */}
+        <div className="sfx-editor-transport-bar">
+          <div className="sfx-editor-transport-left">
+            {loopStage && (
+              <>
+                <button
+                  type="button"
+                  disabled={!processedChannels}
+                  onClick={auditionSeam}
+                  className="ds-btn ds-btn-ghost ds-btn-sm"
+                  title="Jump 1.2s before the loop end to immediately audition the E → S seam transition (S)"
+                >
+                  Test Seam
+                </button>
+                <span className="sfx-rack-hint">Preview</span>
+                <div
+                  className="sfx-pill-group"
+                  role="group"
+                  aria-label="Audition source"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setAuditionMode("loop")}
+                    className={`sfx-choice-pill ${
+                      auditionMode === "loop" ? "active" : ""
+                    }`}
+                  >
+                    Loop
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuditionMode("file")}
+                    className={`sfx-choice-pill ${
+                      auditionMode === "file" ? "active" : ""
+                    }`}
+                    title="Preview the whole edited sound instead of just the loop region"
+                  >
+                    File
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Center Hero Transport Pill */}
+          <div className="sfx-tp-pill">
+            <button
+              type="button"
+              disabled={!processedChannels}
+              onClick={restartLoop}
+              className="sfx-tp-icon-btn"
+              title="Restart from beginning / loop start (Home)"
+              aria-label="Restart playback"
+            >
+              <RotateCcw size={15} />
+            </button>
+
+            <button
+              type="button"
+              disabled={!processedChannels}
+              onClick={togglePlay}
+              className={`sfx-tp-play-btn ${isPlaying ? "playing" : ""}`}
+              title="Play / Pause preview (Space)"
+              aria-label="Play or pause preview"
+            >
+              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+            </button>
+
+            <button
+              type="button"
+              disabled={!processedChannels}
+              onClick={stopPlayback}
+              className="sfx-tp-icon-btn"
+              title="Stop and rewind"
+              aria-label="Stop and rewind"
+            >
+              <Square size={14} />
+            </button>
+
+            <div className="sfx-tp-time ds-tnum">
+              <span>{timePosText}</span>
+              <span className="sep"> / </span>
+              <span className="tot">
+                {formatDuration(totalSamples, sampleRate)}
+              </span>
+            </div>
+          </div>
+
+          <div className="sfx-editor-transport-right">
+            <div
+              className="sfx-meter-slot"
+              aria-hidden={!(live && (isPlaying || playingVarIdx !== null))}
+            >
+              {live && (isPlaying || playingVarIdx !== null) && (
+                <SpectrumMeter
+                  analyserNode={transportRef.current?.analyser ?? null}
+                  isPlaying
+                />
+              )}
+            </div>
+            <div className="sfx-signal-meters ds-tnum">
+              <span title="Peak amplitude of the output">
+                Peak{" "}
                 <strong
                   style={{
                     color:
-                      seamMetrics.seamScore >= 0.7
-                        ? "var(--success-500)"
-                        : seamMetrics.seamScore >= 0.4
-                        ? "var(--warning-500)"
-                        : "var(--danger-400)",
+                      signalStats.peakDbfs > -0.2
+                        ? "var(--danger-400)"
+                        : "var(--text-primary)",
                   }}
                 >
-                  {Math.round(seamMetrics.seamScore * 100)}%
+                  {signalStats.peakDbfs > -119
+                    ? `${signalStats.peakDbfs.toFixed(1)} dB`
+                    : "—"}
                 </strong>
               </span>
-            )}
+              <span className="rms" title="RMS level of the output">
+                RMS{" "}
+                <strong>
+                  {signalStats.rmsDbfs > -119
+                    ? `${signalStats.rmsDbfs.toFixed(1)} dB`
+                    : "—"}
+                </strong>
+              </span>
+              {loopStage && (
+                <span title="Computed loop seam continuity score">
+                  Seam{" "}
+                  <strong
+                    style={{
+                      color:
+                        seamMetrics.seamScore >= 0.7
+                          ? "var(--success-500)"
+                          : seamMetrics.seamScore >= 0.4
+                          ? "var(--warning-500)"
+                          : "var(--danger-400)",
+                    }}
+                  >
+                    {Math.round(seamMetrics.seamScore * 100)}%
+                  </strong>
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </>
-  );
+      </>
+    );
+  };
 
   const keyHints =
     page === "edit"
@@ -2411,182 +2431,226 @@ export const StudioView: React.FC<StudioViewProps> = ({
         }
       }}
     >
-      {header}
-
-      {page !== "variations" && stage}
-
-      {page === "edit" && (
-        <div className="sfx-editor-module-row">
-          <div className="sfx-editor-module-tabs" role="tablist" aria-label="Edit modules">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={editModule === "shaper"}
-              aria-label="Trim & Gain"
-              title="Trim & Gain (1)"
-              onClick={() => setEditModule("shaper")}
-              className={`sfx-module-tab ${editModule === "shaper" ? "active" : ""}`}
-            >
-              <kbd className="sfx-kbd">1</kbd>
-              <Sliders size={14} />
-              <span>Trim &amp; Gain</span>
-              {shaperActive && <span className="sfx-module-dot on" />}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={editModule === "eq"}
-              aria-label="Tone & EQ"
-              title="Tone & EQ (2)"
-              onClick={() => setEditModule("eq")}
-              className={`sfx-module-tab ${editModule === "eq" ? "active" : ""}`}
-            >
-              <kbd className="sfx-kbd">2</kbd>
-              <Activity size={14} />
-              <span>Tone &amp; EQ</span>
-              {eqActive && <span className="sfx-module-dot on" />}
-            </button>
-          </div>
-          <button
-            type="button"
-            disabled={editModule === "shaper" ? !shaperActive : !eqActive}
-            onClick={() =>
-              editModule === "shaper"
-                ? setShaper(DEFAULT_SHAPER_SPEC)
-                : setEq(DEFAULT_EQ_SPEC)
-            }
-            className="ds-btn ds-btn-ghost ds-btn-sm"
-          >
-            <RotateCcw size={12} />
-            {editModule === "shaper" ? "Reset Trim & Gain" : "Reset Tone & EQ"}
-          </button>
-        </div>
-      )}
-
-      <div className={`sfx-editor-rack ${page === "variations" ? "sfx-variations-page" : ""}`}>
-        {page === "edit" && editModule === "shaper" && (
-          <TrimGainPanels
-            shaper={shaper}
-            setShaper={setShaper}
-            rawTotalSamples={rawTotalSamples}
-            sampleRate={sampleRate}
-            totalDurationS={totalDurationS}
-            canAutoTrim={Boolean(sourceChannels)}
-            onAutoTrim={handleAutoTrimSilence}
-          />
-        )}
-
-        {page === "edit" && editModule === "eq" && (
-          <ToneEqPanels eq={eq} setEq={setEq} sampleRate={sampleRate} />
-        )}
-
-        {onLoopPage && (
-          <LoopPanels
-            sampleRate={sampleRate}
-            totalDurationS={totalDurationS}
-            loopDurationS={loopDurationS}
-            fadeMs={fadeMs}
-            setFadeMs={setFadeMs}
-            fadeCurve={fadeCurve}
-            setFadeCurve={setFadeCurve}
-            bakeMode={bakeMode}
-            setBakeMode={setBakeMode}
-            snapZero={snapZero}
-            onToggleSnap={() => {
-              const next = !snapZero;
-              setSnapZero(next);
-              if (next) {
-                updateLoopPoints(loopStart, loopEnd, true);
-              }
-            }}
-            onResetLoop={resetLoop}
-            candidates={candidates}
-            candIndex={candIndex}
-            onApplyCandidate={(idx) => applyCandidate(idx)}
-            onClearCandidates={() => {
-              setCandidates([]);
-              setCandIndex(-1);
-              setStatusMsg("Cleared loop suggestions");
-            }}
-            searching={searching}
-            canSearch={Boolean(processedChannels)}
-            onFindLoops={runLoopSearch}
-            searchModePref={searchModePref}
-            setSearchModePref={setSearchModePref}
-            minLoopSec={minLoopSec}
-            setMinLoopSec={setMinLoopSec}
-            searchWindowMs={searchWindowMs}
-            setSearchWindowMs={setSearchWindowMs}
-            bakedChannels={bakedChannels}
-            fadeSamples={fadeSamples}
-          />
-        )}
-
-        {page === "variations" && (
-          <>
-            <div className="sfx-var-top">
-              <section className="sfx-rack-card sfx-var-source">
-                <div className="sfx-rack-card-head">
-                  <span className="ds-panel-title">
-                    Source{editIncluded.length > 0 ? " · edited" : ""}
-                  </span>
-                  <span className="sfx-rack-hint ds-tnum">{totalDurationS.toFixed(2)} s</span>
-                </div>
-                <div className="sfx-var-source-wave">
-                  <EditorWaveform
-                    ref={waveRef}
-                    channels={processedChannels}
-                    sampleRate={sampleRate}
-                    loop={null}
-                    activeMarker={activeMarker}
-                    onLoopChange={() => {}}
-                    onSeek={seekToSample}
-                  />
-                </div>
-                <div className="sfx-var-source-transport">
-                  <button
-                    type="button"
-                    disabled={!processedChannels}
-                    onClick={togglePlay}
-                    className={`sfx-tp-play-btn ${isPlaying ? "playing" : ""}`}
-                    title="Play / Pause the source (Space)"
-                    aria-label="Play or pause preview"
-                  >
-                    {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-                  </button>
-                  <div className="sfx-tp-time ds-tnum">
-                    <span>{timePosText}</span>
-                    <span className="sep"> / </span>
-                    <span className="tot">{formatDuration(totalSamples, sampleRate)}</span>
-                  </div>
-                </div>
-              </section>
-              <VariationControls
-                varSpec={varSpec}
-                setVarSpec={setVarSpec}
-                onReset={() =>
-                  setVarSpec((s) => ({ ...DEFAULT_VARIATION_SPEC, count: s.count }))
+      <div className="sfx-studio-layers">
+        <div className="sfx-studio-base" ref={baseRef}>
+          {editHeader}
+          {renderStage("edit")}
+          <div className="sfx-editor-module-row">
+            <div className="sfx-module-section">
+              <span className="ds-microlabel">Edit</span>
+              <div className="sfx-editor-module-tabs" role="tablist" aria-label="Edit modules">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={editModule === "shaper"}
+                  aria-label="Trim & Gain"
+                  title="Trim & Gain (1)"
+                  onClick={() => setEditModule("shaper")}
+                  className={`sfx-module-tab ${editModule === "shaper" ? "active" : ""}`}
+                >
+                  <kbd className="sfx-kbd">1</kbd>
+                  <Sliders size={14} />
+                  <span>Trim &amp; Gain</span>
+                  {shaperActive && <span className="sfx-module-dot on" />}
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={editModule === "eq"}
+                  aria-label="Tone & EQ"
+                  title="Tone & EQ (2)"
+                  onClick={() => setEditModule("eq")}
+                  className={`sfx-module-tab ${editModule === "eq" ? "active" : ""}`}
+                >
+                  <kbd className="sfx-kbd">2</kbd>
+                  <Activity size={14} />
+                  <span>Tone &amp; EQ</span>
+                  {eqActive && <span className="sfx-module-dot on" />}
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={editModule === "shaper" ? !shaperActive : !eqActive}
+                onClick={() =>
+                  editModule === "shaper"
+                    ? setShaper(DEFAULT_SHAPER_SPEC)
+                    : setEq(DEFAULT_EQ_SPEC)
                 }
-              />
+                className="ds-btn ds-btn-ghost ds-btn-sm"
+              >
+                <RotateCcw size={12} />
+                {editModule === "shaper" ? "Reset Trim & Gain" : "Reset Tone & EQ"}
+              </button>
             </div>
-            <TakesPanel
-              variations={variations}
-              activeVarIdx={activeVarIdx}
-              playingVarIdx={playingVarIdx}
-              varPlayRatio={varPlayRatio}
-              takeCount={varSpec.count}
-              setTakeCount={(n) => setVarSpec((s) => ({ ...s, count: n }))}
-              canGenerate={Boolean(processedChannels)}
-              stale={variations.length > 0 && takesBasis !== processedChannels}
-              onGenerate={handleGenerateVariations}
-              onAudition={auditionVariation}
-              onStop={stopVariationPlayback}
-              onReroll={handleRerollSingleVariation}
-              onToggleSelected={toggleTakeSelected}
-              onReplaceSource={(v) => replaceSourceWith(v.name, v.channels, v.sampleRate)}
-              onDragStart={handleTakeDragStart}
-              gridRef={takesGridRef}
-            />
+            <div className="sfx-divider-v" />
+            <div className="sfx-module-section">
+              <span className="ds-microlabel">Create</span>
+              <button
+                type="button"
+                disabled={!processedChannels}
+                onClick={() => goToPage("loop")}
+                className="ds-btn ds-btn-secondary sfx-create-btn"
+                aria-label="Create loop"
+                title="Make a seamless loop from the edited sound (3)"
+              >
+                <kbd className="sfx-kbd">3</kbd>
+                <Repeat size={14} />
+                Loop
+              </button>
+              <button
+                type="button"
+                disabled={!processedChannels}
+                onClick={() => goToPage("variations")}
+                className="ds-btn ds-btn-secondary sfx-create-btn"
+                aria-label="Create variations"
+                title="Make round-robin takes from the edited sound (4)"
+              >
+                <kbd className="sfx-kbd">4</kbd>
+                <Dices size={14} />
+                Variations
+              </button>
+            </div>
+          </div>
+          <div className="sfx-editor-rack">
+            {editModule === "shaper" && (
+              <TrimGainPanels
+                shaper={shaper}
+                setShaper={setShaper}
+                rawTotalSamples={rawTotalSamples}
+                sampleRate={sampleRate}
+                totalDurationS={totalDurationS}
+                canAutoTrim={Boolean(sourceChannels)}
+                onAutoTrim={handleAutoTrimSilence}
+              />
+            )}
+
+            {editModule === "eq" && (
+              <ToneEqPanels eq={eq} setEq={setEq} sampleRate={sampleRate} />
+            )}
+          </div>
+        </div>
+
+        {page !== "edit" && (
+          <>
+            {/* The edit page stays in view behind the sheet; a click on it goes back. */}
+            <div className="sfx-studio-sheet-scrim" onClick={() => goToPage("edit")} />
+            <section className="sfx-studio-sheet" aria-label={pageTitle}>
+              {sheetHeader}
+              {onLoopPage && renderStage("loop")}
+              <div
+                className={`sfx-editor-rack ${page === "variations" ? "sfx-variations-page" : ""}`}
+              >
+                {onLoopPage && (
+                  <LoopPanels
+                    sampleRate={sampleRate}
+                    totalDurationS={totalDurationS}
+                    loopDurationS={loopDurationS}
+                    fadeMs={fadeMs}
+                    setFadeMs={setFadeMs}
+                    fadeCurve={fadeCurve}
+                    setFadeCurve={setFadeCurve}
+                    bakeMode={bakeMode}
+                    setBakeMode={setBakeMode}
+                    snapZero={snapZero}
+                    onToggleSnap={() => {
+                      const next = !snapZero;
+                      setSnapZero(next);
+                      if (next) {
+                        updateLoopPoints(loopStart, loopEnd, true);
+                      }
+                    }}
+                    onResetLoop={resetLoop}
+                    candidates={candidates}
+                    candIndex={candIndex}
+                    onApplyCandidate={(idx) => applyCandidate(idx)}
+                    onClearCandidates={() => {
+                      setCandidates([]);
+                      setCandIndex(-1);
+                      setStatusMsg("Cleared loop suggestions");
+                    }}
+                    searching={searching}
+                    canSearch={Boolean(processedChannels)}
+                    onFindLoops={runLoopSearch}
+                    searchModePref={searchModePref}
+                    setSearchModePref={setSearchModePref}
+                    minLoopSec={minLoopSec}
+                    setMinLoopSec={setMinLoopSec}
+                    searchWindowMs={searchWindowMs}
+                    setSearchWindowMs={setSearchWindowMs}
+                    bakedChannels={bakedChannels}
+                    fadeSamples={fadeSamples}
+                  />
+                )}
+
+                {page === "variations" && (
+                  <>
+                    <div className="sfx-var-top">
+                      <section className="sfx-rack-card sfx-var-source">
+                        <div className="sfx-rack-card-head">
+                          <span className="ds-panel-title">
+                            Source{editIncluded.length > 0 ? " · edited" : ""}
+                          </span>
+                          <span className="sfx-rack-hint ds-tnum">{totalDurationS.toFixed(2)} s</span>
+                        </div>
+                        <div className="sfx-var-source-wave">
+                          <EditorWaveform
+                            ref={waveRef}
+                            channels={processedChannels}
+                            sampleRate={sampleRate}
+                            loop={null}
+                            activeMarker={activeMarker}
+                            onLoopChange={() => {}}
+                            onSeek={seekToSample}
+                          />
+                        </div>
+                        <div className="sfx-var-source-transport">
+                          <button
+                            type="button"
+                            disabled={!processedChannels}
+                            onClick={togglePlay}
+                            className={`sfx-tp-play-btn ${isPlaying ? "playing" : ""}`}
+                            title="Play / Pause the source (Space)"
+                            aria-label="Play or pause preview"
+                          >
+                            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+                          </button>
+                          <div className="sfx-tp-time ds-tnum">
+                            <span>{timePosText}</span>
+                            <span className="sep"> / </span>
+                            <span className="tot">{formatDuration(totalSamples, sampleRate)}</span>
+                          </div>
+                        </div>
+                      </section>
+                      <VariationControls
+                        varSpec={varSpec}
+                        setVarSpec={setVarSpec}
+                        onReset={() =>
+                          setVarSpec((s) => ({ ...DEFAULT_VARIATION_SPEC, count: s.count }))
+                        }
+                      />
+                    </div>
+                    <TakesPanel
+                      variations={variations}
+                      activeVarIdx={activeVarIdx}
+                      playingVarIdx={playingVarIdx}
+                      varPlayRatio={varPlayRatio}
+                      takeCount={varSpec.count}
+                      setTakeCount={(n) => setVarSpec((s) => ({ ...s, count: n }))}
+                      canGenerate={Boolean(processedChannels)}
+                      stale={variations.length > 0 && takesBasis !== processedChannels}
+                      onGenerate={handleGenerateVariations}
+                      onAudition={auditionVariation}
+                      onStop={stopVariationPlayback}
+                      onReroll={handleRerollSingleVariation}
+                      onToggleSelected={toggleTakeSelected}
+                      onReplaceSource={(v) => replaceSourceWith(v.name, v.channels, v.sampleRate)}
+                      onDragStart={handleTakeDragStart}
+                      gridRef={takesGridRef}
+                    />
+                  </>
+                )}
+              </div>
+            </section>
           </>
         )}
       </div>

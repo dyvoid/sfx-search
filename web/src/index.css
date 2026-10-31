@@ -2657,25 +2657,106 @@ button.ds-check:focus-visible {
   color: var(--text-tertiary);
 }
 
-.sfx-create-label {
-  margin-right: var(--space-1);
-}
-
 .sfx-editor-toolbar .ds-btn .sfx-kbd {
   margin-left: 2px;
 }
 
+/* Edit modules and Create (Loop, Variations) share one row: what you can do with the sound. */
 .sfx-editor-module-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
   padding: var(--sfx-gutter) var(--sfx-gutter) 0;
   flex-shrink: 0;
 }
 
-.sfx-module-tab .sfx-kbd {
+.sfx-module-section {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.sfx-module-section > .ds-microlabel {
+  margin-right: var(--space-1);
+}
+
+.sfx-editor-module-row > .sfx-divider-v {
+  align-self: stretch;
+  height: auto;
+  margin: var(--space-1) 0;
+}
+
+.sfx-module-tab .sfx-kbd,
+.sfx-create-btn .sfx-kbd {
   margin-right: 2px;
+}
+
+/* Loop and Variations open as a sheet over the edit page, which stays in
+   view (dimmed, inert) above and beside it: they are made from that edit. */
+.sfx-studio-layers,
+.sfx-studio-base {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.sfx-studio-sheet-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  background: var(--scrim);
+  animation: sfx-sheet-scrim-in var(--duration-base) var(--ease-out);
+}
+
+.sfx-studio-sheet {
+  position: absolute;
+  inset: calc(var(--sfx-sheet-top, 0px) + var(--space-2)) var(--space-6) 0;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-app);
+  border: var(--border-width) solid var(--border-strong);
+  border-bottom: 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  /* The animation's transform ends with it, so the output dialog's fixed
+     scrim (a sibling anyway) is never trapped. */
+  animation: sfx-sheet-in var(--duration-slow) var(--ease-out);
+}
+
+.sfx-studio-sheet > .sfx-editor-rack.sfx-variations-page {
+  overflow-y: auto;
+}
+
+@keyframes sfx-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-6));
+  }
+}
+
+@keyframes sfx-sheet-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sfx-studio-sheet,
+  .sfx-studio-sheet-scrim {
+    animation: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  .sfx-studio-sheet {
+    inset: calc(var(--sfx-sheet-top, 0px) + var(--space-2)) var(--space-2) 0;
+  }
 }
 
 /* Variations page: no main stage; the rack is the page. */

@@ -32,7 +32,13 @@ A wireframe set (`redesign/`, not part of the app) proposed the structure decide
    the selected takes. The page you are on is the output; there is no "export as loop" state.
 4. **Replace source.** A loop or a take can become the Studio's file. It is destructive by design
    and goes through the same replace-with-Undo path as Edit in Studio.
-5. **Save into a chosen library folder.** `POST /api/library/save` writes into any folder inside a
+5. **Loop and Variations open over the edit page.** The edit page's module row holds two
+   sections, Edit (Trim & Gain, Tone & EQ) and Create (Loop, Variations). Loop and Variations open
+   as a sheet over the edit page, which stays in view below its header, dimmed and inert. Full-screen
+   pages made them read as peers of the edit page; the sheet shows they are made from it. A click on
+   the dimmed edit page, or Escape, goes back. A sideways slide between pages was considered: it
+   shows the relation only during the transition and implies an order between Loop and Variations.
+6. **Save into a chosen library folder.** `POST /api/library/save` writes into any folder inside a
    library root, with or without a library source (whose favorite, tags and note it can inherit),
    so local files can be saved to the library too. Only loops get the `loop` tag.
 
@@ -43,7 +49,7 @@ A wireframe set (`redesign/`, not part of the app) proposed the structure decide
   lengths.
 - Every window-level key handler must check that its tab (or session) is the one in front.
 - Leaving the Studio no longer has a key: Escape now steps back from Loop or Variations to the edit
-  page. The keyboard contract records the new rules (T1–T6, S2, S5, S12, S13, P1–P5).
+  page. The keyboard contract records the new rules (T1–T6, S2, S5, S12, S13, P1–P6).
 - Saving no longer switches the Studio to the saved file; the Library adds it to its results
   without moving its own selection.
 - `StudioView` shrank by moving the panels (`editor/panels/`) and the output dialog
