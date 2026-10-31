@@ -30,7 +30,7 @@ from .indexer import IndexStats, index_single_file, run_indexer
 from .scan import compute_file_id, normalize_path, to_os_path
 from .search import SearchEngine, SearchMode, SortMode
 from .store import ModelMismatchError, SearchFilters, SfxStore, UserDataRecord
-from .transcode import EXTENSIONS, TranscodeError, parse_spec, transcode_file
+from .transcode import EXTENSIONS, EncodeSpec, TranscodeError, parse_spec, transcode_file
 
 NATIVE_BROWSER_EXTS: set[str] = {".mp3", ".ogg", ".opus", ".m4a", ".aac", ".flac"}
 
@@ -400,6 +400,37 @@ async def _receive_wav(file: UploadFile, os_dest: str, max_bytes: int) -> None:
         wav_ok = False
     if not wav_ok:
         raise HTTPException(status_code=400, detail="Edited audio is not a valid WAV file")
+
+
+def _strip_known_extension(name: str) -> str:
+    """`name` without surrounding spaces or a known audio extension."""
+    custom = name.strip()
+    for known in EXTENSIONS.values():
+        if custom.lower().endswith(known):
+            return custom[: -len(known)]
+    return custom
+
+
+def _safe_stem(name: str) -> str:
+    """A filename stem safe on Windows; raises 400 when nothing usable is left."""
+    kept = "".join(ch for ch in name if ch.isalnum() or ch in (".", "_", "-", " "))
+    safe = kept[:120].strip(" .")
+    if not safe:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if safe.split(".")[0].strip().upper() in _WINDOWS_RESERVED_NAMES:
+        safe = f"_{safe}"
+    return safe
+
+
+def _free_target(parent_dir: Path, stem: str, ext: str, overwrite: bool) -> Path:
+    """`parent_dir/stem+ext`, numbered `_2`, `_3`, ... unless overwriting."""
+    candidate = parent_dir / f"{stem}{ext}"
+    if not overwrite:
+        counter = 2
+        while os.path.exists(to_os_path(candidate)):
+            candidate = parent_dir / f"{stem}_{counter}{ext}"
+            counter += 1
+    return candidate
 
 
 def create_app(
@@ -909,100 +940,43 @@ def create_app(
                 data = f.read()
         return Response(content=data, media_type=spec.media_type)
 
-    @app.post("/api/files/{file_id}/save-edited")
-    async def api_save_edited_file(
-        file_id: str,
-        file: UploadFile = File(...),
-        suffix: str = Query(".loop"),
-        name: str | None = Query(None),
-        overwrite: bool = Query(False),
-        copy_user_data: bool = Query(True),
-        format: str = Query("wav"),
-        bit_depth: int | None = Query(None),
-        bitrate: int | None = Query(None),
+    def _library_folder(folder: str) -> tuple[Path, str]:
+        """A folder inside a configured library root, and that root; 400 otherwise."""
+        target = normalize_path(folder)
+        target_key = target.lower()
+        roots = [normalize_path(r) for r in cfg.library.roots if str(r).strip()]
+        for root in sorted(roots, key=len, reverse=True):
+            root_key = root.lower()
+            if target_key == root_key or target_key.startswith(root_key.rstrip("/") + "/"):
+                if not os.path.isdir(to_os_path(target)):
+                    raise HTTPException(status_code=404, detail=f"Folder not found: {target}")
+                return Path(target), root
+        raise HTTPException(status_code=400, detail="Folder is not inside a library folder")
+
+    async def _store_in_library(
+        file: UploadFile,
+        *,
+        target: Path,
+        root: str,
+        spec: EncodeSpec,
+        overwrite: bool,
+        source_fid: str | None,
+        copy_user_data: bool,
+        add_loop_tag: bool,
     ) -> dict[str, Any]:
+        """Encode the uploaded WAV to `target`, index it and return its search hit."""
         from starlette.concurrency import run_in_threadpool
 
-        f_row = st.get_file_by_id_or_path(file_id)
-        if f_row is None:
-            raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
-        try:
-            spec = parse_spec(format, bit_depth, bitrate)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        ext = spec.extension
-
-        source_fid = str(f_row["file_id"])
-        source_path = str(f_row["path"])
-        source_root = str(f_row.get("root") or "")
-        src_p = Path(source_path)
-        parent_dir = src_p.parent
-        os_parent = to_os_path(parent_dir)
-        if not os.path.isdir(os_parent):
-            raise HTTPException(
-                status_code=404, detail=f"Destination directory missing: {parent_dir}"
-            )
-
-        custom_name = (name or "").strip()
-        for known in EXTENSIONS.values():
-            if custom_name.lower().endswith(known):
-                custom_name = custom_name[: -len(known)]
-                break
-
-        if custom_name:
-            safe_stem = "".join(
-                ch for ch in custom_name if ch.isalnum() or ch in (".", "_", "-", " ")
-            )[:120].strip(" .")
-            if not safe_stem:
-                raise HTTPException(status_code=400, detail="Invalid filename")
-            if safe_stem.split(".")[0].strip().upper() in _WINDOWS_RESERVED_NAMES:
-                safe_stem = f"_{safe_stem}"
-            candidate = parent_dir / f"{safe_stem}{ext}"
-            if not overwrite:
-                counter = 2
-                while os.path.exists(to_os_path(candidate)):
-                    candidate = parent_dir / f"{safe_stem}_{counter}{ext}"
-                    counter += 1
-            target_norm = normalize_path(candidate)
-        elif overwrite:
-            if src_p.suffix.lower() != ext:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Overwrite without a name needs a {ext} source",
-                )
-            target_norm = normalize_path(src_p)
-        else:
-            raw_suffix = suffix.strip() or ".loop"
-            safe_suffix = "".join(ch for ch in raw_suffix if ch.isalnum() or ch in (".", "_", "-"))
-            if not safe_suffix:
-                safe_suffix = ".loop"
-            if not safe_suffix.startswith((".", "_", "-")):
-                safe_suffix = f".{safe_suffix}"
-
-            stem = src_p.stem
-            # Avoid stacking .loop.loop when saving an already-looped file
-            if stem.lower().endswith(safe_suffix.lower()):
-                base_stem = stem
-            else:
-                base_stem = f"{stem}{safe_suffix}"
-
-            candidate = parent_dir / f"{base_stem}{ext}"
-            counter = 2
-            while os.path.exists(to_os_path(candidate)):
-                candidate = parent_dir / f"{base_stem}_{counter}{ext}"
-                counter += 1
-            target_norm = normalize_path(candidate)
-
+        target_norm = normalize_path(target)
         target_fid = compute_file_id(target_norm)
-        u_map = st.get_user_data_map([source_fid, target_fid])
-        max_bytes = _MAX_UPLOAD_BYTES
+        u_map = st.get_user_data_map([fid for fid in (source_fid, target_fid) if fid])
         target_existed = False
         os_target = to_os_path(target_norm)
         tmp_tag = f"{os.getpid()}_{threading.get_ident()}"
         os_tmp = f"{os_target}.{tmp_tag}.tmp"
         os_tmp_out = f"{os_target}.{tmp_tag}.out.tmp"
         try:
-            await _receive_wav(file, os_tmp, max_bytes)
+            await _receive_wav(file, os_tmp, _MAX_UPLOAD_BYTES)
             await run_in_threadpool(transcode_file, os_tmp, os_tmp_out, spec, cfg.paths.ffmpeg)
             target_existed = os.path.exists(os_target)
             os.replace(os_tmp_out, os_target)
@@ -1026,7 +1000,7 @@ def create_app(
             f_rec = await run_in_threadpool(
                 index_single_file,
                 path=target_norm,
-                root=source_root or str(parent_dir),
+                root=root,
                 config=cfg,
                 store=st,
                 embedder=engine.embedder,
@@ -1041,22 +1015,26 @@ def create_app(
                 status_code=500, detail=f"Saved file but indexing failed: {exc}"
             ) from exc
 
-        src_u = u_map.get(source_fid, UserDataRecord(file_id=source_fid))
-        if copy_user_data:
+        existing = st.get_user_data_map([f_rec.file_id]).get(
+            f_rec.file_id, UserDataRecord(file_id=f_rec.file_id)
+        )
+        base_u = existing
+        if copy_user_data and source_fid is not None:
+            base_u = u_map.get(source_fid, UserDataRecord(file_id=source_fid))
             if overwrite and target_existed and target_fid != source_fid and target_fid in u_map:
-                src_u = u_map[target_fid]
-            next_tags = list(src_u.user_tags)
-            if "loop" not in [t.lower() for t in next_tags]:
-                next_tags.append("loop")
+                base_u = u_map[target_fid]
+        next_tags = list(base_u.user_tags)
+        if add_loop_tag and "loop" not in [t.lower() for t in next_tags]:
+            next_tags.append("loop")
+        if base_u is existing and next_tags == list(existing.user_tags):
+            u_rec = existing
+        else:
             u_rec = st.set_user_data(
                 file_id=f_rec.file_id,
-                favorite=src_u.favorite,
+                favorite=base_u.favorite,
                 user_tags=next_tags,
-                note=src_u.note,
+                note=base_u.note,
             )
-        else:
-            u_new_map = st.get_user_data_map([f_rec.file_id])
-            u_rec = u_new_map.get(f_rec.file_id, UserDataRecord(file_id=f_rec.file_id))
 
         try:
             tags_dict = json.loads(f_rec.tags_json or "{}")
@@ -1096,6 +1074,116 @@ def create_app(
             "note": u_rec.note,
         }
         return {"saved": True, "hit": hit_dict}
+
+    @app.post("/api/files/{file_id}/save-edited")
+    async def api_save_edited_file(
+        file_id: str,
+        file: UploadFile = File(...),
+        suffix: str = Query(".loop"),
+        name: str | None = Query(None),
+        overwrite: bool = Query(False),
+        copy_user_data: bool = Query(True),
+        loop: bool = Query(True),
+        folder: str | None = Query(None),
+        format: str = Query("wav"),
+        bit_depth: int | None = Query(None),
+        bitrate: int | None = Query(None),
+    ) -> dict[str, Any]:
+        f_row = st.get_file_by_id_or_path(file_id)
+        if f_row is None:
+            raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
+        try:
+            spec = parse_spec(format, bit_depth, bitrate)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        ext = spec.extension
+
+        source_fid = str(f_row["file_id"])
+        src_p = Path(str(f_row["path"]))
+        if folder:
+            parent_dir, root = _library_folder(folder)
+        else:
+            parent_dir = src_p.parent
+            root = str(f_row.get("root") or "") or str(parent_dir)
+            if not os.path.isdir(to_os_path(parent_dir)):
+                raise HTTPException(
+                    status_code=404, detail=f"Destination directory missing: {parent_dir}"
+                )
+
+        custom_name = _strip_known_extension(name or "")
+        if custom_name:
+            target = _free_target(parent_dir, _safe_stem(custom_name), ext, overwrite)
+        elif overwrite:
+            if src_p.suffix.lower() != ext:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Overwrite without a name needs a {ext} source",
+                )
+            target = src_p
+        else:
+            raw_suffix = suffix.strip() or ".loop"
+            safe_suffix = "".join(ch for ch in raw_suffix if ch.isalnum() or ch in (".", "_", "-"))
+            if not safe_suffix:
+                safe_suffix = ".loop"
+            if not safe_suffix.startswith((".", "_", "-")):
+                safe_suffix = f".{safe_suffix}"
+
+            stem = src_p.stem
+            # Avoid stacking .loop.loop when saving an already-looped file
+            if stem.lower().endswith(safe_suffix.lower()):
+                base_stem = stem
+            else:
+                base_stem = f"{stem}{safe_suffix}"
+            target = _free_target(parent_dir, base_stem, ext, overwrite=False)
+
+        return await _store_in_library(
+            file,
+            target=target,
+            root=root,
+            spec=spec,
+            overwrite=overwrite,
+            source_fid=source_fid,
+            copy_user_data=copy_user_data,
+            # The "loop" tag has always come with the copied user data on this route.
+            add_loop_tag=loop and copy_user_data,
+        )
+
+    @app.post("/api/library/save")
+    async def api_save_to_library(
+        file: UploadFile = File(...),
+        folder: str = Query(...),
+        name: str = Query(...),
+        overwrite: bool = Query(False),
+        source_file_id: str | None = Query(None),
+        loop: bool = Query(False),
+        format: str = Query("wav"),
+        bit_depth: int | None = Query(None),
+        bitrate: int | None = Query(None),
+    ) -> dict[str, Any]:
+        """Save Studio output into a library folder; the source need not be in the library."""
+        try:
+            spec = parse_spec(format, bit_depth, bitrate)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        parent_dir, root = _library_folder(folder)
+        custom_name = _strip_known_extension(name)
+        if not custom_name:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        target = _free_target(parent_dir, _safe_stem(custom_name), spec.extension, overwrite)
+        source_fid: str | None = None
+        if source_file_id:
+            f_row = st.get_file_by_id_or_path(source_file_id)
+            source_fid = str(f_row["file_id"]) if f_row is not None else None
+        return await _store_in_library(
+            file,
+            target=target,
+            root=root,
+            spec=spec,
+            overwrite=overwrite,
+            source_fid=source_fid,
+            copy_user_data=source_fid is not None,
+            add_loop_tag=loop,
+        )
 
     @app.get("/api/stats")
     def api_stats() -> dict[str, Any]:

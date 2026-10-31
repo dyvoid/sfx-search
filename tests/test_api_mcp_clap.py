@@ -400,6 +400,66 @@ def test_save_edited_long_name_is_bounded(tmp_path: Path) -> None:
     assert len(Path(r.json()["hit"]["filename"]).name) <= 255
 
 
+def test_save_edited_into_chosen_folder(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    other = wav.parent.parent / "Other"
+    other.mkdir()
+    r = _post_edit(client, wid, tmp_path, name="moved", folder=str(other), loop="false")
+    assert r.status_code == 200
+    hit = r.json()["hit"]
+    assert Path(hit["path"]).parent == other
+    assert "loop" not in hit["user_tags"]
+    assert (other / "moved.wav").is_file()
+    # Outside every library root, or missing: refused, nothing written.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert _post_edit(client, wid, tmp_path, name="x", folder=str(outside)).status_code == 400
+    assert not (outside / "x.wav").exists()
+    missing = str(wav.parent / "nope")
+    assert _post_edit(client, wid, tmp_path, name="x", folder=missing).status_code == 404
+    escape = str(wav.parent / ".." / ".." / "outside")
+    assert _post_edit(client, wid, tmp_path, name="x", folder=escape).status_code == 400
+
+
+def _post_library_save(client: TestClient, tmp_path: Path, **params: str) -> Any:
+    payload = tmp_path / "payload.wav"
+    write_sine_wav(payload, freq_hz=440.0, duration_s=0.5)
+    with payload.open("rb") as f:
+        return client.post(
+            "/api/library/save",
+            params=params,
+            files={"file": ("x.wav", f, "audio/wav")},
+        )
+
+
+def test_library_save_without_library_source(tmp_path: Path) -> None:
+    client, wav, _aiff, wid, _aid = _save_edited_client(tmp_path)
+    folder = str(wav.parent)
+    r = _post_library_save(client, tmp_path, folder=folder, name="fresh.wav")
+    assert r.status_code == 200
+    hit = r.json()["hit"]
+    assert hit["filename"] == "fresh.wav"
+    assert hit["user_tags"] == []
+    # Collisions are numbered unless overwriting.
+    r = _post_library_save(client, tmp_path, folder=folder, name="fresh")
+    assert r.json()["hit"]["filename"] == "fresh_2.wav"
+    r = _post_library_save(client, tmp_path, folder=folder, name="fresh", overwrite="true")
+    assert r.json()["hit"]["filename"] == "fresh.wav"
+    # A loop gets the "loop" tag; a library source lends its user data.
+    body = {"favorite": True, "user_tags": ["src"], "note": "n"}
+    assert client.put(f"/api/files/{wid}/user", json=body).status_code == 200
+    r = _post_library_save(
+        client, tmp_path, folder=folder, name="zl", source_file_id=wid, loop="true"
+    )
+    hit = r.json()["hit"]
+    assert hit["favorite"] is True
+    assert hit["user_tags"] == ["src", "loop"]
+    assert _post_library_save(client, tmp_path, folder=folder, name="  ").status_code == 400
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert _post_library_save(client, tmp_path, folder=str(outside), name="x").status_code == 400
+
+
 @pytest.mark.asyncio
 async def test_mcp_server_tools(tmp_path: Path) -> None:
     lib_root = tmp_path / "sfx"
