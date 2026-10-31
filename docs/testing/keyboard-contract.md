@@ -13,10 +13,11 @@ Global principles:
 - **Mouse clicks don't leave stray focus.** After a mouse click in a result row, Space/Enter act
   on the library, not on whatever button or dropdown had focus before.
 - **Browser chords stay the browser's.** Ctrl/Cmd/Alt combinations pass through untouched,
-  except Ctrl/Cmd+S in the Studio.
+  except Alt+1 / Alt+2 (switch tabs) and Ctrl/Cmd+S in the Studio.
 - **Held keys don't repeat actions.** Auto-repeat is ignored for one-shot actions (play, save,
   favorite, toggles); only continuous actions (marker nudge, list navigation) repeat.
-- **One audio stream** plays at a time.
+- **One audio stream** plays at a time. Only the tab in front plays; switching tabs stops
+  playback, and each tab keeps its own position.
 
 ## Library view
 
@@ -29,7 +30,7 @@ Global principles:
 | L5 | results shown | R | Reveal the selected file. On failure the footer shows an error. |
 | L6 | anywhere outside a text field | `/` | Focus the search box. |
 | L7 | search box focused | Escape | Blur the search box; library shortcuts work again. |
-| L8 | results shown | E | Open the Studio on the selected row; library audio pauses. |
+| L8 | results shown | E | Load the selected row into the Studio and switch to the Studio tab; library audio stops. See T4/T5 for what happens to work already in the Studio. |
 | L9 | a row button (Play/Edit/Reveal/Similar/Favorite) was mouse-clicked | Space / Enter / arrows | Act on the library selection (focus was released by the click). |
 | L10 | a row button is focused by Tab | Space / Enter | Activate that button only. |
 | L11 | dropdown option picked by mouse, then a row's waveform clicked | Space | Play/pause; the dropdown does not reopen. |
@@ -43,22 +44,37 @@ Global principles:
 | L19 | transient footer error (e.g. reveal failed) | — | Clears after ~5 s. The "Similar to …" chip in the search bar is not transient and has an "Exit similarity view" button. |
 | L20 | Library modal / first-run screen | click / Enter | "Add folder…" opens the native picker and adds the pick. "or enter a path" reveals an empty, focused path field (no placeholder); Enter adds and hides it; Cancel hides it and returns focus to "or enter a path". |
 
+## Tabs
+
+| ID | Context | Key | Expected |
+|---|---|---|---|
+| T1 | anywhere, no dialog open | Alt+1 / Alt+2 | Switch to the Library / Studio tab. Each tab keeps its state: Library query, filters, folders, scroll and selection; Studio file, edits, loop and variations settings, takes and page. |
+| T2 | Studio tab, no file loaded | — | Empty state with Open file, Pick from Library (switches to the Library) and drag-and-drop. |
+| T3 | something is playing | switch tabs | Playback stops; coming back leaves the tab stopped at its position. |
+| T4 | Edit in Studio / Open file / drop, Studio holds unsaved work | — | The new file replaces it at once; a toast "Studio now holds …" offers Undo for ~8 s, which restores the previous file with every edit, setting, take and its page. No toast when the Studio was empty or unedited. |
+| T5 | Edit in Studio on the library file already loaded | E | Switch to the Studio; its edits are kept. |
+| T6 | a dialog is open (Studio output dialog, Library modal) | Alt+1 / Alt+2 | Nothing: the dialog keeps the keyboard. |
+
 ## Studio
+
+The Studio has an edit page (modules Trim & Gain and Tone & EQ) and two pages made from its
+output: Loop and Variations.
 
 | ID | Context | Key | Expected |
 |---|---|---|---|
 | S1 | Studio, nothing focused | Space | Play/pause. After playing through to the end, the next play starts from the top. |
-| S2 | Studio | Digit1–4 | Switch module (Trim & Gain, Tone & EQ, Seamless Loop, Variations). |
-| S3 | Studio, Trim & Gain or Seamless Loop | `[` / `]` | Select the start / end marker (crop handle in Trim & Gain). Not handled in other modules. |
-| S4 | Studio, Trim & Gain or Seamless Loop | ArrowLeft / ArrowRight | Nudge the active marker 1 ms; Shift = 10 ms; auto-repeat keeps nudging. Not handled in other modules. |
-| S5 | Studio | Ctrl/Cmd+S | With a library file: open the save dialog. Without one (local file): open the Download dialog. Never the browser's Save Page dialog, including while audio is still decoding and on auto-repeat. Ctrl+Shift+S and Ctrl+Alt+S are not the save chord. Matched on the typed key, not the physical key. |
-| S6 | Studio | S / F / Home | Audition the loop seam / run loop search (both Seamless Loop only; elsewhere not handled, and the Test Seam button is hidden) / restart playback. |
+| S2 | Studio | Digit1–4 | 1 / 2: Trim & Gain / Tone & EQ on the edit page (from Loop or Variations: back to the edit page first). 3 / 4: open the Loop / Variations page. Changing page stops playback. |
+| S3 | Studio, Trim & Gain or Loop page | `[` / `]` | Select the start / end marker (crop handle in Trim & Gain). Not handled elsewhere. |
+| S4 | Studio, Trim & Gain or Loop page | ArrowLeft / ArrowRight | Nudge the active marker 1 ms; Shift = 10 ms; auto-repeat keeps nudging. Not handled in other modules. |
+| S5 | Studio | Ctrl/Cmd+S | Open Save to Library for the current page's output (the source's folder preselected; none for a local file). With no library folders configured: open the Download dialog instead. Never the browser's Save Page dialog, including while audio is still decoding and on auto-repeat. Ctrl+Shift+S and Ctrl+Alt+S are not the save chord. Matched on the typed key, not the physical key. |
+| S6 | Studio | S / F / Home | Audition the loop seam / run loop search (both Loop page only; elsewhere not handled, and the Test Seam button is hidden) / restart playback. |
 | S7 | slider (range input) focused | ArrowLeft/Right/Up/Down, Home, End, PageUp/Down | Move the slider natively; no marker nudge. |
 | S8 | slider focused | Space, Digit1–4, Ctrl/Cmd+S | Studio shortcuts still work. |
 | S9 | checkbox / radio focused | Space / Enter | Toggle natively, once per press. |
 | S10 | text or number input focused | digits / letters | Typed into the input; no module switch or shortcut. Ctrl/Cmd+S still opens save. |
 | S11 | Studio | Ctrl/Cmd/Alt + other keys (e.g. Ctrl+1, Cmd+ArrowLeft) | Not handled; not preventDefault'd. |
-| S12 | Studio | Escape | Leave the Studio (back to the library). Escape on a focused slider/checkbox blurs it first. |
+| S12 | Studio | Escape | Loop or Variations page: back to the edit page, settings kept. Edit page: nothing (not prevented). Escape on a focused slider/checkbox blurs it first. |
+| S13 | Studio, Variations page | G | Generate the takes. Not handled on other pages. |
 
 ## Studio save dialog
 
@@ -73,4 +89,16 @@ Global principles:
 | D7 | dialog open | Ctrl/Cmd+S (any focus inside) | Blocked (no browser dialog), no second dialog or save. |
 | D8 | "Replace file" checkbox | hold Space / Enter | Toggles once per press. |
 | D9 | save fails | — | Error shown inside the dialog (role=alert); dialog stays open for retry. |
-| D10 | loaded file changes while open | — | Dialog closes. |
+| D10 | the Studio's file is replaced while open (e.g. a file is opened) | — | Dialog closes; it is not open when Undo brings the old file back. |
+
+## Studio pages and output
+
+Behavior rules for the pages; the e2e tests reference these IDs too.
+
+| ID | Context | Action | Expected |
+|---|---|---|---|
+| P1 | Loop page | Save to Library / Download | Outputs the loop with the crossfade baked in, named `<name>.loop`, tagged `loop`. |
+| P2 | edit page | Save to Library / Download | Outputs the edited sound, named `<name>.edit`, never tagged `loop`; no loop and no takes. |
+| P3 | Variations page | Generate, take checkboxes | Every new take starts selected. Save and Download act on the selected takes, one file each; the buttons count them ("Download 5 files"). |
+| P4 | Variations page, takes exist | the edit changes | "The edit changed after these takes were made." with Regenerate. Loop markers reset to the whole sound whenever the trim or direction changes. |
+| P5 | Loop page / a take | Replace source | That output becomes the Studio's file (unsaved, amber dot), on the edit page, as in T4: Undo while the toast shows. |

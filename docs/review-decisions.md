@@ -9,8 +9,9 @@ Format: what, decision, why. Newest last within each section.
 
 ## Intended behavior
 
-- **Studio switches to the saved file after "Save to Library".** Intended: the saved file already
-  contains the baked edits, so the editor state (loop, EQ, shaper) resets to that file.
+- **Saving does not switch the Studio to the saved file** (supersedes the earlier "Studio switches
+  to the saved file"). The Studio keeps its work; turning output into the edited file is the
+  explicit "Replace source" ([ADR 0007](adr/0007-library-studio-tabs-and-studio-pages.md)).
 - **Overwrite with a custom name replaces whatever file has that name** in the source folder, not
   just the source. That is what "Replace file if it already exists" means.
 - **Deleting every file in a root does not mark them missing.** Trade-off of the offline-root
@@ -18,8 +19,8 @@ Format: what, decision, why. Newest last within each section.
   (unmounted drive). Remove the root from the library to drop its files.
 - **An unreadable subtree is protected from "missing"**, not its whole root (a drive root always
   errors on e.g. `System Volume Information`).
-- **Escape on a focused `<button>` in the Studio leaves the Studio.** Only sliders/checkboxes
-  blur first.
+- **Escape on a focused `<button>` on the Loop or Variations page goes back to the edit page.**
+  Only sliders/checkboxes blur first.
 - **Changing tokenization requires a reindex.** Existing `search_text` is not migrated.
 
 ## Rejected or deferred findings
@@ -66,3 +67,15 @@ Format: what, decision, why. Newest last within each section.
   toggles in a bar, with label-sized hit areas; both are keyboard reachable (L18, L20).
 - **The waveform readout strip stays in modules without markers (Tone & EQ, Variations).**
   Intended: hiding it would make the waveform jump in height when switching modules.
+- **The "unsaved work" guard counts edits, not saves.** The amber dot, the Undo toast and the
+  prompt on closing the page fire while the Studio holds edits, a loop, takes or a derived file,
+  even right after saving them. Accepted: simple and on the safe side.
+- **No "Saves as" filename in the Loop and Variations headers** (the wireframe had one). The
+  output dialog shows the editable filename; the header stays uncluttered.
+- **No 1–6 keys to audition takes** (proposed in the wireframe). They would clash with 1–4, which
+  switch modules and pages from every Studio page.
+- **The take cards draw the take with its pitch and volume curves, not over a faint outline of the
+  source** (wireframe). Deferred: takes differ in length, so a shared time scale needs more work
+  than it is worth now.
+- **Download of several takes is one browser download per file**, not a ZIP. Browsers ask once per
+  site to allow multiple downloads. Revisit if it gets in the way.

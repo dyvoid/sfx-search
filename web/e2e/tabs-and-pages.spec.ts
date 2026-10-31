@@ -142,7 +142,7 @@ test.describe("Studio pages", () => {
     expect(saveCalls(api)[0]).toContain("loop=false");
   });
 
-  test("P3 Generate (G) makes selected takes; Download counts the selected ones", async ({
+  test("P3 S13 Generate (G) makes selected takes; Download counts the selected ones", async ({
     app,
     api,
   }) => {

@@ -17,13 +17,12 @@ A local, offline search engine for large personal sound-effects libraries (30–
 - **Studio Auditioning Workspace:**
   - Continuous anti-aliased mirror-envelope mini-waveforms with pointer-drag scrubbing, best-window highlights on long files, and a real-time 16-band Web Audio FFT spectrum & peak-hold meter.
   - Instant HTTP `Range` (`206 Partial Content`) playback starting at the best-matching 10s window offset, with on-the-fly `ffmpeg` WAV transcoding and disk caching for non-browser-native formats (AIFF, multichannel, 32-bit float).
-  - Keyboard-first workflow (<kbd>↑</kbd>/<kbd>↓</kbd> navigate, <kbd>Space</kbd> play/pause, <kbd>R</kbd> reveal in Explorer, <kbd>F</kbd> toggle favorite, <kbd>Enter</kbd> toggle inspector, <kbd>/</kbd> focus search) and drag-and-drop reference audio matching.
-- **Studio Editor (non-destructive, in-browser DSP):** Open any result with **Edit Audio** (<kbd>E</kbd>) to work on a decoded 48 kHz copy through a real-time processing chain. Four modules:
-  - **Trim & Gain** — draggable IN/OUT crop handles on the waveform, boundary fade-in/fade-out, and gain.
-  - **Tone & EQ** — biquad EQ chain (low shelf / peaking / high shelf) with a live frequency-response graph.
-  - **Seamless Loop** — loop-point editor with zoom-to-seam, zero-crossing snapping, adjustable crossfade (pre- or post-roll), an automatic loop-candidate finder running in a Web Worker, and a seam oscilloscope with continuity metrics (step delta, energy match, seam score).
-  - **Variations** — round-robin take generator applying pitch/volume modulation curves in Foley or Melodic mode; audition takes, heart the keepers, test-fire the sequence, and drag takes or the baked file straight into a DAW.
-  - Output can be **baked and downloaded as WAV** or **saved back into the library** (`/api/files/{id}/save-edited`), where it is indexed like any other file. Peak/RMS signal meters and loop-aware transport included.
+  - Keyboard-first workflow (<kbd>↑</kbd>/<kbd>↓</kbd> navigate, <kbd>Space</kbd> play/pause, <kbd>R</kbd> reveal in Explorer, <kbd>F</kbd> toggle favorite, <kbd>Enter</kbd> toggle inspector, <kbd>/</kbd> focus search, <kbd>E</kbd> edit in Studio) and drag-and-drop reference audio matching.
+- **Studio (non-destructive, in-browser DSP):** Library and Studio are tabs (<kbd>Alt</kbd>+<kbd>1</kbd> / <kbd>Alt</kbd>+<kbd>2</kbd>) that each keep their state. Send a result to the Studio with **Edit in Studio** (<kbd>E</kbd>), or open or drop any audio file there, to work on a decoded copy through a real-time processing chain:
+  - **Edit page** — **Trim & Gain** (draggable IN/OUT crop handles, boundary fades, gain, normalize) and **Tone & EQ** (biquad EQ chain with a live frequency-response graph). Edits apply live; each module has a Reset.
+  - **Loop page** (<kbd>3</kbd>) — loop-point editor on the edited sound with zoom-to-seam, zero-crossing snapping, adjustable crossfade, an automatic loop-candidate finder in a Web Worker, and a seam oscilloscope with continuity metrics.
+  - **Variations page** (<kbd>4</kbd>) — round-robin takes from the edited sound with pitch/volume modulation curves in Foley or Melodic mode; audition, re-roll and select takes, or drag them into a DAW.
+  - Each page **saves to a library folder** (`/api/library/save`, indexed like any other file) or **downloads** its own output: the edit, the loop with its crossfade baked in, or the selected takes. **Replace source** turns a loop or take into the file being edited, with Undo.
 - **First-Run Folder Setup & Live Background Indexing:** Add or remove library folders directly from the UI (with native Windows folder picker support); files are decoded and embedded in the background and search unlocks automatically as soon as the first batch commits.
 - **MCP Server:** Exposes `search_sounds`, `batch_search`, `find_similar`, `get_sound`, and `library_stats` over `stdio` and `streamable-http`.
 
