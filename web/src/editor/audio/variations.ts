@@ -29,6 +29,7 @@ import {
   EqSpec,
 } from "./dspChain";
 import { fadeInGain, fadeOutGain } from "./loopdsp";
+import { timeStretch } from "./timeStretch";
 
 export type VariationMode = "foley" | "melodic";
 
@@ -52,7 +53,7 @@ export interface VariationSpec {
   protectStartPct: number;
   /** Protect end (fade-out the internal modulation spline over last X% of file) [0, 50]%. */
   protectEndPct: number;
-  /** Explicit overall duration / speed spread per take [0, 25]%. */
+  /** Length spread per take [0, 25]%, applied without changing pitch (0 = every take as long as the source). */
   lengthSpreadPct: number;
   /** Compensate spectral tilt when pitch shifts so formants/body stay natural. */
   preserveFormants: boolean;
@@ -361,13 +362,11 @@ export function synthesizeVariation(
   }
 
   // 4. Compute exact playback rate table
-  // Global pitch ratio + explicit length spread (decoupled from zero-mean internal drift)
+  // Resampling sets the pitch only (global shift + zero-mean drift); the length
+  // is set afterwards by a pitch-preserving stretch (step 5b).
   const globalPitchRatio = Math.pow(2, globalSemitones / 12);
   const lengthMultiplier = 1 + randSigned() * lenSpreadNorm;
-  const targetMeanRate = Math.max(
-    0.45,
-    Math.min(2.2, globalPitchRatio / Math.max(0.5, lengthMultiplier))
-  );
+  const targetMeanRate = Math.max(0.45, Math.min(2.2, globalPitchRatio));
 
   // Max internal drift excursion in semitones (Foley: ±3.5 st, Melodic: ±0.6 st)
   const maxDriftSemitones = spec.mode === "foley" ? 3.5 : 0.6;
@@ -439,7 +438,14 @@ export function synthesizeVariation(
     actualOutLen = i + 1;
   }
 
-  let outChannels = tempChannels.map((ch) => ch.subarray(0, actualOutLen));
+  // 5b. Length: source length x the length variation, whatever the pitch did.
+  const targetLen = Math.max(16, Math.round(srcLen * lengthMultiplier));
+  let outChannels = timeStretch(
+    tempChannels.map((ch) => ch.subarray(0, actualOutLen)),
+    sampleRate,
+    targetLen / Math.max(1, actualOutLen)
+  );
+  actualOutLen = outChannels[0]?.length ?? actualOutLen;
 
   // 6. Physically-Correlated Tone Spread ( Strike Brightness + Resonant Mode Jitter + Formant Preservation )
   let lowDb = 0;

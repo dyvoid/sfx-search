@@ -188,7 +188,7 @@ export const VariationControls: React.FC<VariationControlsProps> = ({
           />
           <SliderRow
             label="Length Variation"
-            tip="How much faster or slower (shorter or longer) each take is allowed to be. Set to 0% when variations must stay locked to an exact animation length."
+            tip="How much shorter or longer each take may be. The pitch does not change. Set to 0% when variations must stay locked to an exact animation length."
             value={varSpec.lengthSpreadPct}
             max={25}
             readout={`±${varSpec.lengthSpreadPct}%`}
