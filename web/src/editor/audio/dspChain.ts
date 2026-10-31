@@ -39,32 +39,96 @@ export const DEFAULT_SHAPER_SPEC: ShaperSpec = {
   dcOffsetRemove: false,
 };
 
-export interface EqSpec {
-  /** High-pass cutoff Hz (20 = off, up to 2000 Hz). */
-  highpassHz: number;
-  /** Low shelf @ 120 Hz in dB (-18 to +18). */
-  lowGainDb: number;
-  /** Peaking mid band gain in dB (-18 to +18). */
-  midGainDb: number;
-  /** Peaking mid center frequency in Hz (200 to 6000). */
-  midFreqHz: number;
-  /** Peaking mid Q factor (0.4 to 6.0). */
-  midQ: number;
-  /** High shelf @ 4500 Hz in dB (-18 to +18). */
-  highGainDb: number;
-  /** Low-pass cutoff Hz (20000 = off, down to 400 Hz). */
-  lowpassHz: number;
+export type EqBandId = "hp" | "low" | "mid" | "high" | "lp";
+export type EqSlope = 12 | 24 | 36 | 48;
+export type EqToneType = "bell" | "shelf";
+
+/** High-pass / low-pass band: Butterworth cut, 12-48 dB/oct. */
+export interface EqCutBand {
+  on: boolean;
+  freqHz: number;
+  slope: EqSlope;
 }
 
+/**
+ * Low / mid / high band. `type` picks bell or shelf (low = low shelf,
+ * high = high shelf); the mid band is always a bell.
+ */
+export interface EqToneBand {
+  on: boolean;
+  freqHz: number;
+  /** Gain in dB (-18 to +18). */
+  gainDb: number;
+  q: number;
+  type: EqToneType;
+}
+
+/** Five fixed bands in series: HP -> Low -> Mid -> High -> LP. */
+export interface EqSpec {
+  /** Global bypass: false skips every band (A/B against the dry sound). */
+  on: boolean;
+  hp: EqCutBand;
+  low: EqToneBand;
+  mid: EqToneBand;
+  high: EqToneBand;
+  lp: EqCutBand;
+}
+
+export const EQ_BAND_IDS: readonly EqBandId[] = ["hp", "low", "mid", "high", "lp"];
+export const EQ_MIN_HZ = 20;
+export const EQ_MAX_HZ = 20000;
+export const EQ_MAX_GAIN_DB = 18;
+export const EQ_MIN_Q = 0.3;
+export const EQ_MAX_BELL_Q = 10;
+/** Shelves above this Q overshoot into a bump/dip either side of the corner. */
+export const EQ_MAX_SHELF_Q = 2;
+export const EQ_SLOPES: readonly EqSlope[] = [12, 24, 36, 48];
+
 export const DEFAULT_EQ_SPEC: EqSpec = {
-  highpassHz: 20,
-  lowGainDb: 0,
-  midGainDb: 0,
-  midFreqHz: 1200,
-  midQ: 1.0,
-  highGainDb: 0,
-  lowpassHz: 20000,
+  on: true,
+  hp: { on: false, freqHz: 80, slope: 24 },
+  low: { on: true, freqHz: 120, gainDb: 0, q: Math.SQRT1_2, type: "shelf" },
+  mid: { on: true, freqHz: 1200, gainDb: 0, q: 1.0, type: "bell" },
+  high: { on: true, freqHz: 4500, gainDb: 0, q: Math.SQRT1_2, type: "shelf" },
+  lp: { on: false, freqHz: 16000, slope: 24 },
 };
+
+export function isCutBand(id: EqBandId): id is "hp" | "lp" {
+  return id === "hp" || id === "lp";
+}
+
+export function eqQRange(band: EqToneBand): [number, number] {
+  return [EQ_MIN_Q, band.type === "shelf" ? EQ_MAX_SHELF_Q : EQ_MAX_BELL_Q];
+}
+
+/** Clamp a band to its valid ranges (shared by drag, keyboard and typed values). */
+export function clampToneBand(band: EqToneBand): EqToneBand {
+  const [qMin, qMax] = eqQRange(band);
+  return {
+    ...band,
+    freqHz: Math.max(EQ_MIN_HZ, Math.min(EQ_MAX_HZ, band.freqHz)),
+    gainDb: Math.max(-EQ_MAX_GAIN_DB, Math.min(EQ_MAX_GAIN_DB, band.gainDb)),
+    q: Math.max(qMin, Math.min(qMax, band.q)),
+  };
+}
+
+export function clampCutBand(band: EqCutBand): EqCutBand {
+  return {
+    ...band,
+    freqHz: Math.max(EQ_MIN_HZ, Math.min(EQ_MAX_HZ, band.freqHz)),
+  };
+}
+
+/**
+ * What double-clicking a band's node resets: tone bands go back to 0 dB
+ * (frequency, Q and type kept), cut bands back to their default cutoff.
+ */
+export function zeroEqBand(spec: EqSpec, id: EqBandId): EqSpec {
+  if (isCutBand(id)) {
+    return { ...spec, [id]: { ...spec[id], freqHz: DEFAULT_EQ_SPEC[id].freqHz } };
+  }
+  return { ...spec, [id]: { ...spec[id], gainDb: 0 } };
+}
 
 interface BiquadCoeffs {
   b0: number;
@@ -100,12 +164,17 @@ function makeLowpass(fc: number, sr: number, q = Math.SQRT1_2): BiquadCoeffs {
   return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 };
 }
 
-function makeLowShelf(fc: number, gainDb: number, sr: number): BiquadCoeffs {
+function makeLowShelf(
+  fc: number,
+  gainDb: number,
+  q: number,
+  sr: number
+): BiquadCoeffs {
   const A = Math.pow(10, gainDb / 40);
   const w0 = (2 * Math.PI * Math.max(20, Math.min(fc, sr * 0.45))) / sr;
   const cos = Math.cos(w0);
   const sin = Math.sin(w0);
-  const alpha = (sin / 2) * Math.sqrt(2);
+  const alpha = sin / (2 * Math.max(0.1, q));
   const twoSqrtAAlpha = 2 * Math.sqrt(A) * alpha;
   const b0 = A * (A + 1 - (A - 1) * cos + twoSqrtAAlpha);
   const b1 = 2 * A * (A - 1 - (A + 1) * cos);
@@ -116,12 +185,17 @@ function makeLowShelf(fc: number, gainDb: number, sr: number): BiquadCoeffs {
   return { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 };
 }
 
-function makeHighShelf(fc: number, gainDb: number, sr: number): BiquadCoeffs {
+function makeHighShelf(
+  fc: number,
+  gainDb: number,
+  q: number,
+  sr: number
+): BiquadCoeffs {
   const A = Math.pow(10, gainDb / 40);
-  const w0 = (2 * Math.PI * Math.max(40, Math.min(fc, sr * 0.45))) / sr;
+  const w0 = (2 * Math.PI * Math.max(20, Math.min(fc, sr * 0.45))) / sr;
   const cos = Math.cos(w0);
   const sin = Math.sin(w0);
-  const alpha = (sin / 2) * Math.sqrt(2);
+  const alpha = sin / (2 * Math.max(0.1, q));
   const twoSqrtAAlpha = 2 * Math.sqrt(A) * alpha;
   const b0 = A * (A + 1 + (A - 1) * cos + twoSqrtAAlpha);
   const b1 = -2 * A * (A - 1 + (A + 1) * cos);
@@ -139,9 +213,9 @@ function makePeaking(
   sr: number
 ): BiquadCoeffs {
   const A = Math.pow(10, gainDb / 40);
-  const w0 = (2 * Math.PI * Math.max(40, Math.min(fc, sr * 0.45))) / sr;
+  const w0 = (2 * Math.PI * Math.max(20, Math.min(fc, sr * 0.45))) / sr;
   const cos = Math.cos(w0);
-  const alpha = Math.sin(w0) / (2 * Math.max(0.2, q));
+  const alpha = Math.sin(w0) / (2 * Math.max(0.1, q));
   const b0 = 1 + alpha * A;
   const b1 = -2 * cos;
   const b2 = 1 - alpha * A;
@@ -164,16 +238,11 @@ function applyBiquadInPlace(buf: Float32Array, c: BiquadCoeffs): void {
   }
 }
 
-/**
- * Evaluate the composite EQ magnitude response (in dB) at a given frequency `hz`
- * so the UI can draw an exact real-time response curve.
- */
-export function evaluateEqResponseDb(
-  spec: EqSpec,
+function stagesResponseDb(
+  stages: readonly BiquadCoeffs[],
   hz: number,
-  sampleRate = 48000
+  sampleRate: number
 ): number {
-  const stages = buildEqStages(spec, sampleRate);
   if (stages.length === 0) {
     return 0;
   }
@@ -197,29 +266,97 @@ export function evaluateEqResponseDb(
 }
 
 /**
- * Each band is bypassed at its neutral setting (high-pass at its minimum,
- * low-pass at its maximum, zero gain), so default settings yield no stages.
+ * Evaluate the composite EQ magnitude response (in dB) at a given frequency `hz`
+ * so the UI can draw an exact real-time response curve.
+ */
+export function evaluateEqResponseDb(
+  spec: EqSpec,
+  hz: number,
+  sampleRate = 48000
+): number {
+  return stagesResponseDb(buildEqStages(spec, sampleRate), hz, sampleRate);
+}
+
+/** The composite response at many frequencies, building the stages once. */
+export function eqResponseCurveDb(
+  spec: EqSpec,
+  freqsHz: ArrayLike<number>,
+  sampleRate = 48000
+): Float32Array {
+  const stages = buildEqStages(spec, sampleRate);
+  const out = new Float32Array(freqsHz.length);
+  for (let i = 0; i < freqsHz.length; i++) {
+    out[i] = stagesResponseDb(stages, freqsHz[i], sampleRate);
+  }
+  return out;
+}
+
+/**
+ * Butterworth section Qs for an N-th order cut (N = slope / 6): a cascade of
+ * N/2 biquads with these Qs gives a maximally flat passband at -3 dB on fc.
+ */
+function butterworthQs(slope: EqSlope): number[] {
+  const order = slope / 6;
+  const qs: number[] = [];
+  for (let k = 1; k <= order / 2; k++) {
+    qs.push(1 / (2 * Math.sin((Math.PI * (2 * k - 1)) / (2 * order))));
+  }
+  return qs;
+}
+
+function toneStage(
+  id: "low" | "mid" | "high",
+  band: EqToneBand,
+  sampleRate: number
+): BiquadCoeffs {
+  if (band.type === "shelf" && id !== "mid") {
+    return id === "low"
+      ? makeLowShelf(band.freqHz, band.gainDb, band.q, sampleRate)
+      : makeHighShelf(band.freqHz, band.gainDb, band.q, sampleRate);
+  }
+  return makePeaking(band.freqHz, band.gainDb, band.q, sampleRate);
+}
+
+/**
+ * Switched-off bands, and tone bands at 0 dB, add no stage, so the default
+ * spec yields none and the source passes through untouched.
  */
 function buildEqStages(spec: EqSpec, sampleRate: number): BiquadCoeffs[] {
   const stages: BiquadCoeffs[] = [];
-  if (spec.highpassHz > 22) {
-    stages.push(makeHighpass(spec.highpassHz, sampleRate));
+  if (!spec.on) {
+    return stages;
   }
-  if (Math.abs(spec.lowGainDb) > 0.05) {
-    stages.push(makeLowShelf(120, spec.lowGainDb, sampleRate));
+  if (spec.hp.on) {
+    for (const q of butterworthQs(spec.hp.slope)) {
+      stages.push(makeHighpass(spec.hp.freqHz, sampleRate, q));
+    }
   }
-  if (Math.abs(spec.midGainDb) > 0.05) {
-    stages.push(
-      makePeaking(spec.midFreqHz, spec.midGainDb, spec.midQ, sampleRate)
-    );
+  for (const id of ["low", "mid", "high"] as const) {
+    const band = spec[id];
+    if (band.on && Math.abs(band.gainDb) > 0.05) {
+      stages.push(toneStage(id, band, sampleRate));
+    }
   }
-  if (Math.abs(spec.highGainDb) > 0.05) {
-    stages.push(makeHighShelf(4500, spec.highGainDb, sampleRate));
-  }
-  if (spec.lowpassHz < 19500) {
-    stages.push(makeLowpass(spec.lowpassHz, sampleRate));
+  if (spec.lp.on) {
+    for (const q of butterworthQs(spec.lp.slope)) {
+      stages.push(makeLowpass(spec.lp.freqHz, sampleRate, q));
+    }
   }
   return stages;
+}
+
+/** Response of one band alone, ignoring its own and the global on switch. */
+export function eqBandResponseCurveDb(
+  spec: EqSpec,
+  id: EqBandId,
+  freqsHz: ArrayLike<number>,
+  sampleRate = 48000
+): Float32Array {
+  const solo: EqSpec = {
+    ...DEFAULT_EQ_SPEC,
+    [id]: { ...spec[id], on: true },
+  };
+  return eqResponseCurveDb(solo, freqsHz, sampleRate);
 }
 
 export function isShaperActive(shaper: ShaperSpec): boolean {

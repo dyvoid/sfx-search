@@ -476,11 +476,9 @@ export function synthesizeVariation(
     Math.abs(lowDb) > 0.1 || Math.abs(midDb) > 0.1 || Math.abs(highDb) > 0.1;
   const eqSpec: EqSpec = {
     ...DEFAULT_EQ_SPEC,
-    lowGainDb: lowDb,
-    midGainDb: midDb,
-    midFreqHz: midFreq,
-    midQ: 1.1 + rng() * 1.2,
-    highGainDb: highDb,
+    low: { ...DEFAULT_EQ_SPEC.low, gainDb: lowDb },
+    mid: { ...DEFAULT_EQ_SPEC.mid, gainDb: midDb, freqHz: midFreq, q: 1.1 + rng() * 1.2 },
+    high: { ...DEFAULT_EQ_SPEC.high, gainDb: highDb },
   };
 
   if (eqNeeded) {

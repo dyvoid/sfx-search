@@ -75,6 +75,10 @@ output: Loop and Variations.
 | S11 | Studio | Ctrl/Cmd/Alt + other keys (e.g. Ctrl+1, Cmd+ArrowLeft) | Not handled; not preventDefault'd. |
 | S12 | Studio | Escape | Loop or Variations page: back to the edit page, settings kept. Edit page: nothing (not prevented). Escape on a focused slider/checkbox blurs it first. |
 | S13 | Studio, Variations page | G | Generate the takes. Not handled on other pages. |
+| S14 | Tone & EQ, an EQ node focused (Tab, or a click on it) | ArrowLeft/Right, ArrowUp/Down, PageUp/Down | Move that band: frequency a semitone per press (Shift: a quarter), gain 0.5 dB (Shift: 0.1 dB), Q a sixth of an octave. High-/low-pass nodes take Left/Right only; Up/Down and PageUp/Down are not handled there. Auto-repeat keeps moving. |
+| S15 | Tone & EQ, an EQ node focused | `0` | Reset the band as a double-click does: bell/shelf bands to 0 dB (frequency, Q, type kept), high-/low-pass to their default cutoff. |
+| S16 | Tone & EQ, an EQ node focused | Space, Digit1–4, Ctrl/Cmd+S | Studio shortcuts still work (as S8). |
+| S17 | Tone & EQ, Presets menu open | ArrowUp/Down, Home, End, Escape, Tab | Move between presets (wrapping); Enter picks one. Escape closes only the menu and focus returns to Presets; Tab closes it. |
 
 ## Studio save dialog
 
@@ -103,3 +107,4 @@ Behavior rules for the pages; the e2e tests reference these IDs too.
 | P4 | Variations page, takes exist | the edit changes | "The edit changed after these takes were made." with Regenerate. Loop markers reset to the whole sound whenever the trim or direction changes. |
 | P5 | Loop page / a take | Replace source | That output becomes the Studio's file (unsaved, amber dot), on the edit page, as in T4: Undo while the toast shows. |
 | P6 | Loop or Variations page | Tab; a click on the dimmed edit page around the sheet | Loop and Variations open as a sheet over the edit page, which stays in view but inert: Tab never lands on it. A click on it goes back to the edit page (as Escape, S12), settings kept. |
+| P7 | Tone & EQ | click / drag / double-click / wheel | A band pill selects the band for the settings panel; its power toggle switches the band on/off without selecting it. Dragging a node moves frequency (and gain for bell/shelf; Shift = fine); double-click resets it (S15); the wheel over a bell/shelf node changes Q. The switch beside "Parametric EQ" bypasses all bands. Clicking a value lets you type it ("1.2k", "-3"). The audio follows every change; on long files a drag re-renders on release. |

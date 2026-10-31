@@ -105,6 +105,8 @@ export type StudioPage = "edit" | "loop" | "variations";
 export type EditModule = "shaper" | "eq";
 
 const DEFAULT_LOOP_FADE_MS = 350;
+/** Above this render time an EQ drag re-renders the audio on release only. */
+const EQ_LIVE_RENDER_MAX_MS = 50;
 const DEFAULT_LOOP_CURVE: FadeCurve = "equal-power";
 
 const CURVE_NAMES: Record<FadeCurve, string> = {
@@ -191,6 +193,14 @@ export const StudioView: React.FC<StudioViewProps> = ({
   // Edit page state
   const [shaper, setShaper] = useState<ShaperSpec>(DEFAULT_SHAPER_SPEC);
   const [eq, setEq] = useState<EqSpec>(DEFAULT_EQ_SPEC);
+  // While an EQ node is dragged, the audio follows a paced copy of the spec
+  // (the graph itself follows `eq` live); null when no drag is on.
+  const [pacedEq, setPacedEq] = useState<EqSpec | null>(null);
+  const renderEq = pacedEq ?? eq;
+  const eqRef = useRef(eq);
+  eqRef.current = eq;
+  const renderCostRef = useRef(0);
+  const lastRenderAtRef = useRef(0);
 
   // Variations page state
   const [varSpec, setVarSpec] = useState<VariationSpec>(DEFAULT_VARIATION_SPEC);
@@ -406,7 +416,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
       prevProcRef.current = null;
       return;
     }
-    const processed = applyDspChain(sourceChannels, sampleRate, shaper, eq);
+    const t0 = performance.now();
+    const processed = applyDspChain(sourceChannels, sampleRate, shaper, renderEq);
+    lastRenderAtRef.current = performance.now();
+    renderCostRef.current = lastRenderAtRef.current - t0;
     const newLen = processed[0]?.length ?? 0;
     const prev = prevProcRef.current;
     prevProcRef.current = {
@@ -430,7 +443,24 @@ export const StudioView: React.FC<StudioViewProps> = ({
       setCandidates([]);
       setCandIndex(-1);
     }
-  }, [sourceChannels, sampleRate, shaper, eq]);
+  }, [sourceChannels, sampleRate, shaper, renderEq]);
+
+  // Re-render the audio during an EQ drag only as often as the render allows,
+  // and not at all when one render is too slow to keep up: then the drag
+  // lands on release (handleEqDrag), and the graph stays smooth meanwhile.
+  useEffect(() => {
+    if (!pacedEq || pacedEq === eq || renderCostRef.current > EQ_LIVE_RENDER_MAX_MS) {
+      return;
+    }
+    const interval = Math.max(16, renderCostRef.current * 1.5);
+    const wait = Math.max(0, interval - (performance.now() - lastRenderAtRef.current));
+    const id = window.setTimeout(() => setPacedEq(eqRef.current), wait);
+    return () => window.clearTimeout(id);
+  }, [eq, pacedEq]);
+
+  const handleEqDrag = useCallback((dragging: boolean) => {
+    setPacedEq(dragging ? eqRef.current : null);
+  }, []);
 
   // In Trim & Gain the waveform shows the full, uncropped sound so the IN/OUT
   // handles can be dragged and the trimmed-away parts show dimmed. Kept while
@@ -446,8 +476,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
       fadeInMs: 0,
       fadeOutMs: 0,
     };
-    return applyDspChain(sourceChannels, sampleRate, noCropShaper, eq);
-  }, [editModule, sourceChannels, sampleRate, shaper, eq]);
+    return applyDspChain(sourceChannels, sampleRate, noCropShaper, renderEq);
+  }, [editModule, sourceChannels, sampleRate, shaper, renderEq]);
 
   const rawTotalSamples = sourceChannels?.[0]?.length ?? 0;
   const cropStartSamples = useMemo(
@@ -477,6 +507,20 @@ export const StudioView: React.FC<StudioViewProps> = ({
     loopStart,
     loopEnd,
   };
+
+  // Where the playhead is in the source, i.e. in the EQ's input, for the live
+  // spectrum. Null when the main transport is not playing.
+  const getEqInputPosition = useCallback((): number | null => {
+    const tp = transportRef.current;
+    const p = tp?.playheadSamples() ?? null;
+    if (!tp || p === null) {
+      return null;
+    }
+    const inEdit = tp.mode === "loop" ? markersRef.current.loopStart + p : p;
+    return shaper.reverse
+      ? markersRef.current.cropOut - 1 - inEdit
+      : markersRef.current.cropIn + inEdit;
+  }, [shaper.reverse]);
 
   const updateCropPoints = useCallback(
     (nextInSample: number, nextOutSample: number): [number, number] | null => {
@@ -2525,7 +2569,17 @@ export const StudioView: React.FC<StudioViewProps> = ({
             )}
 
             {editModule === "eq" && (
-              <ToneEqPanels eq={eq} setEq={setEq} sampleRate={sampleRate} />
+              <ToneEqPanels
+                eq={eq}
+                setEq={setEq}
+                onDrag={handleEqDrag}
+                sampleRate={sampleRate}
+                inputChannels={sourceChannels}
+                inputStart={cropStartSamples}
+                inputEnd={cropEndSamples}
+                isPlaying={isPlaying}
+                getInputPosition={getEqInputPosition}
+              />
             )}
           </div>
         </div>

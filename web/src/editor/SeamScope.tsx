@@ -1,5 +1,4 @@
 import React, { useEffect, useRef } from "react";
-import { EqSpec, evaluateEqResponseDb } from "./audio/dspChain";
 
 interface SeamScopeProps {
   bakedChannels: Float32Array[] | null;
@@ -7,7 +6,7 @@ interface SeamScopeProps {
   fadeSamples: number;
 }
 
-function readTokenColor(varName: string, fallback: string): string {
+export function readTokenColor(varName: string, fallback: string): string {
   const probe = document.createElement("div");
   document.body.appendChild(probe);
   probe.style.color = `var(${varName}, ${fallback})`;
@@ -162,125 +161,6 @@ export const SeamScope: React.FC<SeamScopeProps> = ({
       ref={canvasRef}
       className="sfx-seam-scope-canvas"
       aria-label="Loop seam phase and continuity oscilloscope"
-    />
-  );
-};
-
-interface EqResponseGraphProps {
-  spec: EqSpec;
-  sampleRate: number;
-}
-
-export const EqResponseGraph: React.FC<EqResponseGraphProps> = ({
-  spec,
-  sampleRate,
-}) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    const cv = canvasRef.current;
-    if (!cv) {
-      return;
-    }
-    const g = cv.getContext("2d");
-    if (!g) {
-      return;
-    }
-
-    const dpr = window.devicePixelRatio || 1;
-    const w = cv.clientWidth || 260;
-    const h = cv.clientHeight || 88;
-    cv.width = Math.round(w * dpr);
-    cv.height = Math.round(h * dpr);
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, w, h);
-
-    const gridColor = readTokenColor(
-      "--border-subtle",
-      "rgba(255, 255, 255, 0.1)"
-    );
-    const curveColor = readTokenColor("--accent-1-400", "#e6b85c");
-    const fillColor = readTokenColor(
-      "--accent-1-muted-bg",
-      "rgba(230, 184, 92, 0.18)"
-    );
-    const textColor = readTokenColor(
-      "--text-tertiary",
-      "rgba(200, 210, 225, 0.55)"
-    );
-
-    const midY = h / 2;
-    const maxDb = 18;
-
-    // 0 dB line & +/- 9 dB guide lines
-    g.strokeStyle = gridColor;
-    g.lineWidth = 1;
-    g.beginPath();
-    g.moveTo(0, midY);
-    g.lineTo(w, midY);
-    g.moveTo(0, h * 0.25);
-    g.lineTo(w, h * 0.25);
-    g.moveTo(0, h * 0.75);
-    g.lineTo(w, h * 0.75);
-    g.stroke();
-
-    const minLog = Math.log10(20);
-    const maxLog = Math.log10(20000);
-
-    const freqToX = (hz: number) =>
-      ((Math.log10(hz) - minLog) / (maxLog - minLog)) * w;
-    const xToFreq = (x: number) =>
-      Math.pow(10, minLog + (x / Math.max(1, w)) * (maxLog - minLog));
-
-    // Frequency grid ticks
-    g.font = '12px "DM Mono", ui-monospace, monospace';
-    g.fillStyle = textColor;
-    for (const [hz, lbl] of [
-      [100, "100"],
-      [1000, "1k"],
-      [10000, "10k"],
-    ] as const) {
-      const fx = freqToX(hz);
-      g.fillText(lbl, fx - g.measureText(lbl).width / 2, h - 4);
-    }
-
-    // Response curve fill + stroke
-    g.beginPath();
-    g.moveTo(0, midY);
-    for (let x = 0; x <= w; x += 2) {
-      const hz = xToFreq(x);
-      const db = evaluateEqResponseDb(spec, hz, sampleRate);
-      const clamped = Math.max(-maxDb, Math.min(maxDb, db));
-      const y = midY - (clamped / maxDb) * (h / 2 - 8);
-      g.lineTo(x, y);
-    }
-    g.lineTo(w, midY);
-    g.closePath();
-    g.fillStyle = fillColor;
-    g.fill();
-
-    g.beginPath();
-    for (let x = 0; x <= w; x += 2) {
-      const hz = xToFreq(x);
-      const db = evaluateEqResponseDb(spec, hz, sampleRate);
-      const clamped = Math.max(-maxDb, Math.min(maxDb, db));
-      const y = midY - (clamped / maxDb) * (h / 2 - 8);
-      if (x === 0) {
-        g.moveTo(x, y);
-      } else {
-        g.lineTo(x, y);
-      }
-    }
-    g.strokeStyle = curveColor;
-    g.lineWidth = 1.75;
-    g.stroke();
-  }, [spec, sampleRate]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className="sfx-seam-scope-canvas"
-      aria-label="EQ frequency response curve"
     />
   );
 };
