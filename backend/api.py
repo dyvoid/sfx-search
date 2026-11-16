@@ -14,6 +14,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import soundfile as sf
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
@@ -21,6 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from .config import Config, load_config
 from .decode import decode_audio_pcm
@@ -466,8 +468,6 @@ def create_app(
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             origin = request.headers.get("origin") or ""
             if origin:
-                from urllib.parse import urlsplit
-
                 try:
                     host = urlsplit(origin).hostname or ""
                 except ValueError:
@@ -534,7 +534,7 @@ def create_app(
         cfg.save_library_roots(current)
         removed_count = 0
         if body.remove_indexed_files:
-            removed_count = st.remove_root_files(norm)
+            removed_count = st.remove_root_files(norm, keep_roots=current)
         return {
             "roots": cfg.library.roots,
             "removed_files": removed_count,
@@ -668,10 +668,7 @@ def create_app(
         file: UploadFile = File(...),
         k: int = Query(30, ge=1, le=500),
     ) -> dict[str, Any]:
-        from starlette.concurrency import run_in_threadpool
-
         suffix = Path(file.filename or "upload.wav").suffix or ".wav"
-        max_bytes = 256 * 1024 * 1024
         too_large = False
         tmp_path: Path | None = None
         try:
@@ -683,7 +680,7 @@ def create_app(
                     if not chunk:
                         break
                     written += len(chunk)
-                    if written > max_bytes:
+                    if written > _MAX_UPLOAD_BYTES:
                         too_large = True
                         break
                     tmp.write(chunk)
@@ -740,7 +737,11 @@ def create_app(
                 if f_row.get("lufs_integrated") is not None
                 else None
             ),
-            "peak_dbfs": round(float(f_row.get("peak_dbfs") or -120.0), 2),
+            "peak_dbfs": (
+                round(float(f_row["peak_dbfs"]), 2)
+                if f_row.get("peak_dbfs") is not None
+                else -120.0
+            ),
             "loop_score": (
                 round(float(f_row["loop_score"]), 3)
                 if f_row.get("loop_score") is not None
@@ -922,8 +923,6 @@ def create_app(
         bitrate: int | None = Query(None),
     ) -> Response:
         """Encode Studio output for Download; nothing is kept on disk."""
-        from starlette.concurrency import run_in_threadpool
-
         try:
             spec = parse_spec(format, bit_depth, bitrate)
         except ValueError as exc:
@@ -965,8 +964,6 @@ def create_app(
         add_loop_tag: bool,
     ) -> dict[str, Any]:
         """Encode the uploaded WAV to `target`, index it and return its search hit."""
-        from starlette.concurrency import run_in_threadpool
-
         target_norm = normalize_path(target)
         target_fid = compute_file_id(target_norm)
         u_map = st.get_user_data_map([fid for fid in (source_fid, target_fid) if fid])

@@ -67,6 +67,28 @@ class IndexStats:
     offline_roots: list[str] = field(default_factory=list)
 
 
+def _failed_item(item: ScannedFile, error: str) -> DecodedWorkItem:
+    """A work item for a file that could not be decoded; keeps its path-derived metadata."""
+    try:
+        tags_json, search_text = extract_metadata(path=item.path, root=item.root, probe_tags={})
+    except Exception:
+        tags_json, search_text = "{}", ""
+    return DecodedWorkItem(
+        scanned=item,
+        format_name=item.ext,
+        sample_rate=0,
+        channels=0,
+        features=AcousticFeatures(
+            duration_s=0.0, lufs_integrated=None, peak_dbfs=-120.0, loop_score=None
+        ),
+        tags_json=tags_json,
+        search_text=search_text,
+        windows=[],
+        peaks=None,
+        error=error,
+    )
+
+
 def _decode_worker_fn(
     item: ScannedFile,
     ffmpeg_bin: str,
@@ -109,37 +131,9 @@ def _decode_worker_fn(
             error=None,
         )
     except DecodeError as exc:
-        tags_json, search_text = extract_metadata(path=item.path, root=item.root, probe_tags={})
-        return DecodedWorkItem(
-            scanned=item,
-            format_name=item.ext,
-            sample_rate=0,
-            channels=0,
-            features=AcousticFeatures(
-                duration_s=0.0, lufs_integrated=None, peak_dbfs=-120.0, loop_score=None
-            ),
-            tags_json=tags_json,
-            search_text=search_text,
-            windows=[],
-            peaks=None,
-            error=str(exc),
-        )
+        return _failed_item(item, str(exc))
     except Exception as exc:
-        tags_json, search_text = extract_metadata(path=item.path, root=item.root, probe_tags={})
-        return DecodedWorkItem(
-            scanned=item,
-            format_name=item.ext,
-            sample_rate=0,
-            channels=0,
-            features=AcousticFeatures(
-                duration_s=0.0, lufs_integrated=None, peak_dbfs=-120.0, loop_score=None
-            ),
-            tags_json=tags_json,
-            search_text=search_text,
-            windows=[],
-            peaks=None,
-            error=f"Unexpected decode error: {exc}",
-        )
+        return _failed_item(item, f"Unexpected decode error: {exc}")
 
 
 def _get_gpu_memory_mb() -> float:
@@ -153,6 +147,70 @@ def _get_gpu_memory_mb() -> float:
         return 0.0
 
 
+def _embed_item(
+    item: DecodedWorkItem, embedder: EmbedderProtocol
+) -> tuple[FileRecord, list[ChunkRecord]]:
+    """Embed a decoded file's windows into its `ok` file record and chunk records."""
+    sf = item.scanned
+    chunk_vecs_np = embedder.embed_windows([w.samples for w in item.windows])
+    file_vec_np = compute_mean_file_vec(chunk_vecs_np)
+    chunks = [
+        ChunkRecord(
+            file_id=sf.file_id,
+            chunk_idx=w.chunk_idx,
+            start_s=w.start_s,
+            end_s=w.end_s,
+            vec=np.asarray(cvec, dtype=np.float32),
+        )
+        for w, cvec in zip(item.windows, chunk_vecs_np, strict=True)
+    ]
+    f_rec = FileRecord(
+        file_id=sf.file_id,
+        path=sf.path,
+        root=sf.root,
+        size_bytes=sf.size_bytes,
+        mtime_ns=sf.mtime_ns,
+        format=item.format_name,
+        duration_s=item.features.duration_s,
+        sample_rate=item.sample_rate,
+        channels=item.channels,
+        lufs_integrated=item.features.lufs_integrated,
+        peak_dbfs=item.features.peak_dbfs,
+        loop_score=item.features.loop_score,
+        tags_json=item.tags_json,
+        search_text=item.search_text,
+        file_vec=[float(x) for x in file_vec_np],
+        embedding_model=embedder.model_id,
+        status="ok",
+        error=None,
+        indexed_at=datetime.now(UTC),
+    )
+    return f_rec, chunks
+
+
+def _write_peaks_cache(peaks_dir: Path, item: DecodedWorkItem) -> None:
+    """Best-effort write of the default-resolution waveform peaks for the web UI."""
+    if item.peaks is None:
+        return
+    sf = item.scanned
+    try:
+        peak_tmp = peaks_dir / f"{sf.file_id}.json.tmp"
+        peak_tmp.write_text(
+            json.dumps(
+                {
+                    "file_id": sf.file_id,
+                    "mtime_ns": sf.mtime_ns,
+                    "duration_s": round(item.features.duration_s, 4),
+                    "peaks": item.peaks,
+                }
+            ),
+            encoding="utf-8",
+        )
+        peak_tmp.replace(peaks_dir / f"{sf.file_id}.json")
+    except OSError:
+        pass
+
+
 def index_single_file(
     path: str | Path,
     root: str | Path,
@@ -161,8 +219,6 @@ def index_single_file(
     embedder: EmbedderProtocol,
 ) -> FileRecord:
     """Decode, extract features/metadata, embed, and upsert a single audio file."""
-    import os
-
     norm_file = normalize_path(path)
     norm_root = normalize_path(root)
     os_file = to_os_path(norm_file)
@@ -192,70 +248,24 @@ def index_single_file(
         max_chunks_per_file=config.embedding.max_chunks_per_file,
     )
 
-    now_utc = datetime.now(UTC)
     if decoded_item.error is not None:
         raise DecodeError(decoded_item.error)
 
-    win_arrays = [w.samples for w in decoded_item.windows]
-    chunk_vecs_np = embedder.embed_windows(win_arrays)
-    file_vec_np = compute_mean_file_vec(chunk_vecs_np)
-
-    chunks = [
-        ChunkRecord(
-            file_id=scanned.file_id,
-            chunk_idx=w.chunk_idx,
-            start_s=w.start_s,
-            end_s=w.end_s,
-            vec=np.asarray(cvec, dtype=np.float32),
-        )
-        for w, cvec in zip(decoded_item.windows, chunk_vecs_np, strict=True)
-    ]
-
-    f_rec = FileRecord(
-        file_id=scanned.file_id,
-        path=scanned.path,
-        root=scanned.root,
-        size_bytes=scanned.size_bytes,
-        mtime_ns=scanned.mtime_ns,
-        format=decoded_item.format_name,
-        duration_s=decoded_item.features.duration_s,
-        sample_rate=decoded_item.sample_rate,
-        channels=decoded_item.channels,
-        lufs_integrated=decoded_item.features.lufs_integrated,
-        peak_dbfs=decoded_item.features.peak_dbfs,
-        loop_score=decoded_item.features.loop_score,
-        tags_json=decoded_item.tags_json,
-        search_text=decoded_item.search_text,
-        file_vec=[float(x) for x in file_vec_np],
-        embedding_model=embedder.model_id,
-        status="ok",
-        error=None,
-        indexed_at=now_utc,
-    )
-
-    peaks_dir = config.peaks_dir
-    peaks_dir.mkdir(parents=True, exist_ok=True)
-    if decoded_item.peaks is not None:
-        peak_file = peaks_dir / f"{scanned.file_id}.json"
-        try:
-            peak_tmp = peaks_dir / f"{scanned.file_id}.json.tmp"
-            peak_tmp.write_text(
-                json.dumps(
-                    {
-                        "file_id": scanned.file_id,
-                        "mtime_ns": scanned.mtime_ns,
-                        "duration_s": round(decoded_item.features.duration_s, 4),
-                        "peaks": decoded_item.peaks,
-                    }
-                ),
-                encoding="utf-8",
-            )
-            peak_tmp.replace(peak_file)
-        except OSError:
-            pass
-
+    f_rec, chunks = _embed_item(decoded_item, embedder)
+    config.peaks_dir.mkdir(parents=True, exist_ok=True)
+    _write_peaks_cache(config.peaks_dir, decoded_item)
     store.upsert_batch([f_rec], chunks, rebuild_fts=True)
     return f_rec
+
+
+def _update_throughput(stats: IndexStats, t0: float) -> None:
+    elapsed = max(1e-6, time.perf_counter() - t0)
+    audio_hours = stats.total_audio_seconds / 3600.0
+    stats.elapsed_seconds = round(elapsed, 3)
+    stats.files_per_min = round(((stats.indexed_ok + stats.indexed_errors) / elapsed) * 60.0, 2)
+    stats.audio_hours_per_min = round((audio_hours / elapsed) * 60.0, 3)
+    stats.audio_hours_per_hour = round(audio_hours / (elapsed / 3600.0), 2)
+    stats.gpu_memory_mb = _get_gpu_memory_mb()
 
 
 def _is_under(path_low: str, root_low: str) -> bool:
@@ -387,26 +397,7 @@ def run_indexer(
         try:
             return fut.result()
         except Exception as exc:
-            try:
-                tags_json, search_text = extract_metadata(
-                    path=item.path, root=item.root, probe_tags={}
-                )
-            except Exception:
-                tags_json, search_text = "{}", ""
-            return DecodedWorkItem(
-                scanned=item,
-                format_name=item.ext,
-                sample_rate=0,
-                channels=0,
-                features=AcousticFeatures(
-                    duration_s=0.0, lufs_integrated=None, peak_dbfs=-120.0, loop_score=None
-                ),
-                tags_json=tags_json,
-                search_text=search_text,
-                windows=[],
-                peaks=None,
-                error=f"Decode worker failed: {exc}",
-            )
+            return _failed_item(item, f"Decode worker failed: {exc}")
 
     def _producer() -> None:
         def _safe_put(value: DecodedWorkItem | None) -> bool:
@@ -482,106 +473,44 @@ def run_indexer(
             if decoded_item is None:
                 break
 
-            now_utc = datetime.now(UTC)
             sf = decoded_item.scanned
 
             if decoded_item.error is not None:
-                f_rec = FileRecord(
-                    file_id=sf.file_id,
-                    path=sf.path,
-                    root=sf.root,
-                    size_bytes=sf.size_bytes,
-                    mtime_ns=sf.mtime_ns,
-                    format=decoded_item.format_name,
-                    duration_s=0.0,
-                    sample_rate=0,
-                    channels=0,
-                    lufs_integrated=None,
-                    peak_dbfs=-120.0,
-                    loop_score=None,
-                    tags_json=decoded_item.tags_json,
-                    search_text=decoded_item.search_text,
-                    file_vec=zero_vec,
-                    embedding_model=embedder.model_id,
-                    status="error",
-                    error=decoded_item.error,
-                    indexed_at=now_utc,
+                pending_files.append(
+                    FileRecord(
+                        file_id=sf.file_id,
+                        path=sf.path,
+                        root=sf.root,
+                        size_bytes=sf.size_bytes,
+                        mtime_ns=sf.mtime_ns,
+                        format=decoded_item.format_name,
+                        duration_s=0.0,
+                        sample_rate=0,
+                        channels=0,
+                        lufs_integrated=None,
+                        peak_dbfs=-120.0,
+                        loop_score=None,
+                        tags_json=decoded_item.tags_json,
+                        search_text=decoded_item.search_text,
+                        file_vec=zero_vec,
+                        embedding_model=embedder.model_id,
+                        status="error",
+                        error=decoded_item.error,
+                        indexed_at=datetime.now(UTC),
+                    )
                 )
-                pending_files.append(f_rec)
                 stats.indexed_errors += 1
             else:
-                win_arrays = [w.samples for w in decoded_item.windows]
-                chunk_vecs_np = embedder.embed_windows(win_arrays)
-                file_vec_np = compute_mean_file_vec(chunk_vecs_np)
-
-                for w, cvec in zip(decoded_item.windows, chunk_vecs_np, strict=True):
-                    pending_chunks.append(
-                        ChunkRecord(
-                            file_id=sf.file_id,
-                            chunk_idx=w.chunk_idx,
-                            start_s=w.start_s,
-                            end_s=w.end_s,
-                            vec=np.asarray(cvec, dtype=np.float32),
-                        )
-                    )
-
-                f_rec = FileRecord(
-                    file_id=sf.file_id,
-                    path=sf.path,
-                    root=sf.root,
-                    size_bytes=sf.size_bytes,
-                    mtime_ns=sf.mtime_ns,
-                    format=decoded_item.format_name,
-                    duration_s=decoded_item.features.duration_s,
-                    sample_rate=decoded_item.sample_rate,
-                    channels=decoded_item.channels,
-                    lufs_integrated=decoded_item.features.lufs_integrated,
-                    peak_dbfs=decoded_item.features.peak_dbfs,
-                    loop_score=decoded_item.features.loop_score,
-                    tags_json=decoded_item.tags_json,
-                    search_text=decoded_item.search_text,
-                    file_vec=[float(x) for x in file_vec_np],
-                    embedding_model=embedder.model_id,
-                    status="ok",
-                    error=None,
-                    indexed_at=now_utc,
-                )
+                f_rec, file_chunks = _embed_item(decoded_item, embedder)
+                pending_chunks.extend(file_chunks)
                 pending_files.append(f_rec)
-
-                if decoded_item.peaks is not None:
-                    peak_file = peaks_dir / f"{sf.file_id}.json"
-                    try:
-                        peak_tmp = peaks_dir / f"{sf.file_id}.json.tmp"
-                        peak_tmp.write_text(
-                            json.dumps(
-                                {
-                                    "file_id": sf.file_id,
-                                    "mtime_ns": sf.mtime_ns,
-                                    "duration_s": round(decoded_item.features.duration_s, 4),
-                                    "peaks": decoded_item.peaks,
-                                }
-                            ),
-                            encoding="utf-8",
-                        )
-                        peak_tmp.replace(peak_file)
-                    except OSError:
-                        pass
+                _write_peaks_cache(peaks_dir, decoded_item)
 
                 stats.indexed_ok += 1
                 stats.total_chunks += len(decoded_item.windows)
                 stats.total_audio_seconds += decoded_item.features.duration_s
 
-            elapsed = max(1e-6, time.perf_counter() - t0)
-            done_count = stats.indexed_ok + stats.indexed_errors
-            stats.elapsed_seconds = round(elapsed, 3)
-            stats.files_per_min = round((done_count / elapsed) * 60.0, 2)
-            stats.audio_hours_per_min = round(
-                ((stats.total_audio_seconds / 3600.0) / elapsed) * 60.0, 3
-            )
-            stats.audio_hours_per_hour = round(
-                (stats.total_audio_seconds / 3600.0) / (elapsed / 3600.0), 2
-            )
-            stats.gpu_memory_mb = _get_gpu_memory_mb()
+            _update_throughput(stats, t0)
 
             should_commit_first = not committed_first_ok and stats.indexed_ok >= 1
             if should_commit_first or len(pending_files) >= commit_every:
@@ -611,11 +540,5 @@ def run_indexer(
     store.create_vector_indices(embedder.embedding_dim)
     store.optimize_tables()
 
-    elapsed = max(1e-6, time.perf_counter() - t0)
-    done_count = stats.indexed_ok + stats.indexed_errors
-    stats.elapsed_seconds = round(elapsed, 3)
-    stats.files_per_min = round((done_count / elapsed) * 60.0, 2)
-    stats.audio_hours_per_min = round(((stats.total_audio_seconds / 3600.0) / elapsed) * 60.0, 3)
-    stats.audio_hours_per_hour = round((stats.total_audio_seconds / 3600.0) / (elapsed / 3600.0), 2)
-    stats.gpu_memory_mb = _get_gpu_memory_mb()
+    _update_throughput(stats, t0)
     return stats

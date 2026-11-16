@@ -36,7 +36,7 @@ from sfxsearch.scan import (
     walk_roots,
 )
 from sfxsearch.search import SearchEngine
-from sfxsearch.store import ModelMismatchError, SearchFilters, SfxStore
+from sfxsearch.store import ChunkRecord, ModelMismatchError, SearchFilters, SfxStore
 
 from .conftest import FakeEmbedder, append_bwf_and_ixml_chunks, write_sine_wav
 
@@ -671,3 +671,88 @@ def test_resolve_device_falls_back_to_cpu_when_cuda_cannot_run(
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert embed.resolve_device() == "cpu"
+
+
+def test_full_scale_peak_is_reported_as_zero_dbfs(tmp_path: Path) -> None:
+    lib_root = tmp_path / "sfx"
+    wav = write_sine_wav(lib_root / "loud_full_scale_tone.wav", freq_hz=1000.0, amplitude=1.0)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+
+    engine = SearchEngine(config=cfg, store=store, embedder=embedder)
+    hits = engine.search("", k=5)
+    assert [h.file_id for h in hits] == [compute_file_id(wav)]
+    # 0.0 dBFS is falsy; it must not fall back to the -120 dB "silent" default.
+    assert hits[0].peak_dbfs > -0.5
+
+
+def test_chunk_knn_with_large_filter_set_is_not_starved(tmp_path: Path) -> None:
+    dim = 8
+    store = SfxStore(tmp_path / "lancedb")
+    store.verify_or_init_tables(embedding_model="test/fake-clap", embedding_dim=dim)
+
+    # 2000 single-chunk files on an arc; the query sits at angle 0, so the
+    # eligible files (the 450 at the far end) are the worst matches of all.
+    total, n_eligible = 2000, 450
+    chunks: list[ChunkRecord] = []
+    for i in range(total):
+        angle = (i / total) * (np.pi / 2)
+        vec = np.zeros(dim, dtype=np.float32)
+        vec[0], vec[1] = np.cos(angle), np.sin(angle)
+        chunks.append(
+            ChunkRecord(file_id=f"f{i:05d}", chunk_idx=0, start_s=0.0, end_s=1.0, vec=vec)
+        )
+    store.upsert_batch([], chunks, rebuild_fts=False)
+
+    query = np.zeros(dim, dtype=np.float32)
+    query[0] = 1.0
+    eligible = {f"f{i:05d}" for i in range(total - n_eligible, total)}
+    rows = store.search_chunks_knn(query, limit=10, eligible_file_ids=eligible)
+
+    assert len(rows) == 10
+    assert {str(r["file_id"]) for r in rows} <= eligible
+    # Best eligible matches first: the ones closest to the query.
+    assert str(rows[0]["file_id"]) == f"f{total - n_eligible:05d}"
+
+
+def test_excluded_term_matches_word_starts_only(tmp_path: Path) -> None:
+    lib_root = tmp_path / "sfx"
+    train = write_sine_wav(lib_root / "Vehicles" / "train_pass_by.wav", freq_hz=300.0)
+    write_sine_wav(lib_root / "Weather" / "train_station_raining.wav", freq_hz=500.0)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+    engine = SearchEngine(config=cfg, store=store, embedder=embedder)
+
+    # "-rain" must not drop "train", but does drop words starting with "rain".
+    for mode in ("hybrid", "keyword_only"):
+        hits = engine.search("train -rain", k=10, mode=mode)  # type: ignore[arg-type]
+        assert [h.file_id for h in hits] == [compute_file_id(train)], mode
+    browse = engine.search("-rain", k=10)
+    assert [h.file_id for h in browse] == [compute_file_id(train)]
+
+
+def test_keyword_only_hits_carry_bm25_scores(tmp_path: Path) -> None:
+    lib_root = tmp_path / "sfx"
+    write_sine_wav(lib_root / "wooden_floor_creak.wav")
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+    hits = SearchEngine(config=cfg, store=store, embedder=embedder).search(
+        "wooden creak", mode="keyword_only"
+    )
+    assert len(hits) == 1
+    assert hits[0].bm25_score is not None and hits[0].bm25_score > 0.0

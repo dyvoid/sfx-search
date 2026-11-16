@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import math
+import re
 import threading
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -88,6 +89,36 @@ def _sql_escape(val: str) -> str:
 def _sql_like_escape(val: str) -> str:
     # Lance only accepts the backslash as LIKE ESCAPE char.
     return val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+# `_score` is named explicitly: Lance is dropping its automatic projection.
+_BM25_COLUMNS = ["file_id", "path", "search_text", "_score"]
+
+
+def _make_text_filter(
+    filters: SearchFilters | None,
+) -> Callable[[dict[str, Any]], bool] | None:
+    """Row predicate for quoted phrases and `-term` exclusions; None when there are none.
+
+    Phrases match anywhere in the search text or path. An excluded term matches
+    only at the start of a word, so `-rain` drops "rain" and "raining" but
+    keeps "train" and "terrain".
+    """
+    if filters is None or not (filters.required_phrases or filters.excluded_terms):
+        return None
+    phrases = [p.lower() for p in filters.required_phrases or []]
+    excluded = [
+        re.compile(rf"(?<![^\W_]){re.escape(term.lower())}")
+        for term in filters.excluded_terms or []
+    ]
+
+    def text_ok(row: dict[str, Any]) -> bool:
+        haystack = f"{row.get('search_text', '')} {row.get('path', '')}".lower()
+        if any(p not in haystack for p in phrases):
+            return False
+        return not any(rx.search(haystack) for rx in excluded)
+
+    return text_ok
 
 
 def make_files_schema(embedding_dim: int, embedding_model: str) -> pa.Schema:
@@ -361,12 +392,18 @@ class SfxStore:
                 chunks_tbl = self.db.open_table("chunks")
                 self._delete_by_file_ids(chunks_tbl, file_ids)
 
-    def remove_root_files(self, root_path: str) -> int:
+    def remove_root_files(self, root_path: str, keep_roots: Sequence[str] = ()) -> int:
+        """Drop the files indexed under `root_path`, except those under a root in `keep_roots`.
+
+        Roots can nest (a library folder added on top of one of its subfolders),
+        so files another configured root still covers must survive.
+        """
         from .scan import normalize_path
 
         if "files" not in self.table_names():
             return 0
         norm_root = normalize_path(root_path).lower().rstrip("/")
+        kept = [normalize_path(k).lower().rstrip("/") for k in keep_roots]
         files_tbl = self.db.open_table("files")
         total = files_tbl.count_rows()
         if total == 0:
@@ -376,6 +413,8 @@ class SfxStore:
         for r in rows:
             r_root = str(r.get("root") or "").lower().rstrip("/")
             r_path = str(r.get("path") or "").lower()
+            if any(r_path.startswith(k + "/") for k in kept):
+                continue
             if r_root == norm_root or r_path.startswith(norm_root + "/"):
                 target_ids.append(str(r["file_id"]))
         if not target_ids:
@@ -592,8 +631,8 @@ class SfxStore:
             return set()
 
         select_cols = ["file_id"]
-        need_text_check = bool(filters and (filters.required_phrases or filters.excluded_terms))
-        if need_text_check:
+        text_ok = _make_text_filter(filters)
+        if text_ok is not None:
             select_cols.append("search_text")
             select_cols.append("path")
 
@@ -603,16 +642,8 @@ class SfxStore:
             fid = str(r["file_id"])
             if allowed_user_ids is not None and fid not in allowed_user_ids:
                 continue
-            if need_text_check and filters is not None:
-                haystack = f"{r.get('search_text', '')} {r.get('path', '')}".lower()
-                if filters.required_phrases and any(
-                    p.lower() not in haystack for p in filters.required_phrases
-                ):
-                    continue
-                if filters.excluded_terms and any(
-                    ex.lower() in haystack for ex in filters.excluded_terms
-                ):
-                    continue
+            if text_ok is not None and not text_ok(r):
+                continue
             ids.add(fid)
 
         if not has_extra_filters and len(ids) == total:
@@ -635,8 +666,8 @@ class SfxStore:
             return [], 0
 
         select_cols = ["file_id", "path", "duration_s", "lufs_integrated"]
-        need_text_check = bool(filters and (filters.required_phrases or filters.excluded_terms))
-        if need_text_check:
+        text_ok = _make_text_filter(filters)
+        if text_ok is not None:
             select_cols.append("search_text")
 
         rows = tbl.search().where(where_sql).select(select_cols).limit(total_rows + 100).to_list()
@@ -645,16 +676,8 @@ class SfxStore:
             fid = str(r["file_id"])
             if allowed_user_ids is not None and fid not in allowed_user_ids:
                 continue
-            if need_text_check and filters is not None:
-                haystack = f"{r.get('search_text', '')} {r.get('path', '')}".lower()
-                if filters.required_phrases and any(
-                    p.lower() not in haystack for p in filters.required_phrases
-                ):
-                    continue
-                if filters.excluded_terms and any(
-                    ex.lower() in haystack for ex in filters.excluded_terms
-                ):
-                    continue
+            if text_ok is not None and not text_ok(r):
+                continue
             matched.append(r)
 
         def _filename_key(row: dict[str, Any]) -> tuple[str, str]:
@@ -803,8 +826,18 @@ class SfxStore:
             q = q.where(f"file_id IN ({quoted})")
             rows = q.limit(limit).to_list()
         elif eligible_file_ids is not None:
-            rows = q.limit(max(limit * 4, 1000)).to_list()
-            rows = [r for r in rows if str(r["file_id"]) in eligible_file_ids][:limit]
+            # Too many ids for an IN list: filter in Python, widening the fetch
+            # until enough eligible chunks turn up or the table is exhausted.
+            # A fixed over-fetch returns nothing when the eligible files are
+            # not among the nearest chunks (a narrow filter on a big library).
+            total_chunks = tbl.count_rows()
+            fetch = max(limit * 4, 1000)
+            while True:
+                fetched = q.limit(fetch).to_list()
+                rows = [r for r in fetched if str(r["file_id"]) in eligible_file_ids][:limit]
+                if len(rows) >= limit or len(fetched) < fetch or fetch >= total_chunks:
+                    break
+                fetch = min(fetch * 4, total_chunks)
         else:
             rows = q.limit(limit).to_list()
         return rows
@@ -848,8 +881,9 @@ class SfxStore:
         where_sql, allowed_user_ids = self.build_files_where_clause(filters)
         if allowed_user_ids is not None and len(allowed_user_ids) == 0:
             return []
+        text_ok = _make_text_filter(filters)
         overfetch = 1
-        if filters and (filters.required_phrases or filters.excluded_terms):
+        if text_ok is not None:
             overfetch = 2
         if allowed_user_ids is not None and len(allowed_user_ids) > 300:
             overfetch = max(overfetch, 4)
@@ -858,7 +892,7 @@ class SfxStore:
             rows = (
                 tbl.search(cleaned, query_type="fts", fts_columns="search_text")
                 .where(where_sql)
-                .select(["file_id", "path", "search_text"])
+                .select(_BM25_COLUMNS)
                 .limit(fetch_limit)
                 .to_list()
             )
@@ -876,7 +910,7 @@ class SfxStore:
                     self.db.open_table("files")
                     .search(cleaned, query_type="fts", fts_columns="search_text")
                     .where(where_sql)
-                    .select(["file_id", "path", "search_text"])
+                    .select(_BM25_COLUMNS)
                     .limit(fetch_limit)
                     .to_list()
                 )
@@ -888,16 +922,8 @@ class SfxStore:
             fid = str(r["file_id"])
             if allowed_user_ids is not None and fid not in allowed_user_ids:
                 continue
-            if filters is not None:
-                haystack = f"{r.get('search_text', '')} {r.get('path', '')}".lower()
-                if filters.required_phrases and any(
-                    p.lower() not in haystack for p in filters.required_phrases
-                ):
-                    continue
-                if filters.excluded_terms and any(
-                    ex.lower() in haystack for ex in filters.excluded_terms
-                ):
-                    continue
+            if text_ok is not None and not text_ok(r):
+                continue
             filtered.append(r)
             if len(filtered) >= limit:
                 break

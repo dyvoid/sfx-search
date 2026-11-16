@@ -181,7 +181,11 @@ def create_mcp_server(
                 if f_row.get("lufs_integrated") is not None
                 else None
             ),
-            "peak_dbfs": round(float(f_row.get("peak_dbfs") or -120.0), 2),
+            "peak_dbfs": (
+                round(float(f_row["peak_dbfs"]), 2)
+                if f_row.get("peak_dbfs") is not None
+                else -120.0
+            ),
             "loop_score": (
                 round(float(f_row["loop_score"]), 3)
                 if f_row.get("loop_score") is not None

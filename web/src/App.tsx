@@ -549,9 +549,14 @@ export const App: React.FC = () => {
     try {
       const saved = localStorage.getItem(LS_FILTERS_KEY);
       // `root` has no control any more; never restore a hidden filter.
-      return saved
-        ? { ...DEFAULT_FILTERS, ...JSON.parse(saved), root: "" }
-        : DEFAULT_FILTERS;
+      if (!saved) {
+        return DEFAULT_FILTERS;
+      }
+      const restored = { ...DEFAULT_FILTERS, ...JSON.parse(saved), root: "" };
+      // A damaged entry must not break rendering (`folders` is iterated).
+      return Array.isArray(restored.folders)
+        ? restored
+        : { ...restored, folders: [] };
     } catch {
       return DEFAULT_FILTERS;
     }
@@ -567,7 +572,10 @@ export const App: React.FC = () => {
   const [history, setHistory] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(LS_HISTORY_KEY);
-      return saved ? JSON.parse(saved) : [];
+      const parsed: unknown = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string")
+        : [];
     } catch {
       return [];
     }

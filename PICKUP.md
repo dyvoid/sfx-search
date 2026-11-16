@@ -5,12 +5,15 @@ instead of archaeology.
 
 ## Current focus
 
-**Library/Studio redesign** on `task/library-studio-redesign` (not merged): Library and Studio
-as top-level tabs, the Studio split into edit / Loop / Variations pages, Save to Library into a
-chosen folder, Replace source with Undo. Decisions in [ADR 0007](docs/adr/0007-library-studio-tabs-and-studio-pages.md);
-the wireframe brief is in the untracked `redesign/` folder. Two Sonnet review rounds found no major
-issues; their minor findings are fixed or recorded in `docs/review-decisions.md`. Next: try it in
-the real app, then rebase and fast-forward to `main`.
+**Review pass** (`fix/review-pass`, merged into `main`): backend fixes with
+regression tests (full-scale peaks shown as -120 dB, filtered semantic search coming back empty on
+big libraries, `-term` exclusions hitting substrings, nested library folders losing files on
+removal, BM25 scores relying on a deprecated Lance projection), plus cleanup in `indexer.py` and
+`store.py`. Findings left alone are in `docs/review-decisions.md`.
+
+The **Library/Studio redesign** (tabs, edit / Loop / Variations pages, Save to Library into a
+chosen folder, Replace source with Undo; [ADR 0007](docs/adr/0007-library-studio-tabs-and-studio-pages.md))
+is on `main`.
 
 Earlier: All milestones (**M1, M2, M3, M4**), the integrated **Edit Mode / Audio Studio & Seamless Loop Workstation** (`task/audio-editor-loop-module`), UI/UX refinements, large-library infinite scroll + sorting, launcher scripts (`start.bat`, `start.sh`), and GitHub Actions CI (`.github/workflows/ci.yml`) are implemented, tested, and verified.
 
@@ -30,7 +33,7 @@ Earlier: All milestones (**M1, M2, M3, M4**), the integrated **Edit Mode / Audio
   - **Audio Studio & Seamless Loop Editor (`web/src/editor/`, `POST /api/files/{file_id}/save-edited`):**
     - Dedicated **Edit Studio** mode (`E` shortcut, row action, Inspector action, or top bar button) with modular non-destructive DSP rack (`Seamless Loop`, `Trim & Gain`, `Tone & EQ`, `Variations`).
     - Incorporates two-stage Web Worker automatic loop-point detection (`findLoopPairs` and `findLoopPoints`), sample-accurate crossfade baking (`auto`, `pre`, `post`, `head` with `equal-power`, `cosine`, `linear` curves), zero-crossing snapping, a real-time **Seam Continuity Scope**, a 3-band parametric EQ + HPF/LPF with live frequency response curve, a Telescope-style **Variations & Round-Robin Generator** (Foley/Melodic mode, multi-point Catmull-Rom pitch/volume modulation splines, formant preservation, random 3-band EQ, motion fades, time-stretch, humanize, take liking, and batch library save) and one-click **Save to Library** with instant single-file CLAP indexing.
-  - **CI & Launchers:** Added `start.bat`, `start.sh`, and `.github/workflows/ci.yml` running backend (`ruff`, `black --check`, `mypy`, `pytest`) and frontend (`npm run build`) checks on pushes and PRs to `main`.
+  - **CI & Launchers:** Added `start.bat`, `start.sh`, and `.github/workflows/ci.yml` running backend (`ruff`, `black --check`, `mypy`, `pytest`), frontend (`npm run build`) and web e2e (Playwright) checks on pushes and PRs to `main`.
 
 ## Next
 
@@ -42,4 +45,4 @@ Earlier: All milestones (**M1, M2, M3, M4**), the integrated **Edit Mode / Audio
 - None.
 
 ---
-*Last updated: 2026-10-31*
+*Last updated: 2026-11-16*
