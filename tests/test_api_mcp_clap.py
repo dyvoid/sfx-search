@@ -619,3 +619,31 @@ def test_transcode_endpoint_returns_encoded_audio(tmp_path: Path) -> None:
         files={"file": ("x.wav", b"garbage" * 50, "audio/wav")},
     )
     assert junk.status_code == 400
+
+
+def test_removing_a_nested_root_keeps_files_of_the_remaining_root(tmp_path: Path) -> None:
+    lib_root = tmp_path / "sfx"
+    nested = lib_root / "Trains"
+    outer_wav = write_sine_wav(lib_root / "rain_on_roof.wav")
+    nested_wav = write_sine_wav(nested / "train_pass_by.wav", freq_hz=300.0)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root), str(nested)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    embedder = FakeEmbedder(embedding_dim=16)
+    run_indexer(config=cfg, store=store, embedder=embedder)
+    client = TestClient(create_app(config=cfg, store=store, embedder=embedder))
+
+    # The outer root still covers the nested folder: nothing may be dropped.
+    r = client.request("DELETE", "/api/library/roots", json={"path": str(nested)})
+    assert r.status_code == 200
+    assert r.json()["removed_files"] == 0
+    assert r.json()["stats"]["ok_files"] == 2
+
+    # Removing the outer root while the nested one stays keeps only the nested files.
+    cfg.save_library_roots([str(lib_root), str(nested)])
+    r = client.request("DELETE", "/api/library/roots", json={"path": str(lib_root)})
+    assert r.json()["removed_files"] == 1
+    assert client.get(f"/api/files/{compute_file_id(nested_wav)}").status_code == 200
+    assert client.get(f"/api/files/{compute_file_id(outer_wav)}").status_code == 404

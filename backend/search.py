@@ -638,7 +638,7 @@ class SearchEngine:
                 if f_row.get("lufs_integrated") is not None
                 else None
             ),
-            peak_dbfs=float(f_row.get("peak_dbfs") or -120.0),
+            peak_dbfs=(float(f_row["peak_dbfs"]) if f_row.get("peak_dbfs") is not None else -120.0),
             loop_score=(
                 float(f_row["loop_score"]) if f_row.get("loop_score") is not None else None
             ),

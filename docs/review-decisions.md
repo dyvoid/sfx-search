@@ -22,6 +22,10 @@ Format: what, decision, why. Newest last within each section.
 - **Escape on a focused `<button>` on the Loop or Variations page goes back to the edit page.**
   Only sliders/checkboxes blur first.
 - **Changing tokenization requires a reindex.** Existing `search_text` is not migrated.
+- **A `-term` exclusion matches at the start of a word**, in the search text and the path: `-rain`
+  drops "rain" and "raining" but keeps "train". Quoted phrases still match anywhere.
+- **Removing a library folder keeps the files another configured folder still covers** (nested
+  folders). Their stored `root` keeps naming the removed folder until they are reindexed.
 
 ## Rejected or deferred findings
 
@@ -88,3 +92,21 @@ Format: what, decision, why. Newest last within each section.
   reachable by hand (status lands in the same frame).
 - **Hidden sessions keep their decoded audio and transport while Undo is offered.** Accepted:
   bounded to one extra session for ~8 s; their playhead loop is stopped.
+- **Unchanged files with status `error` are decoded again on every scan.** Accepted: a retry is
+  what fixes a transient failure (ffmpeg missing, file still being copied); a library with many
+  truly corrupt files pays for it on each rescan.
+- **Removing a library folder while a scan is running can leave some of its files indexed.**
+  Deferred: the running scan still holds the old folder list. Remove the folder again, or
+  rescan, once the scan is done.
+- **The API does not check the `Host` header** (DNS rebinding could let a website read the
+  library through `GET` routes). Deferred to the owner: a check would break deliberate LAN use
+  (`--host 0.0.0.0`). Mutating routes are guarded by the `Origin` check.
+- **`head` crossfade placement only loops cleanly on self-similar audio.** Intended and
+  documented in `loopdsp.ts`; it is the last fallback after `pre` and `post`.
+- **`find similar` with more than 300 favorites or tagged files over-fetches a fixed 4x.**
+  Deferred: unlike the chunk search it cannot come back empty-handed in practice, as files are
+  ranked whole.
+- **File detail is built twice** (`GET /api/files/{id}` and MCP `get_sound`), as is the search
+  hit in the save endpoints. Deferred: merging them changes the MCP payload; cross-module.
+- **`docs/git-strategy.md` lists `eslint` for the web checks, but the repo has no ESLint.**
+  Deferred to the owner: adding it is a dependency change.
