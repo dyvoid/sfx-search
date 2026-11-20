@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import ipaddress
 import json
 import mimetypes
 import os
@@ -459,10 +460,16 @@ def _require_local(request: Request) -> None:
         )
 
 
+def _is_ip_literal(hostname: str) -> bool:
+    try:
+        ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return True
+
+
 def _origin_allowed(origin: str, host_header: str) -> bool:
     """A mutating browser request is allowed from loopback or from this server's own origin."""
-    from urllib.parse import urlsplit
-
     try:
         parts = urlsplit(origin)
         origin_host = parts.hostname or ""
@@ -472,8 +479,12 @@ def _origin_allowed(origin: str, host_header: str) -> bool:
         return True
     # Same-origin: the page was served by this server (e.g. over the LAN), so the
     # Origin's authority equals the Host the browser addressed. Cross-site pages
-    # carry their own origin and stay blocked.
-    return bool(host_header) and parts.netloc.lower() == host_header.strip().lower()
+    # carry their own origin and stay blocked. Only an IP address counts: a
+    # DNS-rebound site is same-origin by construction but always uses a domain
+    # name, so accepting names would let any website drive the API.
+    if not host_header or parts.netloc.lower() != host_header.strip().lower():
+        return False
+    return _is_ip_literal(origin_host)
 
 
 def create_app(

@@ -100,7 +100,9 @@ Format: what, decision, why. Newest last within each section.
   rescan, once the scan is done.
 - **The API does not check the `Host` header** (DNS rebinding could let a website read the
   library through `GET` routes). Deferred to the owner: a check would break deliberate LAN use
-  (`--host 0.0.0.0`). Mutating routes are guarded by the `Origin` check.
+  (`--host 0.0.0.0`). Mutating routes are guarded by the `Origin` check, which accepts a
+  same-origin page only when it is addressed by IP, so a rebound domain cannot mutate
+  ([ADR 0008](adr/0008-lan-access-from-other-machines.md)).
 - **`head` crossfade placement only loops cleanly on self-similar audio.** Intended and
   documented in `loopdsp.ts`; it is the last fallback after `pre` and `post`.
 - **`find similar` with more than 300 favorites or tagged files over-fetches a fixed 4x.**

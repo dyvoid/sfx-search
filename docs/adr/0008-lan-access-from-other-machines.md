@@ -19,10 +19,12 @@ out of scope.
 
 1. **Opt-in bind.** The default stays `127.0.0.1`. LAN access is `sfxsearch serve --host 0.0.0.0`
    (or `server.host` in `config.toml`), plus a firewall rule for the port.
-2. **Same-origin mutating requests are allowed.** The CSRF guard accepts an `Origin` that is
-   loopback or whose authority equals the request's `Host` header (the page was served by this
-   server). Cross-site origins still get 403. DNS rebinding is not defended; that is accepted on a
-   trusted LAN and would need real auth.
+2. **Same-origin mutating requests are allowed, by IP address only.** The CSRF guard accepts an
+   `Origin` that is loopback, or whose authority equals the request's `Host` header (the page was
+   served by this server) *and* whose host is an IP literal. Cross-site origins still get 403. The
+   IP-only rule blocks DNS rebinding: a rebound site is same-origin with itself but always uses a
+   domain name. Without it, any website could drive the API, even with the default loopback bind,
+   because the browser on the host connects from loopback and passes the host-only check too.
 3. **Host-machine-only actions.** Library folder setup (add, remove, rescan, native picker) and
    Reveal in Explorer return 403 unless the TCP peer is loopback. Folders are configured by using
    the app on the host via `http://localhost:<port>`, not its LAN address.
@@ -38,6 +40,9 @@ out of scope.
   save audio into configured library folders (`overwrite` can replace files there). They cannot
   add roots, so they cannot reach other directories on the host.
 - A browser on the host that opens the LAN address counts as remote.
+- Open the UI by IP address. By machine name (`http://mypc.local:8765`) the page and audio load
+  (`GET`), but every `POST` is refused, and that includes search, saving and favorites. A
+  configured list of allowed host names could lift this later.
 - Paths shown in the UI are host paths. Copy path is hidden remotely because it would copy a path
   that means nothing on the client.
 - Not covered: HTTPS (needed for secure-context browser APIs, though none are required now),

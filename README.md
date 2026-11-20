@@ -90,7 +90,9 @@ through its firewall:
 uv run sfxsearch serve --host 0.0.0.0
 ```
 
-Open `http://<that-machine>:8765` from the other computer. Set up library folders by using the app
+Open `http://<that-machine's-IP>:8765` (e.g. `http://192.168.1.10:8765`) from the other computer;
+by machine name (`http://mypc.local:8765`) the app loads, but search, saving and favorites are
+refused (DNS-rebinding protection). Set up library folders by using the app
 on the host itself at `http://localhost:8765`; remote browsers can search, play, favorite, edit in
 the Studio and save into existing library folders, but folder setup and "Reveal in Explorer" are
 host-only and hidden there. There is no authentication, so use this on a trusted network only

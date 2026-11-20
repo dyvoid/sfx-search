@@ -736,3 +736,23 @@ def test_origin_guard_allows_own_origin_and_blocks_cross_site(tmp_path: Path) ->
     assert other_port.status_code == 403
     # Non-browser callers send no Origin and are unaffected.
     assert lan.post("/api/search", json=body).status_code != 403
+    # IPv6 LAN address, as the browser writes it (brackets in both headers).
+    ipv6 = lan.post(
+        "/api/search",
+        json=body,
+        headers={"Origin": "http://[fd00::10]:8765", "Host": "[fd00::10]:8765"},
+    )
+    assert ipv6.status_code != 403
+
+
+def test_origin_guard_blocks_dns_rebinding(tmp_path: Path) -> None:
+    """A rebound domain is same-origin with itself; only IP-addressed pages may mutate."""
+    local, lan = _remote_app_clients(tmp_path)
+    extra = tmp_path / "other"
+    extra.mkdir()
+    rebound = {"Origin": "http://evil.example:8765", "Host": "evil.example:8765"}
+    # From the host machine (the browser's TCP peer is loopback) and over the LAN.
+    r = local.post("/api/library/roots", json={"path": str(extra)}, headers=rebound)
+    assert r.status_code == 403
+    assert lan.post("/api/search", json={"query": "x"}, headers=rebound).status_code == 403
+    assert len(local.get("/api/library").json()["roots"]) == 1
