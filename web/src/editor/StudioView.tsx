@@ -12,7 +12,6 @@ import {
   Dices,
   Download,
   FolderOpen,
-  GripHorizontal,
   Maximize2,
   Pause,
   Play,
@@ -245,7 +244,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const cursorRef = useRef<number>(0);
   const cursorVisibleRef = useRef<boolean>(false);
 
-  // Drag-out stays 24-bit WAV (what DAWs expect); Save and Download use outputSpec.
+  // Find similar sends the edit as 24-bit WAV; Save and Download use outputSpec.
   const exportFormat: WavFormat = "int24";
   const [outputSpec, setOutputSpecState] = useState<OutputSpec>(loadOutputSpec);
   const setOutputSpec = useCallback((next: OutputSpec) => {
@@ -1106,58 +1105,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
     source.kind === "derived" ? baseName.replace(/\.(loop|edit)$/i, "") : baseName;
   const outputStem = `${stemBase}${onLoopPage ? ".loop" : ".edit"}`;
 
-  /** Files a drag from the header carries: this page's output, as 24-bit WAV. */
-  const dragFiles = useCallback((): File[] => {
-    if (page === "variations") {
-      return selectedTakes.map(
-        (v) =>
-          new File([encodeWav(v.channels, v.sampleRate, exportFormat)], `${v.name}.wav`, {
-            type: "audio/wav",
-          })
-      );
-    }
-    const chs = onLoopPage ? bakeLoopNow() : processedChannels;
-    if (!chs || chs.length === 0) {
-      return [];
-    }
-    return [
-      new File([encodeWav(chs, sampleRate, exportFormat)], `${outputStem}.wav`, {
-        type: "audio/wav",
-      }),
-    ];
-  }, [
-    page,
-    selectedTakes,
-    onLoopPage,
-    bakeLoopNow,
-    processedChannels,
-    sampleRate,
-    exportFormat,
-    outputStem,
-  ]);
-
-  const handleDragOutStart = (e: React.DragEvent) => {
-    const files = dragFiles();
-    if (files.length === 0) {
-      e.preventDefault();
-      return;
-    }
-    const dt = e.dataTransfer;
-    dt.effectAllowed = "copy";
-    for (const file of files) {
-      try {
-        dt.items.add(file);
-      } catch {
-        // ignore if browser blocks items.add(File)
-      }
-    }
-    setStatusMsg(
-      files.length === 1
-        ? `Dragging ${files[0].name} to external app / DAW…`
-        : `Dragging ${files.length} takes to external app / DAW…`
-    );
-  };
-
   const handleFindSimilarEdited = useCallback(() => {
     if (!processedChannels) {
       return;
@@ -1525,19 +1472,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
       )
     );
   }, []);
-
-  const handleTakeDragStart = (e: React.DragEvent, v: GeneratedVariation) => {
-    const wav = encodeWav(v.channels, v.sampleRate, exportFormat);
-    const filename = `${v.name}.wav`;
-    const dt = e.dataTransfer;
-    dt.effectAllowed = "copy";
-    try {
-      dt.items.add(new File([wav], filename, { type: "audio/wav" }));
-    } catch {
-      // ignore
-    }
-    setStatusMsg(`Dragging ${filename} to DAW / external app…`);
-  };
 
   // ----- Replace source: a loop or take becomes the file being edited -----
   const replaceSourceWith = useCallback(
@@ -1969,20 +1903,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
         ];
 
   const pageTitle = page === "loop" ? "Loop" : "Variations";
-  const outputReady =
-    page === "variations" ? selectedTakes.length > 0 : Boolean(outputChannels);
-
-  const dragChip = (
-    <div
-      draggable={outputReady}
-      onDragStart={handleDragOutStart}
-      className="sfx-drag-chip"
-      title="Drag into your DAW, video editor, or desktop to drop this page's output as WAV"
-    >
-      <GripHorizontal size={14} />
-      <span>Drag WAV</span>
-    </div>
-  );
+  const sheetSubtitle = `From ${sourceName}${
+    editIncluded.length > 0 ? ", as edited" : ""
+  } · ${totalDurationS.toFixed(2)} s`;
 
   /** Save and Download for a page; the edit page's stay as they were while a sheet covers it. */
   const renderOutputButtons = (forPage: StudioPage) => {
@@ -2048,7 +1971,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <Upload size={14} />
             Open file
           </button>
-          {dragChip}
           <button
             type="button"
             disabled={!processedChannels}
@@ -2097,13 +2019,10 @@ export const StudioView: React.FC<StudioViewProps> = ({
           <div className="sfx-divider-v" />
           <div className="sfx-editor-file-meta">
             <span className="sfx-editor-filename">{pageTitle}</span>
-            <span className="sfx-editor-filespecs ds-tnum">
-              {`From ${sourceName}${editIncluded.length > 0 ? ", as edited" : ""} · ${totalDurationS.toFixed(
-                2
-              )} s`}
+            <span className="sfx-editor-filespecs ds-tnum" title={sheetSubtitle}>
+              {sheetSubtitle}
             </span>
           </div>
-          {dragChip}
         </div>
         <div className="sfx-editor-toolbar-group">
           {onLoopPage && (
@@ -2698,7 +2617,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                       onReroll={handleRerollSingleVariation}
                       onToggleSelected={toggleTakeSelected}
                       onReplaceSource={(v) => replaceSourceWith(v.name, v.channels, v.sampleRate)}
-                      onDragStart={handleTakeDragStart}
                       gridRef={takesGridRef}
                     />
                   </>

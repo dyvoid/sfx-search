@@ -1437,6 +1437,8 @@ body.sfx-resizing-x {
   font-size: var(--font-size-xs);
   color: var(--text-tertiary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sfx-editor-module-tabs {
@@ -1500,36 +1502,6 @@ body.sfx-resizing-x {
 .sfx-module-dot.on {
   background: var(--success-500);
   box-shadow: 0 0 6px var(--success-500);
-}
-
-.sfx-drag-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: var(--control-height-md);
-  padding: 0 var(--space-4);
-  border-radius: var(--radius-sm);
-  border: 1px dashed var(--border-strong);
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-body);
-  font-size: var(--font-size-base);
-  font-weight: 500;
-  cursor: grab;
-  user-select: none;
-  transition: border-color var(--duration-fast) var(--ease-standard),
-    color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard);
-}
-
-.sfx-drag-chip:hover {
-  border-color: var(--primary);
-  color: var(--text-primary);
-  background: var(--surface-hover);
-}
-
-.sfx-drag-chip:active {
-  cursor: grabbing;
 }
 
 /* Waveform Stage */

@@ -25,8 +25,8 @@ and the local builds in use ship `flac`, `libmp3lame`, `libvorbis` and `libopus`
 4. **Download:** `POST /api/transcode` returns the encoded bytes; nothing is kept on disk. WAV is
    still encoded in the browser, so it needs no round trip.
 5. **One dialog** (Save to library / Download, for the edited sound or the variation takes) holds
-   filename and format. The last choice is remembered per browser. Drag-out to a DAW stays 24-bit
-   WAV.
+   filename and format. The last choice is remembered per browser. (Drag-out to a DAW, as 24-bit
+   WAV, was later removed; see ADR 0004.)
 
 ## Consequences
 

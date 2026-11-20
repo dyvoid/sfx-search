@@ -19,7 +19,6 @@ interface TakesPanelProps {
   onReroll: (idx: number) => void;
   onToggleSelected: (idx: number) => void;
   onReplaceSource: (v: GeneratedVariation) => void;
-  onDragStart: (e: React.DragEvent, v: GeneratedVariation) => void;
   gridRef: React.RefObject<HTMLDivElement>;
 }
 
@@ -88,13 +87,11 @@ export const TakesPanel: React.FC<TakesPanelProps> = (p) => {
             return (
               <div
                 key={v.id}
-                draggable
-                onDragStart={(e) => p.onDragStart(e, v)}
                 onClick={() => p.onAudition(v, idx)}
                 className={`sfx-var-take-card ${isAct ? "active" : ""} ${
                   v.selected ? "selected" : ""
                 }`}
-                title="Click to play from the start · Drag into your DAW"
+                title="Click to play from the start"
               >
                 <div className="sfx-var-take-top" onClick={(e) => e.stopPropagation()}>
                   <label

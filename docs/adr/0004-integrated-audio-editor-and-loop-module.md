@@ -28,11 +28,11 @@ Furthermore, we want `sfx-search` to grow into a unified sound-design workstatio
      - **Pitch Shift vs. Zero-Integral Pitch Drift:** Separates static per-take `Pitch Shift` from internal time-varying `Pitch Drift` (normalized so $\int \text{drift}(t)\,dt = 0$, guaranteeing internal spline movement never causes unexpected duration drift), with `Melodic` mode supporting micro-detuning ($\le 45\%$) or scale-step quantization ($> 45\%$).
      - **Protect Start / End (Modulation Masking):** Smoothly masks internal drift and volume modulation at the start and/or end of the sound so initial attack transients stay phase-coherent and tails/loops stay anchored.
      - **Physically-Coupled Tone Variation & Attack Punch:** Continuous `Tone Variation` (`0–100%`) couples strike force to brightness and jitters resonant mid peaks, while `Attack Punch` varies the first ~32 ms transient snap to defeat the machine-gun effect.
-     - **Batch Curation:** Individual re-roll, heart/like curation, direct DAW drag-out, and one-click **Save Liked to Library**. (A **Test Sequence** player that cycled through takes back-to-back was later removed: it was not useful enough to keep.)
+     - **Batch Curation:** Individual re-roll, heart/like curation, and one-click **Save Liked to Library**. (A **Test Sequence** player that cycled through takes back-to-back was later removed: it was not useful enough to keep.)
 4. **Save to Library & Immediate Single-File Indexing:**
    - Export supports three workflows without leaving the editor:
      - **Download WAV** (`16-bit`, `24-bit`, or `32-bit float` RIFF/WAVE encoded in-browser).
-     - **Drag to DAW / Desktop** (attaching the rendered WAV `File` directly to `DataTransfer` on drag-start).
+     - **Drag to DAW / Desktop** (attaching the rendered WAV `File` directly to `DataTransfer` on drag-start). Later removed, with the take-card drag: browsers do not let a drag drop a file onto the file system, so the "Drag WAV" chip looked like it should work there and did not. Save to Library and Download cover getting the output out.
      - **Save to Library** (`POST /api/files/{file_id}/save-edited`), which writes the rendered WAV into the source file's folder (with collision-safe naming or explicit overwrite), immediately runs single-file decode + feature extraction + CLAP window embedding (`index_single_file`), and copies favorite/user_tags/notes so the new asset is searchable in LanceDB within milliseconds.
 
 ## Consequences
