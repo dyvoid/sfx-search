@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { useHostAccess } from "../hostAccess";
 import {
   Check,
   Copy,
@@ -187,6 +188,8 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
     }
   };
 
+  const { isLocal } = useHostAccess();
+
   const handleCopyPath = async () => {
     try {
       await navigator.clipboard.writeText(hit.path);
@@ -232,24 +235,28 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
             </div>
           </div>
           <div className="sfx-inspector-head-actions">
-            <button
-              type="button"
-              onClick={() => revealInExplorer(hit.file_id).catch(reportError)}
-              className="sfx-icon-btn"
-              aria-label="Reveal file in Explorer"
-              title="Reveal file in Explorer"
-            >
-              <FolderOpen size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={handleCopyPath}
-              className="sfx-icon-btn"
-              aria-label="Copy file path"
-              title={copied ? "Copied!" : "Copy full path"}
-            >
-              {copied ? <Check size={14} /> : <Copy size={14} />}
-            </button>
+            {isLocal && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => revealInExplorer(hit.file_id).catch(reportError)}
+                  className="sfx-icon-btn"
+                  aria-label="Reveal file in Explorer"
+                  title="Reveal file in Explorer"
+                >
+                  <FolderOpen size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCopyPath}
+                  className="sfx-icon-btn"
+                  aria-label="Copy file path"
+                  title={copied ? "Copied!" : "Copy full path"}
+                >
+                  {copied ? <Check size={14} /> : <Copy size={14} />}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -127,6 +127,8 @@ export interface LibraryStateResponse {
   missing_roots: string[];
   stats: LibraryStats;
   indexing: IndexingProgress;
+  /** False for LAN clients; folder setup and Reveal are host-machine-only. */
+  is_local?: boolean;
 }
 
 export const DEFAULT_FILTERS: FilterState = {

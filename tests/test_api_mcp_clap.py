@@ -69,7 +69,8 @@ def test_fastapi_endpoints_range_and_transcode(tmp_path: Path) -> None:
     run_indexer(config=cfg, store=store, embedder=embedder)
 
     app = create_app(config=cfg, store=store, embedder=embedder)
-    client = TestClient(app)
+    # Library-root management is host-machine-only, so this client is loopback.
+    client = TestClient(app, client=("127.0.0.1", 50000))
 
     # 1. Stats & Filters
     r_stats = client.get("/api/stats")
@@ -633,7 +634,9 @@ def test_removing_a_nested_root_keeps_files_of_the_remaining_root(tmp_path: Path
     store = SfxStore(cfg.db_dir)
     embedder = FakeEmbedder(embedding_dim=16)
     run_indexer(config=cfg, store=store, embedder=embedder)
-    client = TestClient(create_app(config=cfg, store=store, embedder=embedder))
+    client = TestClient(
+        create_app(config=cfg, store=store, embedder=embedder), client=("127.0.0.1", 50000)
+    )
 
     # The outer root still covers the nested folder: nothing may be dropped.
     r = client.request("DELETE", "/api/library/roots", json={"path": str(nested)})
@@ -647,3 +650,89 @@ def test_removing_a_nested_root_keeps_files_of_the_remaining_root(tmp_path: Path
     assert r.json()["removed_files"] == 1
     assert client.get(f"/api/files/{compute_file_id(nested_wav)}").status_code == 200
     assert client.get(f"/api/files/{compute_file_id(outer_wav)}").status_code == 404
+
+
+def _remote_app_clients(tmp_path: Path) -> tuple[TestClient, TestClient]:
+    """(host-machine client, LAN client) for the same app."""
+    lib_root = tmp_path / "sfx"
+    write_sine_wav(lib_root / "a.wav", freq_hz=440.0, duration_s=0.5)
+    cfg = Config(
+        library=LibraryConfig(roots=[str(lib_root)]),
+        paths=PathsConfig(data_dir=str(tmp_path / "data")),
+    )
+    store = SfxStore(cfg.db_dir)
+    app = create_app(config=cfg, store=store, embedder=FakeEmbedder(embedding_dim=16))
+    return (
+        TestClient(app, client=("127.0.0.1", 50000)),
+        TestClient(app, client=("192.168.1.50", 50000)),
+    )
+
+
+def test_library_reports_is_local(tmp_path: Path) -> None:
+    local, lan = _remote_app_clients(tmp_path)
+    assert local.get("/api/library").json()["is_local"] is True
+    assert lan.get("/api/library").json()["is_local"] is False
+
+
+def test_host_only_endpoints_refuse_lan_clients(tmp_path: Path) -> None:
+    local, lan = _remote_app_clients(tmp_path)
+    extra = tmp_path / "other"
+    extra.mkdir()
+    assert lan.post("/api/library/roots", json={"path": str(extra)}).status_code == 403
+    assert (
+        lan.request(
+            "DELETE", "/api/library/roots", json={"path": str(extra), "remove_indexed_files": True}
+        ).status_code
+        == 403
+    )
+    assert lan.post("/api/library/rescan").status_code == 403
+    assert lan.post("/api/library/pick-folder").status_code == 403
+    assert lan.post("/api/files/whatever/reveal").status_code == 403
+    # Nothing was changed by the refused calls, and the host machine still can.
+    assert len(local.get("/api/library").json()["roots"]) == 1
+    assert local.post("/api/library/roots", json={"path": str(extra)}).status_code == 200
+
+
+def test_lan_clients_can_still_search_and_stream(tmp_path: Path) -> None:
+    local, lan = _remote_app_clients(tmp_path)
+    run_indexer(
+        config=local.app.state.config,  # type: ignore[attr-defined]
+        store=local.app.state.store,  # type: ignore[attr-defined]
+        embedder=FakeEmbedder(embedding_dim=16),
+    )
+    hits = lan.post(
+        "/api/search",
+        json={"query": "tone"},
+        headers={"Origin": "http://192.168.1.10:8765", "Host": "192.168.1.10:8765"},
+    )
+    assert hits.status_code == 200
+    fid = hits.json()["results"][0]["file_id"]
+    assert lan.get(f"/api/audio/{fid}", headers={"Range": "bytes=0-99"}).status_code == 206
+
+
+def test_origin_guard_allows_own_origin_and_blocks_cross_site(tmp_path: Path) -> None:
+    _, lan = _remote_app_clients(tmp_path)
+    body = {"query": "x"}
+    own = lan.post(
+        "/api/search",
+        json=body,
+        headers={"Origin": "http://192.168.1.10:8765", "Host": "192.168.1.10:8765"},
+    )
+    assert own.status_code != 403
+    loopback = lan.post("/api/search", json=body, headers={"Origin": "http://localhost:5173"})
+    assert loopback.status_code != 403
+    cross = lan.post(
+        "/api/search",
+        json=body,
+        headers={"Origin": "https://evil.example", "Host": "192.168.1.10:8765"},
+    )
+    assert cross.status_code == 403
+    # Same host, different port is a different origin.
+    other_port = lan.post(
+        "/api/search",
+        json=body,
+        headers={"Origin": "http://192.168.1.10:9999", "Host": "192.168.1.10:8765"},
+    )
+    assert other_port.status_code == 403
+    # Non-browser callers send no Origin and are unaffected.
+    assert lan.post("/api/search", json=body).status_code != 403

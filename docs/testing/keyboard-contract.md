@@ -43,6 +43,7 @@ Global principles:
 | L18 | Play from best match switch, Favorites only checkbox | Tab, then Space / Enter | Reachable by Tab and toggled by keyboard; exposes role and checked state. |
 | L19 | transient footer error (e.g. reveal failed) | — | Clears after ~5 s. The "Similar to …" chip in the search bar is not transient and has an "Exit similarity view" button. |
 | L20 | Library modal / first-run screen | click / Enter | "Add folder…" opens the native picker and adds the pick. "or enter a path" reveals an empty, focused path field (no placeholder); Enter adds and hides it; Cancel hides it and returns focus to "or enter a path". |
+| L21 | UI opened from another machine on the LAN (`/api/library` reports `is_local: false`) | R | Does nothing (no reveal request). Reveal, Copy path, Add folder, Remove, Scan and Rebuild controls are not rendered; the Folders list is read-only. Search, playback, favorites, Studio and save-to-library work as usual. |
 
 ## Tabs
 

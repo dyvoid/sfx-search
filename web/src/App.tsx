@@ -42,6 +42,7 @@ import {
   updateUserData,
 } from "./api";
 import { DetailPanel } from "./components/DetailPanel";
+import { useHostAccess } from "./hostAccess";
 import { DsSelect } from "./components/DsSelect";
 import { FolderTree } from "./components/FolderTree";
 import { LibraryModal } from "./components/LibraryModal";
@@ -345,6 +346,7 @@ const ResultRow = React.memo(function ResultRow({
   rowRefs,
   actions,
 }: ResultRowProps) {
+  const { isLocal } = useHostAccess();
   return (
     <div
       ref={(el) => {
@@ -496,15 +498,17 @@ const ResultRow = React.memo(function ResultRow({
           <Sliders size={14} />
         </button>
 
-        <button
-          type="button"
-          onClick={(e) => actions.reveal(e, hit)}
-          className="sfx-icon-btn sfx-reveal-btn"
-          aria-label="Reveal file in Explorer"
-          title="Reveal file in Explorer (R)"
-        >
-          <FolderOpen size={14} />
-        </button>
+        {isLocal && (
+          <button
+            type="button"
+            onClick={(e) => actions.reveal(e, hit)}
+            className="sfx-icon-btn sfx-reveal-btn"
+            aria-label="Reveal file in Explorer"
+            title="Reveal file in Explorer (R)"
+          >
+            <FolderOpen size={14} />
+          </button>
+        )}
 
         <button
           type="button"
@@ -582,6 +586,7 @@ export const App: React.FC = () => {
   });
   const [showHistory, setShowHistory] = useState<boolean>(false);
 
+  const { isLocal, setIsLocal } = useHostAccess();
   const [roots, setRoots] = useState<string[]>([]);
   const [missingRoots, setMissingRoots] = useState<string[]>([]);
   const [stats, setStats] = useState<LibraryStats | null>(null);
@@ -877,6 +882,7 @@ export const App: React.FC = () => {
     try {
       const lib = await fetchLibraryState();
       setLibraryFailures(0);
+      setIsLocal(lib.is_local !== false);
       setRoots(lib.roots);
       setMissingRoots(lib.missing_roots ?? []);
       setStats(lib.stats);
@@ -913,7 +919,7 @@ export const App: React.FC = () => {
       // keep the startup retry going.
       setLibraryFailures((n) => n + 1);
     }
-  }, [runSearch, isSimilarityView, loading]);
+  }, [runSearch, isSimilarityView, loading, setIsLocal]);
 
   useEffect(() => {
     refreshLibraryState();
@@ -1335,7 +1341,7 @@ export const App: React.FC = () => {
       ) {
         e.preventDefault();
         const currentHit = results[selectedIndex];
-        if (currentHit) {
+        if (currentHit && isLocal) {
           revealInExplorer(currentHit.file_id).catch(() =>
             setStatusLabel("Reveal failed")
           );
@@ -1360,7 +1366,7 @@ export const App: React.FC = () => {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [results, selectedIndex, playHit, libraryModalOpen, tab, editInStudio]);
+  }, [results, selectedIndex, playHit, libraryModalOpen, tab, editInStudio, isLocal]);
 
   const handleAddRoot = async (path: string) => {
     const res = await addLibraryRoot(path);

@@ -81,6 +81,21 @@ cd ..
 uv run sfxsearch serve
 ```
 
+### Using the UI from another machine on your LAN
+
+Run the server on the machine that holds the library, bound to all interfaces, and allow the port
+through its firewall:
+
+```powershell
+uv run sfxsearch serve --host 0.0.0.0
+```
+
+Open `http://<that-machine>:8765` from the other computer. Set up library folders by using the app
+on the host itself at `http://localhost:8765`; remote browsers can search, play, favorite, edit in
+the Studio and save into existing library folders, but folder setup and "Reveal in Explorer" are
+host-only and hidden there. There is no authentication, so use this on a trusted network only
+([ADR 0008](docs/adr/0008-lan-access-from-other-machines.md)).
+
 ### Running the MCP Server
 
 ```powershell

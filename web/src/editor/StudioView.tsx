@@ -29,6 +29,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { revealInExplorer, saveToLibraryFolder } from "../api";
+import { useHostAccess } from "../hostAccess";
 import { KeyHints } from "../components/KeyHints";
 import { SpectrumMeter } from "../components/SpectrumMeter";
 import { FolderEntry, SearchHit } from "../types";
@@ -142,6 +143,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
   onSavedToLibrary,
   onStatus,
 }) => {
+  const { isLocal } = useHostAccess();
   const waveRef = useRef<EditorWaveformHandle | null>(null);
   /** The edit page; inert while Loop or Variations covers it. */
   const baseRef = useRef<HTMLDivElement | null>(null);
@@ -1993,7 +1995,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
             <Sparkles size={14} />
             Find similar
           </button>
-          {libHit && (
+          {libHit && isLocal && (
             <button
               type="button"
               onClick={() => revealInExplorer(libHit.file_id).catch(() => {})}

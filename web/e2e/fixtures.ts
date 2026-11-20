@@ -110,6 +110,8 @@ export interface ApiOptions {
   missingRoots: string[];
   /** The first N GET /api/library calls fail (backend still starting). */
   libraryFailures: number;
+  /** false = a LAN client: /api/library says is_local false and host-only routes answer 403. */
+  isLocal: boolean;
 }
 
 export const DEFAULT_API_OPTIONS: ApiOptions = {
@@ -126,6 +128,7 @@ export const DEFAULT_API_OPTIONS: ApiOptions = {
   roots: ["/lib"],
   missingRoots: [],
   libraryFailures: 0,
+  isLocal: true,
 };
 
 export class MockApi {
@@ -195,7 +198,15 @@ export class MockApi {
       missing_roots: this.opts.missingRoots,
       stats: this.stats(),
       indexing: this.indexing(),
+      is_local: this.opts.isLocal,
     });
+    const hostOnly =
+      !this.opts.isLocal &&
+      (p === "/api/library/pick-folder" ||
+        p === "/api/library/rescan" ||
+        (p === "/api/library/roots" && m !== "GET") ||
+        p.endsWith("/reveal"));
+    if (hostOnly) return json({ detail: "Only on the host machine" }, 403);
 
     if (p === "/api/search") {
       const body = JSON.parse(req.postData() ?? "{}") as {

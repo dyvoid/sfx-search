@@ -26,6 +26,7 @@ rrf_k = 60
 default_k = 30
 
 [server]
+# "0.0.0.0" serves the UI to other machines on your LAN (no auth; trusted networks only).
 host = "127.0.0.1"
 port = 8765
 

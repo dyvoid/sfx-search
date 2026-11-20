@@ -1,5 +1,6 @@
 import React, { useRef, useState } from "react";
 import { FolderPlus } from "lucide-react";
+import { useHostAccess } from "../hostAccess";
 
 interface AddFolderControlProps {
   /** Opens the native folder picker and adds the picked folder. */
@@ -19,6 +20,7 @@ export const AddFolderControl: React.FC<AddFolderControlProps> = ({
   onAddPath,
   primary = false,
 }) => {
+  const { isLocal } = useHostAccess();
   const [manualOpen, setManualOpen] = useState<boolean>(false);
   const [path, setPath] = useState<string>("");
   const [busy, setBusy] = useState<boolean>(false);
@@ -58,6 +60,10 @@ export const AddFolderControl: React.FC<AddFolderControlProps> = ({
       setPath("");
     }
   };
+
+  if (!isLocal) {
+    return null;
+  }
 
   return (
     <div className="sfx-add-folder">

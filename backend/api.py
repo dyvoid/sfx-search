@@ -435,6 +435,47 @@ def _free_target(parent_dir: Path, stem: str, ext: str, overwrite: bool) -> Path
     return candidate
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _is_local_client(request: Request) -> bool:
+    """True when the request comes from the machine running the server."""
+    client = request.client
+    if client is None:
+        return False
+    host = client.host
+    if host in _LOOPBACK_HOSTS:
+        return True
+    # IPv4-mapped loopback (::ffff:127.0.0.1) as reported by dual-stack sockets.
+    return host.lower().startswith("::ffff:127.")
+
+
+def _require_local(request: Request) -> None:
+    """Host-machine-only actions (folder setup, reveal) refuse LAN clients."""
+    if not _is_local_client(request):
+        raise HTTPException(
+            status_code=403,
+            detail="This action is only available on the machine running sfx-search",
+        )
+
+
+def _origin_allowed(origin: str, host_header: str) -> bool:
+    """A mutating browser request is allowed from loopback or from this server's own origin."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(origin)
+        origin_host = parts.hostname or ""
+    except ValueError:
+        return False
+    if origin_host in _LOOPBACK_HOSTS:
+        return True
+    # Same-origin: the page was served by this server (e.g. over the LAN), so the
+    # Origin's authority equals the Host the browser addressed. Cross-site pages
+    # carry their own origin and stay blocked.
+    return bool(host_header) and parts.netloc.lower() == host_header.strip().lower()
+
+
 def create_app(
     config: Config | None = None,
     store: SfxStore | None = None,
@@ -464,16 +505,12 @@ def create_app(
     @app.middleware("http")
     async def local_origin_guard(request: Request, call_next: Any) -> Response:
         # Browsers always send Origin on mutating requests; local tools don't.
-        # Rejects browser-originated CSRF from arbitrary websites.
+        # Rejects browser-originated CSRF from arbitrary websites while allowing
+        # the UI served by this server itself (loopback or LAN address).
         if request.method in ("POST", "PUT", "DELETE", "PATCH"):
             origin = request.headers.get("origin") or ""
-            if origin:
-                try:
-                    host = urlsplit(origin).hostname or ""
-                except ValueError:
-                    host = ""
-                if host not in {"localhost", "127.0.0.1", "::1"}:
-                    return JSONResponse(status_code=403, content={"detail": "Forbidden origin"})
+            if origin and not _origin_allowed(origin, request.headers.get("host") or ""):
+                return JSONResponse(status_code=403, content={"detail": "Forbidden origin"})
         return await call_next(request)
 
     app.state.config = cfg
@@ -490,7 +527,7 @@ def create_app(
         return {"status": "ok"}
 
     @app.get("/api/library")
-    def api_get_library() -> dict[str, Any]:
+    def api_get_library(request: Request) -> dict[str, Any]:
         stats = st.get_library_stats()
         configured_roots = [normalize_path(r) for r in cfg.library.roots if str(r).strip()]
         missing_roots = [r for r in configured_roots if not os.path.isdir(to_os_path(r))]
@@ -499,10 +536,12 @@ def create_app(
             "missing_roots": missing_roots,
             "stats": stats,
             "indexing": index_mgr.get_status(),
+            "is_local": _is_local_client(request),
         }
 
     @app.post("/api/library/roots")
-    def api_add_library_root(body: RootAddBody) -> dict[str, Any]:
+    def api_add_library_root(body: RootAddBody, request: Request) -> dict[str, Any]:
+        _require_local(request)
         raw = body.path.strip()
         if not raw:
             raise HTTPException(status_code=400, detail="Folder path cannot be empty")
@@ -522,7 +561,8 @@ def create_app(
         }
 
     @app.delete("/api/library/roots")
-    def api_remove_library_root(body: RootRemoveBody) -> dict[str, Any]:
+    def api_remove_library_root(body: RootRemoveBody, request: Request) -> dict[str, Any]:
+        _require_local(request)
         if not body.path.strip():
             raise HTTPException(status_code=400, detail="Path must not be empty")
         norm = normalize_path(body.path.strip())
@@ -543,7 +583,8 @@ def create_app(
         }
 
     @app.post("/api/library/rescan")
-    def api_rescan_library(body: RescanBody | None = None) -> dict[str, Any]:
+    def api_rescan_library(request: Request, body: RescanBody | None = None) -> dict[str, Any]:
+        _require_local(request)
         reindex = body.reindex if body is not None else False
         index_mgr.trigger_scan(reindex=reindex)
         return {
@@ -552,7 +593,8 @@ def create_app(
         }
 
     @app.post("/api/library/pick-folder")
-    def api_pick_folder() -> dict[str, Any]:
+    def api_pick_folder(request: Request) -> dict[str, Any]:
+        _require_local(request)
         picked = _pick_folder_native()
         return {"path": picked}
 
@@ -900,7 +942,8 @@ def create_app(
         }
 
     @app.post("/api/files/{file_id}/reveal")
-    def api_reveal_file(file_id: str) -> dict[str, Any]:
+    def api_reveal_file(file_id: str, request: Request) -> dict[str, Any]:
+        _require_local(request)
         f_row = st.get_file_by_id_or_path(file_id)
         if f_row is None:
             raise HTTPException(status_code=404, detail=f"File not found: {file_id}")

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Folder, RefreshCw, Trash2, X } from "lucide-react";
 import { IndexingProgress, LibraryStats } from "../types";
 import { AddFolderControl } from "./AddFolderControl";
+import { useHostAccess } from "../hostAccess";
 
 interface LibraryModalProps {
   open: boolean;
@@ -26,6 +27,8 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
   onRemoveRoot,
   onRescan,
 }) => {
+  // LAN clients see the folders read-only; setup happens on the host machine.
+  const { isLocal } = useHostAccess();
   // Two-step confirm for destructive actions: first click arms for 3s.
   const [armed, setArmed] = useState<string | null>(null);
 
@@ -150,8 +153,9 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
         >
           {roots.length === 0 ? (
             <p className="sfx-folders-empty">
-              No folders yet. Add the folders that hold your sound effects;
-              they are scanned in the background.
+              {isLocal
+                ? "No folders yet. Add the folders that hold your sound effects; they are scanned in the background."
+                : "No folders yet. Folders are set up on the machine running sfx-search."}
             </p>
           ) : (
             <ul className="sfx-folder-list">
@@ -159,6 +163,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                 <li key={rt} className="sfx-folder-item">
                   <Folder size={14} className="sfx-folder-item-icon" />
                   <span className="sfx-folder-item-path">{rt}</span>
+                  {isLocal && (
                   <button
                     type="button"
                     disabled={isRunning}
@@ -177,6 +182,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
                     <Trash2 size={14} />
                     {armed === `rm:${rt}` ? "Confirm remove" : "Remove"}
                   </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -244,7 +250,7 @@ export const LibraryModal: React.FC<LibraryModalProps> = ({
               {stats.ok_files.toLocaleString()} files indexed
             </span>
           )}
-          {roots.length > 0 && (
+          {roots.length > 0 && isLocal && (
             <>
               <button
                 type="button"

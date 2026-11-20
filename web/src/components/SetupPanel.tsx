@@ -2,6 +2,7 @@ import React from "react";
 import { AlertTriangle, FolderOpen, FolderPlus } from "lucide-react";
 import { AddFolderControl } from "./AddFolderControl";
 import { IndexingProgress } from "../types";
+import { useHostAccess } from "../hostAccess";
 
 interface SetupPanelProps {
   roots: string[];
@@ -30,6 +31,7 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
   onAddPath,
   onRetry,
 }) => {
+  const { isLocal } = useHostAccess();
   const scanning = roots.length > 0 && indexing?.state === "running";
   const failed = roots.length > 0 && indexing?.state === "error";
 
@@ -54,8 +56,9 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
           <h2 className="ds-empty-title">Add your sound-effects folders</h2>
         </div>
         <p className="sfx-setup-text">
-          Choose the folders that hold your sound library. Search is ready as
-          soon as the first sounds have been scanned.
+          {isLocal
+            ? "Choose the folders that hold your sound library. Search is ready as soon as the first sounds have been scanned."
+            : "No sound library is set up yet. Add folders in sfx-search on the machine that hosts it."}
         </p>
         <AddFolderControl onBrowse={onBrowse} onAddPath={onAddPath} primary />
       </div>
@@ -134,11 +137,13 @@ export const SetupPanel: React.FC<SetupPanelProps> = ({
             <pre>{details}</pre>
           </details>
         )}
-        <div>
-          <button type="button" className="ds-btn ds-btn-primary" onClick={onRetry}>
-            Try again
-          </button>
-        </div>
+        {isLocal && (
+          <div>
+            <button type="button" className="ds-btn ds-btn-primary" onClick={onRetry}>
+              Try again
+            </button>
+          </div>
+        )}
         {folderList}
       </div>
     );
