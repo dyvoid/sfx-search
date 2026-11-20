@@ -14,6 +14,8 @@
 | **Bug: Loop stops after switching candidate** | Done | In Seamless Loop, while a found loop candidate is playing, selecting another candidate whose end point is earlier than the current playhead stops looping: playback runs on to the end of the file and stops. Expected: playback jumps into the new loop region and keeps looping | — |
 | **Bug: Seam scope ignores end-point drag** | Open | On the Loop page, dragging the loop end point leaves the Seam Continuity Scope unchanged. Expected: the scope redraws for the new seam as the end point moves, as it does for the rest of the loop edits | — |
 | **Studio: Drop drag-out** | Done | Removed the "Drag WAV" chip from the edit and page headers and the drag on take cards: a browser drag cannot drop a file onto the file system, so the chip was confusing. Also ends the long source name running under the chip in the Loop page header. Save to Library and Download remain the way out | [ADR 0004](adr/0004-integrated-audio-editor-and-loop-module.md) |
+| **Library: Multi-select download** | Open | Select several results in the library (e.g. Ctrl/Shift+click, plus a keyboard equivalent) and download them in one go, as the original files. Mostly for remote sessions, where the library lives on another machine and Reveal in Explorer does not help | — |
+| **Studio: Simple and advanced modes** | Open | A switch between a simple Studio (the controls most edits need) and an advanced one (every setting, as now), so quick jobs are not buried under the full rack | — |
 
 ---
 
