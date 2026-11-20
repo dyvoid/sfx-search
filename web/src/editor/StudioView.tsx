@@ -18,6 +18,7 @@ import {
   Repeat,
   Replace,
   RotateCcw,
+  SkipBack,
   Save,
   Sliders,
   Sparkles,
@@ -240,6 +241,11 @@ export const StudioView: React.FC<StudioViewProps> = ({
   // Transport state
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [auditionMode, setAuditionMode] = useState<"loop" | "file">("loop");
+  // The edit page's Loop toggle, kept per module: repeat the whole edited sound.
+  const [editLoop, setEditLoop] = useState<Record<EditModule, boolean>>({
+    shaper: false,
+    eq: false,
+  });
   const [timePosText, setTimePosText] = useState<string>("0:00.00");
   const cursorRef = useRef<number>(0);
   const cursorVisibleRef = useRef<boolean>(false);
@@ -297,6 +303,9 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const onLoopPage = page === "loop";
   const showCrop = page === "edit" && editModule === "shaper";
   const loopAudition = onLoopPage && auditionMode === "loop";
+  const fileLoopOn = page === "edit" && editLoop[editModule];
+  const fileLoopRef = useRef(fileLoopOn);
+  fileLoopRef.current = fileLoopOn;
 
   const fadeSamples = useMemo(
     () => Math.max(0, Math.round((fadeMs / 1000) * sampleRate)),
@@ -314,10 +323,15 @@ export const StudioView: React.FC<StudioViewProps> = ({
         cursorVisibleRef.current = false;
         setIsPlaying(false);
       };
+      t.setFileLoop(fileLoopRef.current);
       transportRef.current = t;
     }
     return transportRef.current;
   }, []);
+
+  useEffect(() => {
+    transportRef.current?.setFileLoop(fileLoopOn);
+  }, [fileLoopOn]);
 
   const stopVariationPlayback = useCallback(() => {
     const activeVar = varSourceRef.current;
@@ -2193,6 +2207,21 @@ export const StudioView: React.FC<StudioViewProps> = ({
         {/* Studio Transport Deck */}
         <div className="sfx-editor-transport-bar">
           <div className="sfx-editor-transport-left">
+            {stagePage === "edit" && (
+              <button
+                type="button"
+                aria-pressed={editLoop[editModule]}
+                disabled={!processedChannels}
+                onClick={() =>
+                  setEditLoop((s) => ({ ...s, [editModule]: !s[editModule] }))
+                }
+                className={`sfx-choice-pill sfx-tp-loop-toggle ${editLoop[editModule] ? "active" : ""}`}
+                title="Repeat the whole edited sound while previewing"
+              >
+                <Repeat size={13} />
+                Loop
+              </button>
+            )}
             {loopStage && (
               <>
                 <button
@@ -2244,7 +2273,7 @@ export const StudioView: React.FC<StudioViewProps> = ({
               title="Restart from beginning / loop start (Home)"
               aria-label="Restart playback"
             >
-              <RotateCcw size={15} />
+              <SkipBack size={15} />
             </button>
 
             <button

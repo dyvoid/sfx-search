@@ -3,7 +3,8 @@
  *
  * Two modes share one output and feed an AnalyserNode for real-time metering:
  * - 'loop': the baked/processed loop buffer on repeat (seamless-loop audition).
- * - 'file': the full processed buffer, one-shot from a cursor position to EOF.
+ * - 'file': the full processed buffer from a cursor position, one-shot to EOF,
+ *   or on repeat while file looping is on (the edit page's Loop toggle).
  */
 export class StudioTransport {
   private ctx: AudioContext;
@@ -16,6 +17,7 @@ export class StudioTransport {
   private startedAt = 0;
   private startOffset = 0;
   private _playing = false;
+  private _fileLoop = false;
 
   /** Fired when 'file' playback reaches the end of the buffer. */
   onEnded: (() => void) | null = null;
@@ -89,6 +91,19 @@ export class StudioTransport {
     }
   }
 
+  /** Repeat the whole file in 'file' mode; a running file playback switches in place. */
+  setFileLoop(on: boolean): void {
+    if (on === this._fileLoop) {
+      return;
+    }
+    const wasFilePlaying = this._playing && this._mode === "file";
+    const pos = wasFilePlaying ? this.positionSamples() : null;
+    this._fileLoop = on;
+    if (wasFilePlaying) {
+      this.startSource("file", pos ?? 0);
+    }
+  }
+
   playLoop(offsetSamples = 0): void {
     if (this.ctx.state === "suspended") {
       void this.ctx.resume();
@@ -115,7 +130,7 @@ export class StudioTransport {
     );
     const s = this.ctx.createBufferSource();
     s.buffer = buffer;
-    s.loop = mode === "loop";
+    s.loop = mode === "loop" || this._fileLoop;
     if (mode === "file") {
       s.onended = () => {
         if (this.source !== s) {
@@ -191,7 +206,7 @@ export class StudioTransport {
     }
     const t =
       (this.ctx.currentTime - this.startedAt) * b.sampleRate + this.startOffset;
-    return this._mode === "loop" ? t % b.length : Math.min(t, b.length);
+    return this._mode === "loop" || this._fileLoop ? t % b.length : Math.min(t, b.length);
   }
 
   /** Position within the active buffer — playhead when playing, offset when paused. */

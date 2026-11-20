@@ -1687,6 +1687,12 @@ body.sfx-resizing-x {
   white-space: nowrap;
 }
 
+.sfx-tp-loop-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .sfx-editor-transport-left .sfx-pill-group {
   flex-wrap: nowrap;
 }
