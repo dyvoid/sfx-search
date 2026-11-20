@@ -12,6 +12,7 @@
 | **Studio: Transcoding on Save & Download** | Done | `Save to Library` and `Download` (formerly `Export WAV`) share one dialog with filename and output format: WAV 16/24/32-float, FLAC 16/24, MP3, Ogg Vorbis and Opus with a bitrate. Also used for the Variations batch save/download. Encoding runs in the backend with `ffmpeg`; the last choice is remembered per browser | [ADR 0006](adr/0006-studio-output-encoding-via-backend-ffmpeg.md) |
 | **Bug: Studio waveform overflows on gain** | Done | Raising Output Gain past 0 dBFS draws the waveform beyond its lane bounds (into the neighbouring channel and off the canvas) instead of showing it clipped. Expected: samples over full scale are drawn flat at the lane edge and marked as clipping (`--danger`), so the user sees the result will clip | — |
 | **Bug: Loop stops after switching candidate** | Done | In Seamless Loop, while a found loop candidate is playing, selecting another candidate whose end point is earlier than the current playhead stops looping: playback runs on to the end of the file and stops. Expected: playback jumps into the new loop region and keeps looping | — |
+| **Bug: Seam scope ignores end-point drag** | Open | On the Loop page, dragging the loop end point leaves the Seam Continuity Scope unchanged. Expected: the scope redraws for the new seam as the end point moves, as it does for the rest of the loop edits | — |
 
 ---
 
