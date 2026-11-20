@@ -13,6 +13,7 @@
 | **Bug: Studio waveform overflows on gain** | Done | Raising Output Gain past 0 dBFS draws the waveform beyond its lane bounds (into the neighbouring channel and off the canvas) instead of showing it clipped. Expected: samples over full scale are drawn flat at the lane edge and marked as clipping (`--danger`), so the user sees the result will clip | — |
 | **Bug: Loop stops after switching candidate** | Done | In Seamless Loop, while a found loop candidate is playing, selecting another candidate whose end point is earlier than the current playhead stops looping: playback runs on to the end of the file and stops. Expected: playback jumps into the new loop region and keeps looping | — |
 | **Bug: Seam scope ignores end-point drag** | Open | On the Loop page, dragging the loop end point leaves the Seam Continuity Scope unchanged. Expected: the scope redraws for the new seam as the end point moves, as it does for the rest of the loop edits | — |
+| **Bug: Long source name overlaps Drag WAV** | Open | In the Loop page header, a long source filename in the subtitle ("From … · 30.00 s") runs underneath the Drag WAV button. Expected: the subtitle truncates with an ellipsis (full name on hover) before it reaches the header buttons | — |
 
 ---
 
