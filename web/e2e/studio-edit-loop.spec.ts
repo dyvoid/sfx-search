@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 import { expect, openStudio, studioFront, studioPlayButton, test } from "./fixtures";
 
 const loopToggle = (page: Page) =>
-  studioFront(page).getByRole("button", { name: "Loop", exact: true });
+  studioFront(page).locator(".sfx-tp-pill").getByRole("button", { name: "Loop", exact: true });
 
 test.describe("Studio edit page, Loop toggle", () => {
   test.use({ apiOptions: { audioSeconds: 1 } });
@@ -40,12 +40,12 @@ test.describe("Studio edit page, Loop toggle", () => {
     await expect(loopToggle(app)).toHaveAttribute("aria-pressed", "true");
   });
 
-  test("P8 the Loop page's File preview does not loop", async ({ app }) => {
-    await loopToggle(app).click();
+  test("P8 the Loop page has no toggle and always repeats the loop", async ({ app }) => {
     await app.keyboard.press("Digit3");
-    await studioFront(app).getByRole("button", { name: "File", exact: true }).click();
+    await expect(loopToggle(app)).toHaveCount(0);
     await app.keyboard.press("Space");
     await expect(studioPlayButton(app)).toHaveClass(/playing/);
-    await expect(studioPlayButton(app)).not.toHaveClass(/playing/, { timeout: 3000 });
+    await app.waitForTimeout(1800);
+    await expect(studioPlayButton(app)).toHaveClass(/playing/);
   });
 });

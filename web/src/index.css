@@ -1687,12 +1687,6 @@ body.sfx-resizing-x {
   white-space: nowrap;
 }
 
-.sfx-tp-loop-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 .sfx-editor-transport-left .sfx-pill-group {
   flex-wrap: nowrap;
 }
@@ -1805,6 +1799,12 @@ body.sfx-resizing-x {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.sfx-tp-icon-btn.active {
+  color: var(--primary-400);
+  background: var(--primary-muted-bg);
+  border-color: var(--primary-400);
 }
 
 .sfx-tp-icon-btn:focus-visible {

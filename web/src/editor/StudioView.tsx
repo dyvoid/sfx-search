@@ -240,7 +240,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
 
   // Transport state
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
-  const [auditionMode, setAuditionMode] = useState<"loop" | "file">("loop");
   // The edit page's Loop toggle, kept per module: repeat the whole edited sound.
   const [editLoop, setEditLoop] = useState<Record<EditModule, boolean>>({
     shaper: false,
@@ -302,7 +301,8 @@ export const StudioView: React.FC<StudioViewProps> = ({
   const canSaveToLibrary = libraryRoots.length > 0;
   const onLoopPage = page === "loop";
   const showCrop = page === "edit" && editModule === "shaper";
-  const loopAudition = onLoopPage && auditionMode === "loop";
+  // The Loop page always previews the loop region on repeat.
+  const loopAudition = onLoopPage;
   const fileLoopOn = page === "edit" && editLoop[editModule];
   const fileLoopRef = useRef(fileLoopOn);
   fileLoopRef.current = fileLoopOn;
@@ -838,7 +838,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
     const startOffset = Math.max(0, loopLen - preRollSamples);
     cursorRef.current = loopStart + startOffset;
     cursorVisibleRef.current = true;
-    setAuditionMode("loop");
     tp.playLoop(startOffset);
     setIsPlaying(true);
     setStatusMsg("Auditioning loop seam wrap (E → S)…");
@@ -917,7 +916,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
       cursorRef.current = 0;
       cursorVisibleRef.current = false;
       setIsPlaying(false);
-      setAuditionMode("loop");
       setPage(next);
     },
     [page, stopVariationPlayback]
@@ -2207,21 +2205,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
         {/* Studio Transport Deck */}
         <div className="sfx-editor-transport-bar">
           <div className="sfx-editor-transport-left">
-            {stagePage === "edit" && (
-              <button
-                type="button"
-                aria-pressed={editLoop[editModule]}
-                disabled={!processedChannels}
-                onClick={() =>
-                  setEditLoop((s) => ({ ...s, [editModule]: !s[editModule] }))
-                }
-                className={`sfx-choice-pill sfx-tp-loop-toggle ${editLoop[editModule] ? "active" : ""}`}
-                title="Repeat the whole edited sound while previewing"
-              >
-                <Repeat size={13} />
-                Loop
-              </button>
-            )}
             {loopStage && (
               <>
                 <button
@@ -2233,32 +2216,6 @@ export const StudioView: React.FC<StudioViewProps> = ({
                 >
                   Test Seam
                 </button>
-                <span className="sfx-rack-hint">Preview</span>
-                <div
-                  className="sfx-pill-group"
-                  role="group"
-                  aria-label="Audition source"
-                >
-                  <button
-                    type="button"
-                    onClick={() => setAuditionMode("loop")}
-                    className={`sfx-choice-pill ${
-                      auditionMode === "loop" ? "active" : ""
-                    }`}
-                  >
-                    Loop
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAuditionMode("file")}
-                    className={`sfx-choice-pill ${
-                      auditionMode === "file" ? "active" : ""
-                    }`}
-                    title="Preview the whole edited sound instead of just the loop region"
-                  >
-                    File
-                  </button>
-                </div>
               </>
             )}
           </div>
@@ -2297,6 +2254,22 @@ export const StudioView: React.FC<StudioViewProps> = ({
             >
               <Square size={14} />
             </button>
+
+            {stagePage === "edit" && (
+              <button
+                type="button"
+                aria-pressed={editLoop[editModule]}
+                aria-label="Loop"
+                disabled={!processedChannels}
+                onClick={() =>
+                  setEditLoop((s) => ({ ...s, [editModule]: !s[editModule] }))
+                }
+                className={`sfx-tp-icon-btn ${editLoop[editModule] ? "active" : ""}`}
+                title="Loop: repeat the whole edited sound while previewing"
+              >
+                <Repeat size={15} />
+              </button>
+            )}
 
             <div className="sfx-tp-time ds-tnum">
               <span>{timePosText}</span>
